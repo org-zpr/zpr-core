@@ -14,7 +14,7 @@ use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
-use zpr;
+use zpr::packet_info::{LinkId, SubstrateAddr};
 use zpr_utils::net_defs;
 
 pub enum TryEnqueueError<T = ()> {
@@ -87,7 +87,7 @@ impl MgmtSubstrateEgress {
     /// The packet is marked PRIORITY, which instructs the fastpath to
     /// ensure it eventually gets queued with the OS.
     #[allow(dead_code)]
-    pub async fn enqueue_packet(&self, link_id: zpr::LinkId, packet: &mut Packet) {
+    pub async fn enqueue_packet(&self, link_id: LinkId, packet: &mut Packet) {
         packet.metadata_mut().egress_link_id = link_id;
         packet.metadata_mut().flags |= packet::flags::PRIORITY;
         self.queue
@@ -99,7 +99,7 @@ impl MgmtSubstrateEgress {
     /// Try to enqueue the given packet to be egressed on the substrate.
     /// Returns `false` if there is no room in the queue.
     /// Unlike `enqueue_packet()`, the packet is not marked for any special processing.
-    pub fn try_enqueue_packet(&self, link_id: zpr::LinkId, packet: &mut Packet) -> bool {
+    pub fn try_enqueue_packet(&self, link_id: LinkId, packet: &mut Packet) -> bool {
         packet.metadata_mut().egress_link_id = link_id;
         match self.queue.try_send(packet) {
             Ok(()) => true,
@@ -208,7 +208,7 @@ impl Capture {
 pub enum MgmtDispatchMessage {
     WithLink(Packet), // Link ID stored in packet metadata
     WithAddr {
-        peer_sa: zpr::SubstrateAddr,
+        peer_sa: SubstrateAddr,
         interface_addr: net_defs::ScopedIpAddr,
         packet: Packet,
     },
@@ -249,7 +249,7 @@ impl MgmtDispatch {
 
     pub fn try_dispatch_mgmt_packet_with_addr(
         &mut self,
-        peer_sa: &zpr::SubstrateAddr,
+        peer_sa: &SubstrateAddr,
         interface_addr: &net_defs::ScopedIpAddr,
         packet: Packet,
     ) -> Result<(), TryEnqueueError<Packet>> {

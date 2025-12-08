@@ -19,10 +19,9 @@ use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
-use zpr;
+use zpr::packet_info::{L3Type, LinkId, Tcst};
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 use zpr_utils::net_defs::IpAddress;
-
 /// Indicates whether the mgmt message was handled successfully.
 /// (It may be the case that the mgmt message itself indicates
 /// failure of a remote operation; modulo a parsing issue,
@@ -76,7 +75,7 @@ pub type HandleMgmtResult = Result<(), HandleMgmtError>;
 /// link state machine.
 fn dispatch_link_state_event_or_error(
     asm: &Arc<Assembly>,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     event: LinkEvent,
 ) -> Result<(), LinkStateError> {
     if let Err(ls_err) = asm.process_link_state_event(link_id, event) {
@@ -484,7 +483,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 
 fn process_window_size_tlv(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     message_name: &str,
     tlv_value: &[tlv::TlvValue],
 ) -> HandleMgmtResult {
@@ -646,8 +645,8 @@ fn parse_acquire_zpr_address_request(
     let actor_addresses: Option<Vec<IpAddress>>;
     if hdr.addr_count > 0 {
         let bytes_needed = match hdr.ip_version {
-            zpr::L3Type::Ipv4 => 4 * hdr.addr_count as usize,
-            zpr::L3Type::Ipv6 => 16 * hdr.addr_count as usize,
+            L3Type::Ipv4 => 4 * hdr.addr_count as usize,
+            L3Type::Ipv6 => 16 * hdr.addr_count as usize,
             _ => {
                 warn!(target: ZDP, "invalid ip_version field");
                 return Err(HandleMgmtError::BadStructure);
@@ -661,13 +660,13 @@ fn parse_acquire_zpr_address_request(
         for _ in 0..hdr.addr_count {
             let addr: IpAddress;
             match hdr.ip_version {
-                zpr::L3Type::Ipv4 => {
+                L3Type::Ipv4 => {
                     let Ok(addr_bytes) = <[u8; 4]>::read_from_buf(pkt) else {
                         return Err(HandleMgmtError::BadStructure);
                     };
                     addr = addr_bytes.into();
                 }
-                zpr::L3Type::Ipv6 => {
+                L3Type::Ipv6 => {
                     let Ok(addr_bytes) = <[u8; 16]>::read_from_buf(pkt) else {
                         return Err(HandleMgmtError::BadStructure);
                     };
@@ -706,8 +705,8 @@ fn parse_grant_zpr_address_request(
 
     let mut actor_addresses = Vec::new();
     let bytes_needed = match hdr.ip_version {
-        zpr::L3Type::Ipv4 => 4 * hdr.addr_count as usize,
-        zpr::L3Type::Ipv6 => 16 * hdr.addr_count as usize,
+        L3Type::Ipv4 => 4 * hdr.addr_count as usize,
+        L3Type::Ipv6 => 16 * hdr.addr_count as usize,
         _ => {
             warn!(target: ZDP, "invalid ip_version field");
             return Err(HandleMgmtError::BadStructure);
@@ -720,13 +719,13 @@ fn parse_grant_zpr_address_request(
     for _ in 0..hdr.addr_count {
         let addr: IpAddress;
         match hdr.ip_version {
-            zpr::L3Type::Ipv4 => {
+            L3Type::Ipv4 => {
                 let Ok(addr_bytes) = <[u8; 4]>::read_from_buf(pkt) else {
                     return Err(HandleMgmtError::BadStructure);
                 };
                 addr = addr_bytes.into();
             }
-            zpr::L3Type::Ipv6 => {
+            L3Type::Ipv6 => {
                 let Ok(addr_bytes) = <[u8; 16]>::read_from_buf(pkt) else {
                     return Err(HandleMgmtError::BadStructure);
                 };
@@ -822,7 +821,7 @@ pub async fn handle_bind_actor_address_request(
                     .write_to_buf(&mut rsp_pkt)
                     .unwrap();
 
-                    zpr::Tcst::Ip5Tuple.write_to_buf(&mut rsp_pkt).unwrap();
+                    Tcst::Ip5Tuple.write_to_buf(&mut rsp_pkt).unwrap();
                     tc.serialize(&mut rsp_pkt);
 
                     ingress_tether_id = ingress_tid;
@@ -952,7 +951,7 @@ pub async fn handle_bind_egress_stream_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
-    if !matches!(hdr.tcst, zpr::Tcst::Ip5Tuple) {
+    if !matches!(hdr.tcst, Tcst::Ip5Tuple) {
         warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, hdr.tcst.0);
         return Err(HandleMgmtError::BadStructure);
     }
@@ -1065,11 +1064,11 @@ pub async fn handle_bind_actor_address_response(
         zdp::ResponseCode::Success => {
             let stream_id = pkt.metadata().ingress_stream_id;
 
-            let Ok(tcst) = zpr::Tcst::read_from_buf(&mut pkt) else {
+            let Ok(tcst) = Tcst::read_from_buf(&mut pkt) else {
                 return Err(HandleMgmtError::BadStructure);
             };
 
-            if !matches!(tcst, zpr::Tcst::Ip5Tuple) {
+            if !matches!(tcst, Tcst::Ip5Tuple) {
                 warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, tcst.0);
                 return Err(HandleMgmtError::BadStructure);
             }

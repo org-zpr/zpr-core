@@ -10,7 +10,7 @@ use crate::errors::VSClientError;
 use crate::logging::targets::VS_RPC;
 use crate::m2;
 use vsapi::{self, TVisaServiceSyncClient, VisaServiceSyncClient};
-use zpr;
+use zpr::packet_info::L3Type;
 use zpr::vsapi_types::VisaResponse;
 
 /// Timeout for connecting to the visa service.
@@ -45,7 +45,7 @@ pub trait VSClientI: Send {
     fn request_visa(
         &mut self,
         source_tether_addr: IpAddr,
-        l3_type: zpr::L3Type,
+        l3_type: L3Type,
         packet: Vec<u8>,
     ) -> Result<VisaResponse, VSClientError>;
     fn authorize_connect(
@@ -168,7 +168,7 @@ impl VSClientI for VSClient {
     fn request_visa(
         &mut self,
         source_tether_addr: IpAddr,
-        l3_type: zpr::L3Type,
+        l3_type: L3Type,
         packet: Vec<u8>,
     ) -> Result<VisaResponse, VSClientError> {
         if self.key.is_none() {
@@ -182,8 +182,8 @@ impl VSClientI for VSClient {
         };
 
         let l3t: i8 = match l3_type {
-            zpr::L3Type::Ipv4 => 4,
-            zpr::L3Type::Ipv6 => 6,
+            L3Type::Ipv4 => 4,
+            L3Type::Ipv6 => 6,
             _ => return Err(VSClientError::UnsupportedTrafficType),
         };
 

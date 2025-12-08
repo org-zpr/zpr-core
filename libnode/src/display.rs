@@ -75,9 +75,9 @@ fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi_types::Visa) -> fmt::Result {
     };
 
     if icmp {
-        write!(f, "{}<{}>/->[{}]", proto, sport, v.dst_addr,)
+        write!(f, "{}<{}>/->[{}]", proto, sport, v.dest_addr,)
     } else {
-        write!(f, "{}/[{}]->[{}]:{}", proto, sport, v.dst_addr, dport,)
+        write!(f, "{}/[{}]->[{}]:{}", proto, sport, v.dest_addr, dport,)
     }
 }
 

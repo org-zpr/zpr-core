@@ -7,6 +7,7 @@
 use crate::defs;
 use crate::zdp;
 use bytes::{Buf, BufMut};
+use zpr::packet_info::{CompressionMode, L3Type, compression_mode};
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 use zpr_utils::net_defs;
 
@@ -27,14 +28,14 @@ impl Ip5TupleTc {
     /// TEMPORARY: use compression mode flags to indicate which ports of the five-tuple
     /// should be masked out and treated as wildcards.
     pub fn new_with_compression_mode(
-        compression_mode: zpr::CompressionMode,
+        compression_mode: CompressionMode,
         mut five_tuple: defs::FiveTuple,
     ) -> Self {
-        if compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT == 0 {
+        if compression_mode & compression_mode::SOURCE_PORT_PRESENT == 0 {
             five_tuple.src_port = 0;
         }
 
-        if compression_mode & zpr::compression_mode::DESTINATION_PORT_PRESENT == 0 {
+        if compression_mode & compression_mode::DESTINATION_PORT_PRESENT == 0 {
             five_tuple.dst_port = 0;
         }
 
@@ -48,15 +49,15 @@ impl Ip5TupleTc {
     }
 
     /// TEMPORARY: Return compression mode flags indicating whether ports are wildcarded.
-    pub fn compression_mode(&self) -> zpr::CompressionMode {
-        let mut mode: zpr::CompressionMode = 0;
+    pub fn compression_mode(&self) -> CompressionMode {
+        let mut mode: CompressionMode = 0;
 
         if self.0.src_port != 0 {
-            mode |= zpr::compression_mode::SOURCE_PORT_PRESENT;
+            mode |= compression_mode::SOURCE_PORT_PRESENT;
         }
 
         if self.0.dst_port != 0 {
-            mode |= zpr::compression_mode::DESTINATION_PORT_PRESENT;
+            mode |= compression_mode::DESTINATION_PORT_PRESENT;
         }
 
         mode
@@ -67,8 +68,8 @@ impl Ip5TupleTc {
         let mut flags = 0;
 
         match self.0.l3_type {
-            zpr::L3Type::Ipv4 => flags |= zdp::traffic_classifier_flags::IPV4,
-            zpr::L3Type::Ipv6 => (), // default is IPv6
+            L3Type::Ipv4 => flags |= zdp::traffic_classifier_flags::IPV4,
+            L3Type::Ipv6 => (), // default is IPv6
             _ => panic!("must be IPv4 or IPv6"),
         }
 
@@ -88,12 +89,12 @@ impl Ip5TupleTc {
         .unwrap();
 
         match self.0.l3_type {
-            zpr::L3Type::Ipv4 => {
+            L3Type::Ipv4 => {
                 buf.put(self.0.src_address.read_as_v4().as_slice());
                 buf.put(self.0.dst_address.read_as_v4().as_slice());
             }
 
-            zpr::L3Type::Ipv6 => {
+            L3Type::Ipv6 => {
                 buf.put(self.0.src_address.v6.as_slice());
                 buf.put(self.0.dst_address.v6.as_slice());
             }
@@ -120,7 +121,7 @@ impl Ip5TupleTc {
         let dst_address;
 
         if hdr.flags & zdp::traffic_classifier_flags::IPV4 != 0 {
-            l3_type = zpr::L3Type::Ipv4;
+            l3_type = L3Type::Ipv4;
 
             if buf.remaining() < 2 * net_defs::IPV4_ADDRESS_SIZE {
                 return Err(());
@@ -129,7 +130,7 @@ impl Ip5TupleTc {
             src_address = buf_get_ipv4(buf);
             dst_address = buf_get_ipv4(buf);
         } else {
-            l3_type = zpr::L3Type::Ipv6;
+            l3_type = L3Type::Ipv6;
 
             if buf.remaining() < 2 * net_defs::IPV6_ADDRESS_SIZE {
                 return Err(());

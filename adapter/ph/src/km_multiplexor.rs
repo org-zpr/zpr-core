@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::{sync::mpsc, time};
 use tokio_util::sync::CancellationToken;
 use tracing::*;
-use zpr;
+use zpr::packet_info::LinkId;
 
 /// How often the signal monitor worker checks the error conditions
 /// on the KeyManager state machines.  Indirectly, this controls how
@@ -82,7 +82,7 @@ pub async fn launch_signal_worker(
 ) {
     let sp_ctok = asm.km_state.ctok.clone();
 
-    let mut status: HashMap<zpr::LinkId, ErrorStatus> = HashMap::new();
+    let mut status: HashMap<LinkId, ErrorStatus> = HashMap::new();
     let mut interval = time::interval(CHECK_ERROR_INTERVAL);
 
     loop {
@@ -206,7 +206,7 @@ pub async fn launch_message_worker(
 /// even if the system is running with the null km
 pub fn add_adapter_link(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: NoiseKeypair,
     peer_noise_key: [u8; 32],
@@ -236,7 +236,7 @@ pub fn add_adapter_link(
 /// Note that the link must already have a peer_table entry.
 pub fn add_node_link(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: NoiseKeypair,
     certx: KmCertExchange,
@@ -249,7 +249,7 @@ pub fn add_node_link(
 }
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
-pub async fn drop_link(asm: &Arc<Assembly>, link_id: zpr::LinkId) {
+pub async fn drop_link(asm: &Arc<Assembly>, link_id: LinkId) {
     // If present in state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 
@@ -266,11 +266,7 @@ pub async fn drop_link(asm: &Arc<Assembly>, link_id: zpr::LinkId) {
 }
 
 // Completes the add_*_link functions above.
-fn add_noise_link(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    noise: KmNoise,
-) -> Result<(), KmSetupError> {
+fn add_noise_link(asm: &Assembly, link_id: LinkId, noise: KmNoise) -> Result<(), KmSetupError> {
     let mgr = KeyManager::new(link_id, Box::new(noise));
 
     // Link must already have a table entry
@@ -325,7 +321,7 @@ fn add_noise_link(
 ///
 pub fn handle_inbound_km_msg(
     asm: &Assembly,
-    from_link: zpr::LinkId,
+    from_link: LinkId,
     km_payload: &[u8],
 ) -> Result<(), KmMsgProcessingError> {
     let tx = match asm.peer_table.clone_km_tx_chan(from_link) {
@@ -354,6 +350,7 @@ mod test {
     use std::time::Duration;
     use tokio::task::{self, yield_now};
     use tokio::time::timeout;
+    use zpr::packet_info::{KM_ID_NOISE, SubstrateAddr};
     use zpr_utils::net_defs;
 
     #[tokio::test]
@@ -395,7 +392,7 @@ mod test {
         local
             .run_until(async move {
                 // add a fake adapter.
-                let adapter_link_id: zpr::LinkId;
+                let adapter_link_id: LinkId;
                 {
                     let entry = asm.peer_table.vacant_entry().unwrap();
 
@@ -403,8 +400,7 @@ mod test {
                         link_id: entry.key(),
                     };
 
-                    let fake_sa =
-                        zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000);
+                    let fake_sa = SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000);
 
                     let fake_intf_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
 
@@ -476,16 +472,15 @@ mod test {
                 };
 
                 // Since we have a "raw" responder, we can just pass the payload (no ZDP headers have been added).
-                let handshake_reply =
-                    match responder.handle_message(&handshake_req, zpr::KM_ID_NOISE) {
-                        Ok(Some(m)) => m,
-                        Ok(None) => {
-                            panic!("expected handshake-1 message, got nothing!");
-                        }
-                        Err(e) => {
-                            panic!("responder handle_message failed on handshake-req: {:?}", e);
-                        }
-                    };
+                let handshake_reply = match responder.handle_message(&handshake_req, KM_ID_NOISE) {
+                    Ok(Some(m)) => m,
+                    Ok(None) => {
+                        panic!("expected handshake-1 message, got nothing!");
+                    }
+                    Err(e) => {
+                        panic!("responder handle_message failed on handshake-req: {:?}", e);
+                    }
+                };
 
                 // Now send the reply back into our link.
                 handle_inbound_km_msg(&asm, adapter_link_id, &handshake_reply).unwrap();

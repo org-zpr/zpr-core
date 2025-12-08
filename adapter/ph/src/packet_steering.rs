@@ -1,6 +1,7 @@
 //! OS-level control of steering packets into sockets.
 
 use std::net::UdpSocket;
+use zpr::packet_info::ZPI_ENCRYPTED_HEADER_FLAG;
 
 #[allow(dead_code)]
 pub enum SteeringMethod {
@@ -37,7 +38,6 @@ mod os_impl {
     use libc::sock_filter as sf;
     use std::io;
     use std::mem::{offset_of, size_of};
-    use zpr;
     use zpr_ext::std::net::UdpSocketExt;
 
     pub fn set_steering(
@@ -83,7 +83,7 @@ mod os_impl {
                     code: JMP | JSET | K,
                     jt: 5,
                     jf: 0,
-                    k: ((zpr::ZPI_ENCRYPTED_HEADER_FLAG as u32) << 8)
+                    k: ((ZPI_ENCRYPTED_HEADER_FLAG as u32) << 8)
                         | zdp::ZDP_PACKET_TYPE_NON_FLOW_FLAG as u32,
                 },
                 // [2] load stream ID, assuming this is a transit packet (no MgmtHeader)

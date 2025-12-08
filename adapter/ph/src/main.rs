@@ -92,6 +92,10 @@ use tun_ctl::TunCtl;
 use zpr_ext::socket2::SockAddrExt;
 use zpr_utils::net_defs::SocketAddrExt;
 
+use zpr::addrs::{
+    DEFAULT_TETHER_PORT, VISA_SERVICE_ADDR, VISA_SERVICE_PORT, ZPR_TEMP_LOCAL_ADDRESS,
+};
+use zpr::packet_info::{DOCK_LINK_ID, LOCAL_ACTOR_LINK_ID};
 use zpr::vsapi_types::AuthServicesList;
 
 /// Creates a nonblocking local socket pair suitable for transferring
@@ -294,7 +298,7 @@ fn main() -> ExitCode {
         if cfg!(target_os = "linux") {
             None
         } else {
-            Some(zpr::ZPR_TEMP_LOCAL_ADDRESS.into())
+            Some(ZPR_TEMP_LOCAL_ADDRESS.into())
         }
     };
 
@@ -329,7 +333,7 @@ fn main() -> ExitCode {
     match ph_mode {
         PhMode::Node => {
             if config.self_addr.port() == 0 {
-                config.self_addr.set_port(zpr::DEFAULT_TETHER_PORT);
+                config.self_addr.set_port(DEFAULT_TETHER_PORT);
                 info!(target: STARTUP, "listening on default tether port {}", config.self_addr.port());
             }
         }
@@ -337,7 +341,7 @@ fn main() -> ExitCode {
         PhMode::Adapter => {
             let node_addr = config.node_addr.as_mut().unwrap();
             if node_addr.port() == 0 {
-                node_addr.set_port(zpr::DEFAULT_TETHER_PORT);
+                node_addr.set_port(DEFAULT_TETHER_PORT);
                 info!(target: STARTUP, "connecting to default tether port {}", node_addr.port());
             }
         }
@@ -521,7 +525,7 @@ fn main() -> ExitCode {
             libnode::vsconn::VSConn::new(
                 node_actor,
                 vs_inq,
-                &SocketAddr::new(zpr::VISA_SERVICE_ADDR, zpr::VISA_SERVICE_PORT).to_string(),
+                &SocketAddr::new(VISA_SERVICE_ADDR, VISA_SERVICE_PORT).to_string(),
                 config.certificate_file.as_ref().unwrap(),
                 config.zpr_addr[0],
                 None,
@@ -581,7 +585,7 @@ fn main() -> ExitCode {
 
     assert_eq!(
         asm.peer_table.insert_internal_peer().get(),
-        zpr::LOCAL_ACTOR_LINK_ID
+        LOCAL_ACTOR_LINK_ID
     );
 
     //
@@ -600,13 +604,10 @@ fn main() -> ExitCode {
                 )
                 .unwrap();
 
-            assert_eq!(dsid.get(), zpr::DOCK_LINK_ID);
+            assert_eq!(dsid.get(), DOCK_LINK_ID);
         }
 
-        PhMode::Node => assert_eq!(
-            asm.peer_table.insert_internal_peer().get(),
-            zpr::DOCK_LINK_ID
-        ),
+        PhMode::Node => assert_eq!(asm.peer_table.insert_internal_peer().get(), DOCK_LINK_ID),
     }
 
     //
@@ -695,7 +696,7 @@ fn main() -> ExitCode {
 
     if ph_mode == PhMode::Adapter {
         local_set.block_on(&runtime, async {
-            let dsid = zpr::DOCK_LINK_ID;
+            let dsid = DOCK_LINK_ID;
             debug!(target: STARTUP, "waiting on security association establishment on link {dsid}");
             while !asm.peer_table.is_security_association_established(dsid) {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;

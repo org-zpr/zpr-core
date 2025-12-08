@@ -11,8 +11,8 @@ use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
+use zpr::packet_info::{LinkId, StreamId, VisaId};
 use zpr::vsapi_types;
-use zpr::{self, LinkId, StreamId};
 
 #[derive(Debug, Error)]
 pub enum BindActorAddressError {
@@ -25,8 +25,8 @@ pub enum BindActorAddressError {
 }
 
 pub struct ForwardingDecision {
-    pub egress_link_id: NonZero<zpr::LinkId>,
-    pub visa_id: zpr::VisaId,
+    pub egress_link_id: NonZero<LinkId>,
+    pub visa_id: VisaId,
 }
 
 /// Fulfills a Bind Actor Address request.

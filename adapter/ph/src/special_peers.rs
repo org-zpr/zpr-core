@@ -1,5 +1,6 @@
 use enum_map::Enum;
 use enumset::{EnumSet, EnumSetType, enum_set};
+use zpr::dn::VISA_SERVICE_DN;
 
 /// Some peers are "special", e.g. the visa service adapter attached to the initial node.
 /// These names let us identify them.
@@ -16,7 +17,7 @@ pub fn special_peer_names_from_x509_subject_name(
         return enum_set!();
     };
     match dn_der.as_slice() {
-        zpr::VISA_SERVICE_DN => enum_set!(SpecialPeerName::VisaServiceAdapter),
+        VISA_SERVICE_DN => enum_set!(SpecialPeerName::VisaServiceAdapter),
         _ => enum_set!(),
     }
 }

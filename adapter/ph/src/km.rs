@@ -25,7 +25,7 @@ use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::*;
 use zerocopy::FromBytes;
-use zpr;
+use zpr::packet_info::{KmId, LinkId, SaId};
 
 #[derive(Debug, Error)]
 #[allow(dead_code)]
@@ -128,7 +128,7 @@ pub enum KmSignal {
     Error,
 
     /// When the SA_ID changes.  Note that if new is zero then the SA is no longer established.
-    SaIdChange { old: zpr::SaId, new: zpr::SaId },
+    SaIdChange { old: SaId, new: SaId },
 
     /// When a security association is established.
     SaEstablished(KmTransportSA),
@@ -169,7 +169,7 @@ pub struct KmTransportSA {
     ///
     /// Note that when this is used by implementations of [KeyManagerStateMachine] the `sa_id`
     /// field is not set.  Only the [KeyManager] is setting an ID on the association.
-    pub sa_id: zpr::SaId,
+    pub sa_id: SaId,
 
     /// These are the ZPIs which we have given to our peer to use for sending us messages.
     pub recv_zpis: ZPIPair,
@@ -235,12 +235,12 @@ impl fmt::Display for KmTransportSA {
 /// The `msg` field is either going to be a [KmSignal] or a payload for a Key Management
 /// ZDP message which will be in a [Bytes].
 pub struct KmLinkMsg<T> {
-    pub link_id: zpr::LinkId,
+    pub link_id: LinkId,
     pub msg: T,
 }
 
 impl<T> KmLinkMsg<T> {
-    pub fn new(link_id: zpr::LinkId, msg: T) -> KmLinkMsg<T> {
+    pub fn new(link_id: LinkId, msg: T) -> KmLinkMsg<T> {
         KmLinkMsg { link_id, msg }
     }
 }
@@ -259,9 +259,9 @@ struct KmShared {
 
 struct KmState {
     statemachine: Box<dyn KeyManagerStateMachine>,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     kmsettings: KmSettings,
-    sa_id: zpr::SaId, // current SA identifier
+    sa_id: SaId, // current SA identifier
     ts: KmTransportSA,
     restart_request: bool,
     error_signaled: bool,
@@ -280,7 +280,7 @@ impl fmt::Debug for KmState {
 impl KeyManager {
     /// A new KeyManager for a link.
     /// - `statemachine` is the key management algorithm.
-    pub fn new(link_id: zpr::LinkId, statemachine: Box<dyn KeyManagerStateMachine>) -> KeyManager {
+    pub fn new(link_id: LinkId, statemachine: Box<dyn KeyManagerStateMachine>) -> KeyManager {
         let settings = statemachine.get_settings();
 
         KeyManager {
@@ -347,7 +347,7 @@ impl KeyManager {
         km_buffers_out: mpsc::Sender<KmLinkMsg<Bytes>>,
         km_signals_out: mpsc::Sender<KmLinkMsg<KmSignal>>,
         mut km_messages_in: mpsc::Receiver<Bytes>,
-        km_impl: zpr::KmId,
+        km_impl: KmId,
     ) -> KmResult<()> {
         let tick_interval: Duration;
         let link_id;
@@ -430,7 +430,7 @@ impl KeyManager {
     /// is sent our our message channel.
     async fn start_state_machine_internal(
         &self,
-        link_id: zpr::LinkId,
+        link_id: LinkId,
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
     ) -> KmResult<()> {
@@ -470,7 +470,7 @@ impl KeyManager {
     fn send_signal<'a>(
         &self,
         chan: &'a mpsc::Sender<KmLinkMsg<KmSignal>>,
-        link_id: zpr::LinkId,
+        link_id: LinkId,
         signal: KmSignal,
     ) -> impl Future<Output = Result<(), mpsc::error::SendError<KmLinkMsg<KmSignal>>>> + 'a {
         chan.send(KmLinkMsg::new(link_id, signal))
@@ -479,7 +479,7 @@ impl KeyManager {
     /// Calls the state machine's tick method and sends any resulting message.
     async fn tick_statemachine(
         &self,
-        link_id: zpr::LinkId,
+        link_id: LinkId,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
         cur_state: &KmSMState,
@@ -556,7 +556,7 @@ impl KeyManager {
         &self,
         prev_state: KmSMState,
         next_state: KmSMState,
-        link_id: zpr::LinkId,
+        link_id: LinkId,
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
     ) -> KmResult<()> {
         debug!(target: KEY_MGMT, "state transition {:?} -> {:?}", prev_state, next_state);
@@ -568,8 +568,8 @@ impl KeyManager {
         }
         match next_state {
             KmSMState::Transport(ts) => {
-                let prev_id: zpr::SaId;
-                let cur_id: zpr::SaId;
+                let prev_id: SaId;
+                let cur_id: SaId;
                 let mut my_sa = ts.clone();
                 {
                     let mut state = self.shared.state.lock().unwrap();
@@ -645,9 +645,9 @@ impl KeyManager {
     async fn dispatch_km_message(
         &self,
         inmsg: Bytes,
-        link_id: zpr::LinkId,
+        link_id: LinkId,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
-        km_impl: zpr::KmId,
+        km_impl: KmId,
     ) -> KmResult<()> {
         let resp: Option<Bytes>;
         {
@@ -880,7 +880,7 @@ impl Codec for UnimplCodec {
 #[allow(dead_code)]
 pub struct KmSettings {
     /// The ZDP defined type value for this Key Management system.
-    pub zdp_km_type: zpr::KmId,
+    pub zdp_km_type: KmId,
 
     /// Number of additional bytes required to encrypt a payload for transport.
     pub padlen: usize,
@@ -912,7 +912,7 @@ pub trait KeyManagerStateMachine: Send + Sync {
     fn handle_message(
         self: &mut Self,
         message: &[u8],
-        km_impl: zpr::KmId,
+        km_impl: KmId,
     ) -> Result<Option<Bytes>, KmError>;
 
     /// Optional outbound KM message
@@ -923,11 +923,11 @@ pub trait KeyManagerStateMachine: Send + Sync {
 
 #[cfg(test)]
 mod test {
+    use crate::config::PACKET_BUFFER_SIZE;
     use tokio::task::yield_now;
     use tokio::time::sleep;
+    use zpr::packet_info::{KM_ID_EXPERIMENTAL, KM_ID_NOISE};
     use zpr_ext::zerocopy::*;
-
-    use crate::config::PACKET_BUFFER_SIZE;
 
     use super::*;
 
@@ -988,7 +988,7 @@ mod test {
     impl KeyManagerStateMachine for TestKM {
         fn get_settings(&self) -> KmSettings {
             KmSettings {
-                zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
+                zdp_km_type: KM_ID_EXPERIMENTAL,
                 padlen: 0,
                 alignment: 0,
                 tick_interval: Duration::from_millis(200),
@@ -1009,7 +1009,7 @@ mod test {
         fn handle_message(
             &mut self,
             _message: &[u8],
-            _km_impl: zpr::KmId,
+            _km_impl: KmId,
         ) -> Result<Option<Bytes>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.handle_count += 1;
@@ -1035,7 +1035,7 @@ mod test {
         let (_km_tx, km_rx) = mpsc::channel(16);
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE).await;
+            let _ = km.start(sp_ctok, tx, sig_tx, km_rx, KM_ID_NOISE).await;
         });
 
         yield_now().await;
@@ -1059,7 +1059,7 @@ mod test {
 
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE).await;
+            let _ = km.start(sp_ctok, tx, sig_tx, km_rx, KM_ID_NOISE).await;
         });
 
         sleep(Duration::from_millis(900)).await;
@@ -1085,9 +1085,7 @@ mod test {
 
         let (km_tx, km_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            let _ = sp_km
-                .start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE)
-                .await;
+            let _ = sp_km.start(sp_ctok, tx, sig_tx, km_rx, KM_ID_NOISE).await;
         });
         yield_now().await;
 
@@ -1113,9 +1111,7 @@ mod test {
         let mut sp_km = km.clone();
         let (km_tx, km_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            let _ = sp_km
-                .start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE)
-                .await;
+            let _ = sp_km.start(sp_ctok, tx, sig_tx, km_rx, KM_ID_NOISE).await;
         });
         yield_now().await;
 

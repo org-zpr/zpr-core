@@ -23,7 +23,7 @@ use crate::vss::DEFAULT_VSS_PORT;
 use zpr::vsapi_types::{ConnectRequest, Connection, VisaResponse};
 
 use vsapi;
-use zpr;
+use zpr::packet_info::L3Type;
 
 const PING_INTERVAL: Duration = Duration::from_millis(10000);
 const MAX_PING_ERRORS: u32 = 5;
@@ -31,7 +31,7 @@ const MAX_PING_ERRORS: u32 = 5;
 #[derive(Debug)]
 pub struct VisaRequest {
     pub source_tether_addr: IpAddr,
-    pub l3_type: zpr::L3Type,
+    pub l3_type: L3Type,
     pub packet: Vec<u8>,
 }
 
@@ -547,7 +547,7 @@ s5JVZ48=
         fn request_visa(
             &mut self,
             source_tether_addr: IpAddr,
-            l3_type: zpr::L3Type,
+            l3_type: L3Type,
             _packet: Vec<u8>,
         ) -> Result<VisaResponse, VSClientError> {
             if let Some(e) = take_next_error() {
@@ -819,7 +819,7 @@ s5JVZ48=
 
         let req = VisaRequest {
             source_tether_addr: node_addr,
-            l3_type: zpr::L3Type::Ipv4,
+            l3_type: L3Type::Ipv4,
             packet: vec![1, 2, 3, 4],
         };
         let resp = conn_handle.request_visa(req);
@@ -833,7 +833,7 @@ s5JVZ48=
                     assert!(denied.reason.is_some());
                     let reason = denied.reason.unwrap();
                     assert!(reason.contains(&node_addr.to_string()));
-                    assert!(reason.contains(format!("type: {}", zpr::L3Type::Ipv4).as_str()));
+                    assert!(reason.contains(format!("type: {}", L3Type::Ipv4).as_str()));
                 } else {
                     assert!(false);
                 }
@@ -847,7 +847,7 @@ s5JVZ48=
             // Run again check that we get the error:
             let req = VisaRequest {
                 source_tether_addr: node_addr,
-                l3_type: zpr::L3Type::Ipv4,
+                l3_type: L3Type::Ipv4,
                 packet: vec![1, 2, 3, 4],
             };
             set_next_error(VSClientError::NoAPIKey);

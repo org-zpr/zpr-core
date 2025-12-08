@@ -9,7 +9,7 @@ use crate::two_way_queue;
 use std::num::NonZero;
 use std::sync::Arc;
 use tracing::*;
-use zpr;
+use zpr::packet_info::{DOCK_LINK_ID, LOCAL_ACTOR_LINK_ID};
 
 pub async fn launch(
     asm: Arc<Assembly>,
@@ -32,7 +32,7 @@ pub async fn launch(
 
 // RFC 6.5 § 6.3.11
 async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
-    let dock_link_id = zpr::DOCK_LINK_ID;
+    let dock_link_id = DOCK_LINK_ID;
 
     // copy out five tuple so we can give away packet
     let five_tuple = *pkt.metadata().five_tuple();
@@ -100,7 +100,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
         PhMode::Node => {
             let bind_result = mgmt::dock::bind_actor_address(
                 asm,
-                NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
+                NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
                 &five_tuple,
                 &packet_body,
             )

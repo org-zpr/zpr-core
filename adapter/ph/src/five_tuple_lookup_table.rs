@@ -6,7 +6,7 @@ use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
-use zpr::VisaId;
+use zpr::packet_info::VisaId;
 use zpr::vsapi_types::{VsapiFiveTuple, VsapiIpProtocol};
 
 pub type FiveTupleLookup = HashMap<IpAddr, Arc<IpLookupTable<Ipv6Addr, DstPortLookup>>>;
@@ -79,13 +79,13 @@ impl FiveTupleLookupTable {
         arr.push(ProtoAndId::new(five_tuple.l4_protocol, visa_id));
 
         // Determine which enum to use for src level
-        let src_level: SrcPortLookup = match five_tuple.src_port {
+        let src_level: SrcPortLookup = match five_tuple.source_port {
             0 => PortLookup::Wildcard(ProtoLookup::new(arr)),
             val => PortLookup::SingleVal(Arc::new((val, ProtoLookup::new(arr)))),
         };
 
         // Determine which enum to use for dst level
-        let dst_level: DstPortLookup = match five_tuple.dst_port {
+        let dst_level: DstPortLookup = match five_tuple.dest_port {
             0 => PortLookup::Wildcard(src_level),
             val => PortLookup::SingleVal(Arc::new((val, src_level))),
         };
@@ -93,16 +93,16 @@ impl FiveTupleLookupTable {
         // Create table of src addresses, add map of destination ports
         // NOTE how large do we expect each IpLookupTable to be? I.E. how many src addresses for each dst address, typically?
         let mut ip_table = IpLookupTable::new();
-        match five_tuple.src_address {
+        match five_tuple.source_addr {
             IpAddr::V4(addr) => ip_table.insert(addr.to_ipv6_mapped(), 128, dst_level),
             IpAddr::V6(addr) => ip_table.insert(addr, 128, dst_level),
         };
 
         // Try to add to hash table, if there is a collision, combine the tables, then add the combined table
-        match table.insert(five_tuple.dst_address, Arc::new(ip_table)) {
+        match table.insert(five_tuple.dest_addr, Arc::new(ip_table)) {
             None => (),
             Some(removed_src_addrs) => {
-                let in_table_src_addrs = table.get(&five_tuple.dst_address).unwrap();
+                let in_table_src_addrs = table.get(&five_tuple.dest_addr).unwrap();
                 // Create intersection that has the dst port levels from both the src addrs currently in the table and those that were removed
                 let mut intersection = IpLookupTable::new();
                 for (addr, mask_len, val) in in_table_src_addrs.iter() {
@@ -121,16 +121,16 @@ impl FiveTupleLookupTable {
                     }
                 }
                 // Add the intersection of source addresses to the bucket of the proper dst address
-                table.insert(five_tuple.dst_address, Arc::new(intersection));
+                table.insert(five_tuple.dest_addr, Arc::new(intersection));
             }
         }
     }
 
     pub fn find_match(&self, ft: VsapiFiveTuple) -> Option<VisaId> {
-        match self.table.get().get(&ft.dst_address) {
+        match self.table.get().get(&ft.dest_addr) {
             None => return None,
             Some(src_addr_table) => {
-                let src_addr = match ft.src_address {
+                let src_addr = match ft.source_addr {
                     IpAddr::V4(addr) => addr.to_ipv6_mapped(),
 
                     IpAddr::V6(addr) => addr,
@@ -144,12 +144,12 @@ impl FiveTupleLookupTable {
                         PortLookup::SingleVal(tuple_val) => {
                             let port = tuple_val.0;
                             let src_level = tuple_val.1.clone();
-                            match port == ft.dst_port {
+                            match port == ft.dest_port {
                                 false => return None,
                                 true => return Self::find_src_level_match(src_level.clone(), ft),
                             };
                         }
-                        PortLookup::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
+                        PortLookup::MultiVal(dst_level) => match dst_level.get(ft.dest_port) {
                             None => None,
                             Some(src_level) => Self::find_src_level_match(src_level.clone(), ft),
                         },
@@ -166,12 +166,12 @@ impl FiveTupleLookupTable {
                 let port = tuple_val.0;
                 let protos = tuple_val.1.clone();
 
-                match port == ft.src_port {
+                match port == ft.source_port {
                     false => None,
                     true => Self::find_proto_level_match(&protos, ft.l4_protocol),
                 }
             }
-            PortLookup::MultiVal(src_level_map) => match src_level_map.get(ft.src_port) {
+            PortLookup::MultiVal(src_level_map) => match src_level_map.get(ft.source_port) {
                 None => None,
                 Some(protos) => Self::find_proto_level_match(protos, ft.l4_protocol),
             },
@@ -309,7 +309,7 @@ mod tests {
     use super::*;
 
     use libnode::vsapi;
-    use zpr::L3Type;
+    use zpr::packet_info::L3Type;
     use zpr::vsapi_types;
     use zpr::vsapi_types::vsapi_ip_number;
 

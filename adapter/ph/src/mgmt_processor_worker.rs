@@ -10,12 +10,12 @@ use crate::zdp::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::*;
-use zpr;
+use zpr::packet_info::LinkId;
 use zpr_ext::zerocopy::*;
 
 #[derive(Clone, Copy)]
 pub struct Config {
-    pub link_id: std::num::NonZero<zpr::LinkId>,
+    pub link_id: std::num::NonZero<LinkId>,
 }
 
 pub async fn launch(

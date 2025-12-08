@@ -5,7 +5,7 @@ use libnode::vss::VSSMsg;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::*;
-use zpr::VisaId;
+use zpr::packet_info::VisaId;
 use zpr::vsapi_types::VisaOp;
 
 pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {

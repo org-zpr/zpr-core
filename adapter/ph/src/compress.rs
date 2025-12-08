@@ -6,7 +6,7 @@ use crate::packet::Packet;
 use bytes::Buf;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::*;
-use zpr::{CompressionMode, L3Type};
+use zpr::packet_info::{CompressionMode, L3Type};
 use zpr_ext::bytes::BufExt;
 use zpr_utils::net_defs;
 
@@ -195,7 +195,6 @@ mod tests {
     use crate::config;
     use crate::packet::Packet;
     use bytes::BufMut;
-    use zpr::CompressionMode;
 
     #[test]
     fn test_round_trip() {

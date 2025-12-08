@@ -12,8 +12,7 @@ use zpr_utils::net_defs::*;
 extern crate libc;
 use std::mem::size_of;
 use zerocopy::*;
-use zpr;
-use zpr::L3Type;
+use zpr::packet_info::{L3Type, LinkId, SeqNum, StreamId};
 
 /// Exclusive handle to an in-use packet buffer.
 ///
@@ -173,16 +172,16 @@ pub struct PacketMetadata {
     _padding: [u8; 4],
 
     /// which link this packet arrived on
-    pub ingress_link_id: zpr::LinkId,
+    pub ingress_link_id: LinkId,
 
     /// which link this packet should be egressed on
-    pub egress_link_id: zpr::LinkId,
+    pub egress_link_id: LinkId,
 
     /// which stream ID this packet is associated with
-    pub ingress_stream_id: zpr::StreamId,
+    pub ingress_stream_id: StreamId,
 
     /// expanded sequence number of this packet
-    pub seq_num: zpr::SeqNum,
+    pub seq_num: SeqNum,
 }
 
 pub type PacketFlags = u8;

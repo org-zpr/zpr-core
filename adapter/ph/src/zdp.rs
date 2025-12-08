@@ -3,7 +3,9 @@
 use open_enum::open_enum;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
-use zpr;
+use zpr::packet_info::{
+    A2aSaid, KM_ID_EXPERIMENTAL, KM_ID_IKEV2, KM_ID_NOISE, KM_ID_NULL, L3Type, Tcst,
+};
 
 #[open_enum]
 #[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -171,7 +173,7 @@ pub struct ZdpInitAuthenticationRequestHeader {
 #[repr(packed)]
 pub struct ZdpAcquireZprAddressRequestHeader {
     pub blob_len: U16,
-    pub ip_version: zpr::L3Type, // Length of address determined by IP type
+    pub ip_version: L3Type, // Length of address determined by IP type
     pub addr_count: u8,
     // Followed in memory by:
     //  - BLOB (of blob_len bytes) is-a base64 encoded json string.
@@ -182,7 +184,7 @@ pub struct ZdpAcquireZprAddressRequestHeader {
 #[repr(packed)]
 pub struct ZdpGrantZprAddressRequestHeader {
     pub status_code: ResponseCode,
-    pub ip_version: zpr::L3Type, // Length of address determined by IP type
+    pub ip_version: L3Type, // Length of address determined by IP type
     pub addr_count: u8,
     // Followed in memory by:
     //  - IP addresses (addr_count * IP address size bytes)
@@ -247,7 +249,7 @@ pub struct ZdpBindActorAddressResponseHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindEgressStreamRequestHeader {
-    pub tcst: zpr::Tcst,
+    pub tcst: Tcst,
     // followed by traffic classifier
 }
 
@@ -268,26 +270,26 @@ pub struct ZdpKeyManagementHeader {
 impl ZdpKeyManagementHeader {
     /// TRUE if this is a noise protocol KM message
     pub fn is_noise(&self) -> bool {
-        self.message_type.get() == zpr::KM_ID_NOISE
+        self.message_type.get() == KM_ID_NOISE
     }
     /// TRUE if this is an IKEv2 KM message
     pub fn is_ikev2(&self) -> bool {
-        self.message_type.get() == zpr::KM_ID_IKEV2
+        self.message_type.get() == KM_ID_IKEV2
     }
     /// TRUE if this is an experimental KM message
     pub fn is_experiment(&self) -> bool {
-        self.message_type.get() == zpr::KM_ID_EXPERIMENTAL
+        self.message_type.get() == KM_ID_EXPERIMENTAL
     }
 
     pub fn is_null(&self) -> bool {
-        self.message_type.get() == zpr::KM_ID_NULL
+        self.message_type.get() == KM_ID_NULL
     }
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpA2aHeader {
-    pub a2a_said: zpr::A2aSaid,
+    pub a2a_said: A2aSaid,
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

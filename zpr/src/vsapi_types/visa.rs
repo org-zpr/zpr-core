@@ -1,7 +1,7 @@
 use std::net::IpAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::L3Type;
+use crate::packet_info::L3Type;
 use crate::vsapi::v1;
 use crate::vsapi_types::VsapiFiveTuple;
 use crate::vsapi_types::VsapiTypeError;

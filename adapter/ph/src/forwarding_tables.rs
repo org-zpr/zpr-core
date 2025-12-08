@@ -7,7 +7,7 @@
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use cslab::{RcuCslab, RcuCslabReader};
 use std::sync::Mutex;
-use zpr::{ForwardingEntry, StreamId, VisaId};
+use zpr::packet_info::{ForwardingEntry, StreamId, VisaId};
 
 const PEER_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
 

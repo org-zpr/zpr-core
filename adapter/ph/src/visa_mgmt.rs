@@ -9,8 +9,9 @@ use std::num::NonZero;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use tracing::*;
+use zpr::dn::VISA_SERVICE_CN;
+use zpr::packet_info::{LinkId, VisaId};
 use zpr::vsapi_types::{self, AuthServicesList};
-use zpr::{LinkId, VisaId};
 use zpr_utils::net_defs::IpAddress;
 
 pub fn authorize_connect(
@@ -68,7 +69,7 @@ pub fn build_connect_request(
 ) -> Result<Option<vsapi_types::ConnectRequest>, LinkStateError> {
     let cn = get_common_name(asm, id)?;
 
-    if cn == zpr::VISA_SERVICE_CN {
+    if cn == VISA_SERVICE_CN {
         return Ok(None);
     }
 
@@ -150,7 +151,7 @@ pub fn insert_visa(
     asm: &Arc<Assembly>,
     visa: vsapi_types::Visa,
 ) -> Result<(VisaId, NonZero<LinkId>), visa_table::VisaTableError> {
-    let addr = visa.dst_addr.clone();
+    let addr = visa.dest_addr.clone();
     let Some(link_id) = asm.find_egress_link(addr.into()) else {
         asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         return Err(visa_table::VisaTableError::DestNotFound(addr.into()));

@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::*;
-use zpr::{LinkId, ZPI_ENCRYPTED_HEADER_FLAG};
+use zpr::addrs::ZPRNET_PREFIX_LEN;
+use zpr::packet_info::{LINK_ID_UNKNOWN, LinkId, ZPI_ENCRYPTED_HEADER_FLAG};
 use zpr_utils::net_defs::IpAddress;
 
 /// State machine for links and docking sessions
@@ -470,7 +471,7 @@ impl LinkStateWrapper {
     /// Transitions from Inactive -> Keying
     /// Will trigger key management messages to be sent if this is an adapter
     fn process_start(&self, asm: &Assembly) -> Result<(), LinkStateError> {
-        assert!(self.id != zpr::LINK_ID_UNKNOWN);
+        assert!(self.id != LINK_ID_UNKNOWN);
         let link_id = self.id;
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Inactive {
@@ -490,7 +491,7 @@ impl LinkStateWrapper {
                 km_multiplexor::add_adapter_link(
                     asm,
                     link_id,
-                    ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
+                    ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
                     asm.self_noise_keypair.clone().unwrap(),
                     asm.peer_noise_keypair.clone().unwrap().public,
                     asm.certx.clone().unwrap(),
@@ -920,7 +921,7 @@ impl LinkStateWrapper {
                             // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
                             match asm
                                 .tun_ctl
-                                .clear_address(aaa_addr.into(), zpr::ZPRNET_PREFIX_LEN)
+                                .clear_address(aaa_addr.into(), ZPRNET_PREFIX_LEN)
                             {
                                 Ok(()) => {}
                                 Err(e) => {
@@ -938,9 +939,7 @@ impl LinkStateWrapper {
                         }
 
                         // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
-                        if let Err(e) = asm
-                            .tun_ctl
-                            .add_address(addrs[0].into(), zpr::ZPRNET_PREFIX_LEN)
+                        if let Err(e) = asm.tun_ctl.add_address(addrs[0].into(), ZPRNET_PREFIX_LEN)
                         {
                             warn!(target: LINK_STATE, "Link {link_id} failed to set ZPR address: {e}");
                             locked_fsm.set_state(LinkState::Error);
@@ -1129,7 +1128,7 @@ impl LinkStateWrapper {
                     // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
                     match asm
                         .tun_ctl
-                        .add_address(aaa_addr.unwrap().into(), zpr::ZPRNET_PREFIX_LEN)
+                        .add_address(aaa_addr.unwrap().into(), ZPRNET_PREFIX_LEN)
                     {
                         Ok(_) => {
                             asm.tun_ctl.set_carrier(true).unwrap();

@@ -14,7 +14,7 @@
 use enum_map::{Enum, EnumMap};
 use std::collections::VecDeque;
 use std::task::{Context, Poll, Waker, ready};
-use zpr::SeqNum;
+use zpr::packet_info::SeqNum;
 
 /// ID of a packet which was queued for sending (but maybe not yet sent).
 pub type QueuedPacketId = u64;
@@ -659,7 +659,7 @@ impl Receiver {
 
 #[cfg(test)]
 mod sender_tests {
-    use super::{EnqueueResult::*, QueuedPacketId, Sender};
+    use super::{EnqueueResult::*, QueuedPacketId, Sender, SeqNum};
     use std::sync::{Arc, atomic};
     use std::task::{Context, Wake};
 
@@ -693,7 +693,7 @@ mod sender_tests {
         assert!(!send.retry_needed());
     }
 
-    fn retry_packets_cloned_sorted<Pkt: Clone>(send: &mut Sender<Pkt>) -> Vec<(zpr::SeqNum, Pkt)> {
+    fn retry_packets_cloned_sorted<Pkt: Clone>(send: &mut Sender<Pkt>) -> Vec<(SeqNum, Pkt)> {
         let mut retry_packets: Vec<_> = send
             .retry_packets()
             .map(|(sn, pkt)| (sn, pkt.clone()))
@@ -702,10 +702,7 @@ mod sender_tests {
         retry_packets
     }
 
-    fn enqueue_packet_expect_sent<Pkt>(
-        send: &mut Sender<Pkt>,
-        body: Pkt,
-    ) -> (zpr::SeqNum, &mut Pkt) {
+    fn enqueue_packet_expect_sent<Pkt>(send: &mut Sender<Pkt>, body: Pkt) -> (SeqNum, &mut Pkt) {
         let Sent(sn, pkt) = send.enqueue_packet(body) else {
             panic!("packet blocked");
         };
@@ -715,7 +712,7 @@ mod sender_tests {
     fn enqueue_packet_expect_sent_with_sn<Pkt>(
         send: &mut Sender<Pkt>,
         body: Pkt,
-        expected_sn: zpr::SeqNum,
+        expected_sn: SeqNum,
     ) -> &mut Pkt {
         let (sn, pkt) = enqueue_packet_expect_sent(send, body);
         assert_eq!(sn, expected_sn);

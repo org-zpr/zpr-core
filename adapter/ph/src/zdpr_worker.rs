@@ -7,8 +7,9 @@ use crate::mgmt;
 use std::sync::Arc;
 use tokio::select;
 use tokio::time;
+use zpr::packet_info::LinkId;
 
-pub async fn launch(asm: Arc<Assembly>, link_id: zpr::LinkId) {
+pub async fn launch(asm: Arc<Assembly>, link_id: LinkId) {
     let mut retry_interval = time::interval(config::DEFAULT_ZDPR_RETRY_TIMER);
     retry_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 

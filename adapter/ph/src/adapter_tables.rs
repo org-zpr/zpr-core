@@ -15,7 +15,7 @@ use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::mapref::one::Ref as DashMapRef;
 use std::sync::Mutex;
-use zpr::{CompressionMode, StreamId};
+use zpr::packet_info::{CompressionMode, StreamId};
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 

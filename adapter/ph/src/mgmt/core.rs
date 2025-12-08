@@ -12,7 +12,7 @@ use crate::zdpr;
 use std::task::{Context, Poll};
 use tracing::*;
 use zerocopy::FromBytes;
-use zpr;
+use zpr::packet_info::{LINK_ID_UNKNOWN, LinkId, SeqNum, StreamId};
 
 /// Helper to allocate a new Packet with default parameters from the heap.
 /// The packet is sized to fit most outbound management traffic, but
@@ -51,7 +51,7 @@ pub fn count_events(asm: &Assembly, event: ManagementCounterType, count: u64) {
 /// The packet should contain only the message body.
 pub fn send_non_flow_mgmt(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     packet_type: zdp::ZdpPacketType,
     packet: Packet,
 ) -> Sent<'_> {
@@ -63,9 +63,9 @@ pub fn send_non_flow_mgmt(
 #[allow(dead_code)]
 pub fn send_per_flow_mgmt(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     packet_type: zdp::ZdpPacketType,
-    stream_id: zpr::StreamId,
+    stream_id: StreamId,
     packet: Packet,
 ) -> Sent<'_> {
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet)
@@ -73,9 +73,9 @@ pub fn send_per_flow_mgmt(
 
 pub fn send_per_flow_txn_mgmt(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     packet_type: zdp::ZdpPacketType,
-    stream_id: zpr::StreamId,
+    stream_id: StreamId,
     txn_id: u16,
     packet: Packet,
 ) -> Sent<'_> {
@@ -89,7 +89,7 @@ pub fn send_per_flow_txn_mgmt(
     )
 }
 
-pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_number: zpr::SeqNum) {
+pub fn send_acknowledgement(asm: &Assembly, link_id: LinkId, sequence_number: SeqNum) {
     // TODO: just allocate this on the stack, pending #985.
     let mut packet = new_tiny_heap_packet();
 
@@ -116,7 +116,7 @@ pub enum MgmtSendError {
 
 #[allow(dead_code)]
 enum PacketId {
-    Sent(zpr::SeqNum),
+    Sent(SeqNum),
     Queued(zdpr::QueuedPacketId),
 }
 
@@ -135,7 +135,7 @@ enum PacketId {
 #[must_use = "dropping a sent packet may cancel it"]
 pub struct Sent<'a> {
     asm: &'a Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     packet_id: PacketId,
     // NOTE: if we add anything without a trivial destructor,
     // modify `enqueue()` appropriately!
@@ -171,7 +171,7 @@ impl<'a> Sent<'a> {
                 let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
                     return Err(Acked {
                         asm: self.asm,
-                        link_id: zpr::LINK_ID_UNKNOWN,
+                        link_id: LINK_ID_UNKNOWN,
                         seq_num: None,
                     });
                 };
@@ -239,8 +239,8 @@ impl<'a> std::future::Future for Sent<'a> {
 /// it is unknown whether the peer ever received the packet).
 pub struct Acked<'a> {
     asm: &'a Assembly,
-    link_id: zpr::LinkId,
-    seq_num: Option<zpr::SeqNum>, // None indicates acked before we knew the sequenece number
+    link_id: LinkId,
+    seq_num: Option<SeqNum>, // None indicates acked before we knew the sequenece number
 }
 
 impl<'a> std::future::Future for Acked<'a> {
@@ -305,9 +305,9 @@ impl<'a> std::future::Future for SentAndAcked<'a> {
 
 fn send_mgmt_helper(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     packet_type: zdp::ZdpPacketType,
-    stream_id: Option<zpr::StreamId>,
+    stream_id: Option<StreamId>,
     txn_id: Option<u16>,
     mut packet: Packet,
 ) -> Sent<'_> {
@@ -335,7 +335,7 @@ fn send_mgmt_helper(
     let Some(peer_state) = asm.peer_table.get(link_id) else {
         return Sent {
             asm,
-            link_id: zpr::LINK_ID_UNKNOWN,
+            link_id: LINK_ID_UNKNOWN,
             packet_id: PacketId::Queued(0), // will not be used due to unknown link ID
         };
     };
@@ -377,8 +377,8 @@ fn send_mgmt_helper(
 /// a no-op for retries), and forwards to the fastpath.
 pub fn build_and_egress_packets<'a>(
     asm: &Assembly,
-    link_id: zpr::LinkId,
-    packets: impl Iterator<Item = (zpr::SeqNum, &'a mut Packet)>,
+    link_id: LinkId,
+    packets: impl Iterator<Item = (SeqNum, &'a mut Packet)>,
 ) {
     let mut dropped_backpressure = 0;
 

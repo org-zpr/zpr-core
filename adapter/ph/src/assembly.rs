@@ -33,8 +33,10 @@ use tracing::*;
 use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
+use zpr::packet_info::{
+    ForwardingEntry, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, SubstrateAddr, VisaId,
+};
 use zpr::vsapi_types::AuthServicesList;
-use zpr::{self, LinkId, SubstrateAddr, VisaId};
 use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -356,7 +358,7 @@ impl Assembly {
             .iter()
             .any(|addr| IpAddress::new_from_std(addr) == actor_addr)
         {
-            return Some(NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap());
+            return Some(NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap());
         }
 
         // Check peer actor addresses to see if one of them matches
@@ -377,9 +379,9 @@ impl Assembly {
         visa_id: VisaId,
         tc: tc::Ip5TupleTc,
         egress_link_id: NonZero<LinkId>,
-    ) -> Result<zpr::StreamId, AddRouteError> {
+    ) -> Result<StreamId, AddRouteError> {
         let egress_tether_id;
-        if egress_link_id.get() == zpr::LOCAL_ACTOR_LINK_ID {
+        if egress_link_id.get() == LOCAL_ACTOR_LINK_ID {
             egress_tether_id = self
                 .dlt
                 .insert(adapter_tables::DltPep {
@@ -401,7 +403,7 @@ impl Assembly {
 
         // form PEP
         let pep = forwarding_tables::PftPep {
-            next_hop: zpr::ForwardingEntry(egress_link_id.get(), egress_tether_id),
+            next_hop: ForwardingEntry(egress_link_id.get(), egress_tether_id),
             visa_id: visa_id,
         };
 
@@ -420,7 +422,7 @@ impl Assembly {
             .unwrap()
             .link_forwarding_entry(
                 visa_id,
-                zpr::ForwardingEntry(ingress_link_id.get(), ingress_tether_id),
+                ForwardingEntry(ingress_link_id.get(), ingress_tether_id),
             )
             .is_err()
         {

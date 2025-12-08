@@ -1,7 +1,7 @@
 //! Common definitions that have no more specific place to live.
 
 use zerocopy::*;
-use zpr;
+use zpr::packet_info::L3Type;
 use zpr_utils::net_defs;
 
 /// Packet direction with respect to an interface.
@@ -21,7 +21,7 @@ pub enum Direction {
 pub struct FiveTuple {
     pub src_address: net_defs::IpAddress,
     pub dst_address: net_defs::IpAddress,
-    pub l3_type: zpr::L3Type,
+    pub l3_type: L3Type,
     pub l4_protocol: net_defs::IpProtocol,
     pub src_port: u16,
     pub dst_port: u16,
@@ -30,7 +30,7 @@ pub struct FiveTuple {
 impl FiveTuple {
     #[allow(dead_code)]
     pub fn new(
-        l3_type: zpr::L3Type,
+        l3_type: L3Type,
         src_address: net_defs::IpAddress,
         dst_address: net_defs::IpAddress,
         l4_protocol: net_defs::IpProtocol,
@@ -65,7 +65,7 @@ impl FiveTuple {
     pub fn set_dst_address(&mut self, dst_address: net_defs::IpAddress) {
         self.dst_address = dst_address;
     }
-    pub fn set_l3_type(&mut self, l3_type: zpr::L3Type) {
+    pub fn set_l3_type(&mut self, l3_type: L3Type) {
         self.l3_type = l3_type;
     }
     pub fn set_l4_protocol(&mut self, l4_protocol: net_defs::IpProtocol) {
@@ -82,12 +82,12 @@ impl FiveTuple {
 impl From<zpr::vsapi_types::VsapiFiveTuple> for FiveTuple {
     fn from(other: zpr::vsapi_types::VsapiFiveTuple) -> Self {
         Self {
-            src_address: other.src_address.into(),
-            dst_address: other.dst_address.into(),
+            src_address: other.source_addr.into(),
+            dst_address: other.dest_addr.into(),
             l3_type: other.l3_type,
             l4_protocol: net_defs::vsapi_ip_to_defs_ip(other.l4_protocol).unwrap(),
-            src_port: other.src_port,
-            dst_port: other.dst_port,
+            src_port: other.source_port,
+            dst_port: other.dest_port,
         }
     }
 }
@@ -95,12 +95,12 @@ impl From<zpr::vsapi_types::VsapiFiveTuple> for FiveTuple {
 impl From<FiveTuple> for zpr::vsapi_types::VsapiFiveTuple {
     fn from(other: FiveTuple) -> Self {
         Self {
-            src_address: other.src_address.into(),
-            dst_address: other.dst_address.into(),
+            source_addr: other.src_address.into(),
+            dest_addr: other.dst_address.into(),
             l3_type: other.l3_type,
             l4_protocol: other.l4_protocol,
-            src_port: other.src_port,
-            dst_port: other.dst_port,
+            source_port: other.src_port,
+            dest_port: other.dst_port,
         }
     }
 }

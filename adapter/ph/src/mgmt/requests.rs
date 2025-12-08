@@ -18,11 +18,11 @@ use bytes::{Buf, BufMut};
 use std::net::IpAddr;
 use thiserror::Error;
 use tracing::*;
-use zpr::{self, L3TypeDeriveable};
+use zpr::packet_info::{KmId, L3Type, L3TypeDeriveable, LinkId, StreamId, Tcst};
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)
-pub fn send_key_management(asm: &Assembly, link_id: zpr::LinkId, km_id: zpr::KmId, payload: &[u8]) {
+pub fn send_key_management(asm: &Assembly, link_id: LinkId, km_id: KmId, payload: &[u8]) {
     let mut pkt = core::new_heap_packet();
 
     let km_hdr = pkt.alloc_zeroed_header::<zdp::ZdpKeyManagementHeader>();
@@ -41,13 +41,13 @@ pub fn send_key_management(asm: &Assembly, link_id: zpr::LinkId, km_id: zpr::KmI
 }
 
 /// send a Discard message (RFC 6.5 § 6.3.1)
-pub fn send_discard(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
+pub fn send_discard(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     let pkt = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt)
 }
 
 /// send an Echo Request (RFC 6.5 § 6.3.2)
-pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
+pub fn send_echo_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::EchoRequest, pkt)
@@ -58,7 +58,7 @@ pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
 /// Originally this was used to send the pre-configured ZPR address of the
 /// remote adapter into the node.  This is no longer necessary.
 ///
-pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
+pub fn send_hello_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.alloc_zeroed_header::<zdp::ZdpHelloRequestHeader>();
     super::helpers::put_window_size_tlv(asm, link_id, &mut pkt);
@@ -78,7 +78,7 @@ pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
 ///
 pub fn send_init_authentication_request(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     flags: u8,
     payload: auth::ZdpInitAuthenticationPayload,
 ) -> Sent<'_> {
@@ -116,7 +116,7 @@ pub fn send_init_authentication_request(
 /// - Panics if all requested addresses are not the same IP version.
 pub fn send_acquire_zpr_address_request<'a>(
     asm: &'a Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     actor_addrs: &'_ [IpAddr],
     blob: Option<&'_ [u8]>,
 ) -> Sent<'a> {
@@ -125,7 +125,7 @@ pub fn send_acquire_zpr_address_request<'a>(
     let mut req = core::new_heap_packet();
 
     let ip_version = if actor_addrs.is_empty() {
-        zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
+        L3Type::Ipv6 // whatever, doesn't matter since count is zero.
     } else {
         actor_addrs[0].l3_type()
     };
@@ -139,7 +139,7 @@ pub fn send_acquire_zpr_address_request<'a>(
     for addr in actor_addrs {
         match addr {
             IpAddr::V4(addr) => {
-                if ip_version != zpr::L3Type::Ipv4 {
+                if ip_version != L3Type::Ipv4 {
                     panic!(
                         "attempt to send an IPv4 address with IPv6 type acquire zpr address packet"
                     )
@@ -147,7 +147,7 @@ pub fn send_acquire_zpr_address_request<'a>(
                 req.put(&addr.octets()[..])
             }
             IpAddr::V6(addr) => {
-                if ip_version != zpr::L3Type::Ipv6 {
+                if ip_version != L3Type::Ipv6 {
                     panic!(
                         "attempt to send an IPv6 address with IPv4 type acquire zpr address packet"
                     )
@@ -176,7 +176,7 @@ pub fn send_acquire_zpr_address_request<'a>(
 /// - Panics if all granted addresses are not the same IP version.
 pub fn send_grant_zpr_address_request<'a>(
     asm: &'a Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     status_code: zdp::ResponseCode,
     actor_addrs: &'_ [IpAddr],
 ) -> Sent<'a> {
@@ -185,7 +185,7 @@ pub fn send_grant_zpr_address_request<'a>(
     let mut req = core::new_heap_packet();
 
     let ip_version = if actor_addrs.is_empty() {
-        zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
+        L3Type::Ipv6 // whatever, doesn't matter since count is zero.
     } else {
         actor_addrs[0].l3_type()
     };
@@ -198,7 +198,7 @@ pub fn send_grant_zpr_address_request<'a>(
     for addr in actor_addrs {
         match addr {
             IpAddr::V4(addr) => {
-                if ip_version != zpr::L3Type::Ipv4 {
+                if ip_version != L3Type::Ipv4 {
                     panic!(
                         "attempt to send an IPv4 address with IPv6 type grant zpr address packet"
                     )
@@ -206,7 +206,7 @@ pub fn send_grant_zpr_address_request<'a>(
                 req.put(&addr.octets()[..])
             }
             IpAddr::V6(addr) => {
-                if ip_version != zpr::L3Type::Ipv6 {
+                if ip_version != L3Type::Ipv6 {
                     panic!(
                         "attempt to send an IPv6 address with IPv4 type grant zpr address packet"
                     )
@@ -227,7 +227,7 @@ pub fn send_grant_zpr_address_request<'a>(
 /// send a Terminate Request (RFC 6.5 § 6.3.3)
 pub fn send_terminate_request<'a, 'pktbuf>(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     reason: zdp::TerminateReason,
 ) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
@@ -241,7 +241,7 @@ pub fn send_terminate_request<'a, 'pktbuf>(
 /// send a Terminate Indication (RFC 6.5 § 6.3.3)
 pub fn send_terminate_indication<'a, 'pktbuf>(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     reason: zdp::TerminateReason,
 ) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
@@ -276,7 +276,7 @@ impl From<core::MgmtSendError> for BindActorAddressError {
 /// send a Bind Actor Address Request and wait for the Response (RFC 6.5 § 6.3.11)
 pub fn send_bind_actor_address_request<'a>(
     asm: &'a Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     txn_id: TxnId,
     five_tuple: &FiveTuple,
     packet_body: &[u8],
@@ -304,9 +304,9 @@ pub fn send_bind_actor_address_request<'a>(
 
 pub async fn send_bind_egress_stream_request(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     tc: tc::Ip5TupleTc,
-) -> Result<zpr::StreamId, BindActorAddressError> {
+) -> Result<StreamId, BindActorAddressError> {
     info!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {tc}");
 
     let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -327,7 +327,7 @@ pub async fn send_bind_egress_stream_request(
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
-    bind_req_hdr.tcst = zpr::Tcst::Ip5Tuple;
+    bind_req_hdr.tcst = Tcst::Ip5Tuple;
     tc.serialize(&mut req);
 
     core::send_per_flow_txn_mgmt(
@@ -374,7 +374,7 @@ pub async fn send_bind_egress_stream_request(
 }
 
 /// send a Report message (RFC 6.5 § 6.3.13)
-pub fn send_report<'a>(asm: &'a Assembly, link_id: zpr::LinkId, report: &'_ str) -> Sent<'a> {
+pub fn send_report<'a>(asm: &'a Assembly, link_id: LinkId, report: &'_ str) -> Sent<'a> {
     // TODO this condition will need to be adjusted when we have complete ZPR packets
     // with the information at the end of the packet at well
     /*if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {

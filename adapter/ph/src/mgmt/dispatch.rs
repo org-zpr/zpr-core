@@ -15,7 +15,7 @@ use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tracing::*;
 use zerocopy::FromBytes;
-use zpr;
+use zpr::packet_info::{KM_ID_NOISE, KM_ID_NULL, LINK_ID_UNKNOWN, SubstrateAddr};
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::FromBytesExt;
 use zpr_utils::net_defs;
@@ -26,7 +26,7 @@ use zpr_utils::net_defs;
 /// It merely dispatches the management packet to the correct queue.
 pub fn dispatch_mgmt_packet_with_addr(
     asm: &Arc<Assembly>,
-    peer_sa: zpr::SubstrateAddr,
+    peer_sa: SubstrateAddr,
     interface_addr: net_defs::ScopedIpAddr,
     pkt: &mut Packet,
 ) {
@@ -45,7 +45,7 @@ pub fn dispatch_mgmt_packet_with_addr(
                 .lookup_peer(&peer_sa, &interface_addr)
                 .unwrap_or_zero();
 
-            if ingress_link_id == zpr::LINK_ID_UNKNOWN {
+            if ingress_link_id == LINK_ID_UNKNOWN {
                 let Some(i_link_id) = asm
                     .start_tether(&peer_sa, &interface_addr, LinkType::NodeToAdapter)
                     .ok()
@@ -165,8 +165,8 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
         return;
     };
 
-    if (km_hdr.is_noise() && asm.config.get().km_impl != zpr::KM_ID_NOISE)
-        || (km_hdr.is_null() && asm.config.get().km_impl != zpr::KM_ID_NULL)
+    if (km_hdr.is_noise() && asm.config.get().km_impl != KM_ID_NOISE)
+        || (km_hdr.is_null() && asm.config.get().km_impl != KM_ID_NULL)
     {
         error!(
             target: KEY_MGMT,
@@ -255,7 +255,7 @@ mod test {
         let hdr = pkt2.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
 
-        let peer_sa = zpr::SubstrateAddr::from(([127, 0, 0, 1], 1234));
+        let peer_sa = SubstrateAddr::from(([127, 0, 0, 1], 1234));
         let int_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 1).into());
 
         let local = LocalSet::new();

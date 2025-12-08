@@ -27,29 +27,30 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
 use zerocopy::FromBytes;
-use zpr;
-use zpr::L3Type;
+use zpr::packet_info::{
+    A2aSaid, DOCK_LINK_ID, KM_ID_NOISE, L3Type, LINK_ID_UNKNOWN, LOCAL_ACTOR_LINK_ID, LinkId,
+    StreamId, SubstrateAddr, ZPI_0, Zpi,
+};
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 use zpr_utils::net_defs;
 
 /// Simple function used on an adapter to forward actor packets to the the tether and vice-versa.
-const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
+const fn adapter_next_hop_link(ingress_link_id: LinkId) -> LinkId {
     // this optimization is checked by the static asserts below
     // this allows us to avoid an unpredictable branch on every packet
     (ingress_link_id % 2) + 1
 }
 
-const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_ACTOR_LINK_ID) == zpr::DOCK_LINK_ID);
-const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_ACTOR_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(LOCAL_ACTOR_LINK_ID) == DOCK_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(DOCK_LINK_ID) == LOCAL_ACTOR_LINK_ID);
 
 #[cfg(debug_assertions)]
 /// This table is used to track whether a flow ever switches from one worker
 /// to another (indicating potential for out-of-order packets) -- meaning
 /// our packet steerer isn't steering correctly.  This is used only in debug mode.
-const ACTOR_PACKET_FLOW_TRACKER: std::sync::LazyLock<
-    dashmap::DashMap<(zpr::LinkId, zpr::StreamId), usize>,
-> = std::sync::LazyLock::new(|| dashmap::DashMap::new());
+const ACTOR_PACKET_FLOW_TRACKER: std::sync::LazyLock<dashmap::DashMap<(LinkId, StreamId), usize>> =
+    std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
 #[derive(Clone, Copy)]
 pub struct FastpathWorkerConfig {
@@ -136,7 +137,7 @@ impl FastpathWorker {
     /// Process packet ingressing from the specified address.
     pub fn substrate_ingress(
         &mut self,
-        peer_sa: &zpr::SubstrateAddr,
+        peer_sa: &SubstrateAddr,
         interface_addr: &net_defs::ScopedIpAddr,
         mut pkt: Packet,
     ) {
@@ -175,7 +176,7 @@ impl FastpathWorker {
 
         // If we weren't able to match this packet to an existing link,
         // send it off to be processed as a potential new link.
-        if pkt.metadata().ingress_link_id == zpr::LINK_ID_UNKNOWN {
+        if pkt.metadata().ingress_link_id == LINK_ID_UNKNOWN {
             match self.mgmt_dispatch.try_dispatch_mgmt_packet_with_addr(
                 peer_sa,
                 interface_addr,
@@ -195,7 +196,7 @@ impl FastpathWorker {
 
         // In ZPI zero only KM messages are allowed (well, and ZPR ARP which we don't support yet)
         // Can be overridden (FOR TESTING ONLY) in the flags.
-        if zpi_hdr.zpi == zpr::ZPI_0 && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
+        if zpi_hdr.zpi == ZPI_0 && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
             warn!(
                 target: DATAPATH,
                 "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
@@ -224,7 +225,7 @@ impl FastpathWorker {
             return self.drop_and_count(pkt, FastpathCounterType::BadStructure);
         };
 
-        let ingress_stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
+        let ingress_stream_id: StreamId = per_flow_hdr.stream_id.into();
         pkt.metadata_mut().ingress_stream_id = ingress_stream_id;
 
         // in debug builds, track which worker this actor traffic came in on
@@ -249,7 +250,7 @@ impl FastpathWorker {
     /// Process uncompressed packet from the actor.
     /// The packet will be compressed, or trigger a Bind request.
     pub fn actor_output(&mut self, mut pkt: Packet) {
-        pkt.metadata_mut().ingress_link_id = zpr::LOCAL_ACTOR_LINK_ID;
+        pkt.metadata_mut().ingress_link_id = LOCAL_ACTOR_LINK_ID;
         pkt.metadata_mut().ingress_lane_id = self.worker_index as u8;
 
         // determine five tuple
@@ -322,7 +323,7 @@ impl FastpathWorker {
                 AltEntry::Active(pep) => {
                     // compute A2A MAC
                     // TODO: use actual A2A SAID & keyed hash
-                    let a2a_said: zpr::A2aSaid = 0;
+                    let a2a_said: A2aSaid = 0;
                     let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
                     let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
                     // SECURITY: truncating BLAKE3 is safe
@@ -394,7 +395,7 @@ impl FastpathWorker {
             }
         }
 
-        if egress_link_id == zpr::LOCAL_ACTOR_LINK_ID {
+        if egress_link_id == LOCAL_ACTOR_LINK_ID {
             self.actor_input(egress_stream_id, pkt);
         } else {
             let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
@@ -413,7 +414,7 @@ impl FastpathWorker {
     /// The packet will be decompressed according to the given stream ID.
     pub fn actor_input(
         &mut self,
-        tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
+        tether_id: StreamId, // TODO: should we keep this in metadata? or per-flow header?
         mut pkt: Packet,
     ) {
         // extract A2A MAC
@@ -494,7 +495,7 @@ impl FastpathWorker {
 }
 
 /// Add the ZPI header to a packet.
-pub fn encap_zpi(_asm: &Assembly, _link_id: zpr::LinkId, zpi: zpr::Zpi, pkt: &mut Packet) {
+pub fn encap_zpi(_asm: &Assembly, _link_id: LinkId, zpi: Zpi, pkt: &mut Packet) {
     pkt.alloc_zeroed_header::<zdp::ZdpZpiHeader>().zpi = zpi;
 }
 
@@ -712,7 +713,7 @@ fn decrypt_with_sa(
         return decrypt_hmac(transport_sa.recv_hmac_key, pkt);
     } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
         // TODO: Put padlen in state somewhere too
-        if asm.config.get().km_impl == zpr::KM_ID_NOISE {
+        if asm.config.get().km_impl == KM_ID_NOISE {
             return decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, pkt);
         } else {
             return decrypt_full(asm, &*transport_sa.codec, 0, pkt);
@@ -765,7 +766,7 @@ fn decrypt(
 
     // If we got here, it's because we couldn't find a security association.
     // This means only ZPI 0 is allowed.
-    if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
+    if zpi_hdr.zpi != ZPI_0 && pkt.metadata().ingress_link_id != LINK_ID_UNKNOWN {
         warn!(
             target: DATAPATH,
             "ingress: {}: ZPI {} not allowed on unestablished SA",
@@ -786,10 +787,10 @@ fn decrypt(
 
 fn substrate_egress_common(
     asm: &Assembly,
-    link_id: zpr::LinkId,
+    link_id: LinkId,
     pkt: &mut Packet,
     batch_counters: &FastpathCounters,
-) -> Result<Option<(zpr::SubstrateAddr, net_defs::ScopedIpAddr)>, km::EncryptionError> {
+) -> Result<Option<(SubstrateAddr, net_defs::ScopedIpAddr)>, km::EncryptionError> {
     // TODO: should we add ZDP header here also??
 
     let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
@@ -831,10 +832,10 @@ fn substrate_egress_common(
             } else {
                 real_zpi = transport_sa.send_zpis.encr;
             }
-            assert!(real_zpi != zpr::ZPI_0);
+            assert!(real_zpi != ZPI_0);
         }
         None => {
-            real_zpi = zpr::ZPI_0;
+            real_zpi = ZPI_0;
         }
     }
 
@@ -866,7 +867,7 @@ fn substrate_egress_common(
 }
 
 /// If substrate supports flow info, set it to the specified value.
-fn set_flowinfo(substrate_addr: &mut zpr::SubstrateAddr, flowinfo: u32) {
+fn set_flowinfo(substrate_addr: &mut SubstrateAddr, flowinfo: u32) {
     match substrate_addr {
         SocketAddr::V4(_) => (),
         SocketAddr::V6(sa) => sa.set_flowinfo(flowinfo),

@@ -25,7 +25,7 @@ use tokio::sync::{Notify, mpsc};
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use zpr::{self, LINK_ID_UNKNOWN, LinkId, SubstrateAddr};
+use zpr::packet_info::{ForwardingEntry, LINK_ID_UNKNOWN, LinkId, SubstrateAddr};
 use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
 const PEER_TABLE_SIZE: usize = config::MAX_ACTIVE_LINKS;
@@ -409,7 +409,7 @@ impl PeerTable {
     }
 
     /// Remove a route from a peer forwarding table
-    pub fn remove_route(&self, route: zpr::ForwardingEntry) {
+    pub fn remove_route(&self, route: ForwardingEntry) {
         let Some(entry) = self.get(route.0) else {
             // If the peer is gone, nothing to be done
             return;

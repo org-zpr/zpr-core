@@ -14,9 +14,10 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
+use zpr::addrs::{VISA_SERVICE_ADDR, VISA_SERVICE_PORT};
+use zpr::packet_info::{ForwardingEntry, VisaId};
 use zpr::vsapi_types;
 use zpr::vsapi_types::{DockPep, VsapiFiveTuple};
-use zpr::{ForwardingEntry, VisaId};
 use zpr_utils::net_defs::IpAddress;
 
 // TODO: Figure out correct value for this visa expiration
@@ -110,10 +111,10 @@ impl Visa {
         }
 
         let visa_tuple = self.ftuple.as_ref().unwrap();
-        if visa_tuple.src_address != IpAddr::from(five_tuple.src_address) {
+        if visa_tuple.source_addr != IpAddr::from(five_tuple.src_address) {
             return false;
         }
-        if visa_tuple.dst_address != IpAddr::from(five_tuple.dst_address) {
+        if visa_tuple.dest_addr != IpAddr::from(five_tuple.dst_address) {
             return false;
         }
         // TODO: Explicitly set this (l3_type) in visa and also allow it to be set to 0?
@@ -123,10 +124,10 @@ impl Visa {
         if visa_tuple.l4_protocol != 0 && visa_tuple.l4_protocol != five_tuple.l4_protocol {
             return false;
         }
-        if visa_tuple.src_port != 0 && visa_tuple.src_port != five_tuple.src_port {
+        if visa_tuple.source_port != 0 && visa_tuple.source_port != five_tuple.src_port {
             return false;
         }
-        if visa_tuple.dst_port != 0 && visa_tuple.dst_port != five_tuple.dst_port {
+        if visa_tuple.dest_port != 0 && visa_tuple.dest_port != five_tuple.dst_port {
             return false;
         }
         return true;
@@ -167,7 +168,7 @@ impl VisaTable {
         };
 
         // TODO: This is crazy since VS is always IPv6
-        let vs_zpr_addr = match zpr::VISA_SERVICE_ADDR {
+        let vs_zpr_addr = match VISA_SERVICE_ADDR {
             IpAddr::V4(addr) => addr.to_ipv6_mapped(),
             IpAddr::V6(addr) => addr,
         };
@@ -180,14 +181,14 @@ impl VisaTable {
             &node_zpr_addr,
             0,
             &vs_zpr_addr,
-            zpr::VISA_SERVICE_PORT,
+            VISA_SERVICE_PORT,
             expires_ms,
             VS_VISAS_CONFIG_ID,
         );
         let vs2node = make_tcp_visa(
             2,
             &vs_zpr_addr,
-            zpr::VISA_SERVICE_PORT,
+            VISA_SERVICE_PORT,
             &node_zpr_addr,
             0,
             expires_ms,
@@ -323,7 +324,7 @@ impl VisaTable {
         match visa_query {
             Ok(visa) => {
                 if let Some(ftuple) = &visa.ftuple {
-                    Ok(IpAddress::from(ftuple.dst_address.clone()))
+                    Ok(IpAddress::from(ftuple.dest_addr.clone()))
                 } else {
                     Err(VisaTableError::ParseError(
                         "visa missing destination address",
@@ -355,8 +356,8 @@ fn make_tcp_visa(
         issuer_id: visa_id as u64,
         config: configuration,
         expires: UNIX_EPOCH + dur,
-        src_addr: (*source).into(),
-        dst_addr: (*dest).into(),
+        source_addr: (*source).into(),
+        dest_addr: (*dest).into(),
         dock_pep: DockPep::TCP(pepargs),
         session_key: vsapi_types::KeySet::default(),
         cons: None,
@@ -373,6 +374,7 @@ mod tests {
     use crate::peer_table::test::create_dummy_peer_state;
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
+    use zpr::packet_info::{L3Type, SubstrateAddr};
     use zpr_utils::net_defs;
     use zpr_utils::net_defs::ip_number;
 
@@ -435,7 +437,7 @@ mod tests {
             .insert(create_dummy_peer_state(
                 entry_key,
                 LinkType::Internal,
-                zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
                 net_defs::ScopedIpAddr::V4(Ipv4Addr::new(1, 2, 3, 5)),
             ))
             .get();
@@ -444,12 +446,12 @@ mod tests {
         let visa1 = 12345;
         let visa2 = 986;
         let pep1 = PftPep {
-            next_hop: zpr::ForwardingEntry(link_id, 1),
+            next_hop: ForwardingEntry(link_id, 1),
             visa_id: visa1,
         };
 
         let pep2 = PftPep {
-            next_hop: zpr::ForwardingEntry(link_id, 2),
+            next_hop: ForwardingEntry(link_id, 2),
             visa_id: visa2,
         };
 
@@ -468,12 +470,12 @@ mod tests {
         visa_table.insert_id(visa2, Utc::now() + one_second); // An element that will time out in a second
         assert!(
             visa_table
-                .link_forwarding_entry(visa1, zpr::ForwardingEntry(link_id, tether_id1))
+                .link_forwarding_entry(visa1, ForwardingEntry(link_id, tether_id1))
                 .is_ok()
         );
         assert!(
             visa_table
-                .link_forwarding_entry(visa2, zpr::ForwardingEntry(link_id, tether_id2))
+                .link_forwarding_entry(visa2, ForwardingEntry(link_id, tether_id2))
                 .is_ok()
         );
 
@@ -515,7 +517,7 @@ mod tests {
         let traffic = FiveTuple {
             src_address: IpAddress::new_from_std_v6(&client1_addr),
             dst_address: IpAddress::new_from_std_v6(&service_addr),
-            l3_type: zpr::L3Type::Ipv6,
+            l3_type: L3Type::Ipv6,
             l4_protocol: ip_number::TCP,
             src_port: 20345,
             dst_port: 80,

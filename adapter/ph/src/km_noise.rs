@@ -46,7 +46,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 use tracing::{error, warn};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
-use zpr;
+use zpr::packet_info::{KM_ID_NOISE, KM_ID_NULL, KmId};
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
@@ -190,7 +190,7 @@ impl KmNoise {
         }
 
         let settings = KmSettings {
-            zdp_km_type: zpr::KM_ID_NOISE,
+            zdp_km_type: KM_ID_NOISE,
             padlen: NOISE_PADLEN,
             alignment: 0,
             tick_interval: Duration::from_millis(500),
@@ -465,11 +465,7 @@ impl KeyManagerStateMachine for KmNoise {
     //
     // Initiator will only get a handshake-reply msg, to which no reply is sent.
     // Responder will only get a handshake-request msg (and return a reply).
-    fn handle_message(
-        &mut self,
-        message: &[u8],
-        km_impl: zpr::KmId,
-    ) -> Result<Option<Bytes>, KmError> {
+    fn handle_message(&mut self, message: &[u8], km_impl: KmId) -> Result<Option<Bytes>, KmError> {
         if self.state != KmSMState::Configuring {
             error!(
                 target: KEY_MGMT,
@@ -553,8 +549,8 @@ impl KeyManagerStateMachine for KmNoise {
             match hs.into_stateless_transport_mode() {
                 Ok(t) => {
                     let codec: Arc<dyn Codec> = match km_impl {
-                        zpr::KM_ID_NOISE => Arc::new(NoiseCodec::new(t)),
-                        zpr::KM_ID_NULL => Arc::new(NullCodec::new()),
+                        KM_ID_NOISE => Arc::new(NoiseCodec::new(t)),
+                        KM_ID_NULL => Arc::new(NullCodec::new()),
                         _ => return Err(KmError::HandshakeError),
                     };
                     self.state = KmSMState::Transport(KmTransportSA::new(
@@ -675,7 +671,7 @@ mod test {
         };
 
         // -> e, es, s, ss
-        let handshake_msg_1 = match responder.handle_message(&handshake_msg_0, zpr::KM_ID_NOISE) {
+        let handshake_msg_1 = match responder.handle_message(&handshake_msg_0, KM_ID_NOISE) {
             Ok(Some(m)) => m,
             Ok(None) => {
                 panic!("expected handshake-1 message, got nothing!");
@@ -692,7 +688,7 @@ mod test {
         assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
         // <- e, ee, se
-        match initiator.handle_message(&handshake_msg_1, zpr::KM_ID_NOISE) {
+        match initiator.handle_message(&handshake_msg_1, KM_ID_NOISE) {
             Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
             Ok(None) => {} // good
             Err(e) => {
@@ -861,7 +857,7 @@ mod test {
         };
 
         // -> e, es, s, ss
-        let handshake_msg_1 = match responder.handle_message(&handshake_msg_0, zpr::KM_ID_NOISE) {
+        let handshake_msg_1 = match responder.handle_message(&handshake_msg_0, KM_ID_NOISE) {
             Ok(Some(m)) => m,
             Ok(None) => {
                 panic!("expected handshake-1 message, got nothing!");
@@ -878,7 +874,7 @@ mod test {
         assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
         // <- e, ee, se
-        match initiator.handle_message(&handshake_msg_1, zpr::KM_ID_NOISE) {
+        match initiator.handle_message(&handshake_msg_1, KM_ID_NOISE) {
             Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
             Ok(None) => {} // good
             Err(e) => {
@@ -971,7 +967,7 @@ mod test {
         let mut sp_node = node.clone();
         tokio::spawn(async move {
             let _ = sp_node
-                .start(n_ctok, n_km_tx, n_sig_tx, n_km_payload_rx, zpr::KM_ID_NOISE)
+                .start(n_ctok, n_km_tx, n_sig_tx, n_km_payload_rx, KM_ID_NOISE)
                 .await; // Start the node
         });
 
@@ -982,7 +978,7 @@ mod test {
         let mut sp_adapter = adapter.clone();
         tokio::spawn(async move {
             let _ = sp_adapter
-                .start(a_ctok, a_km_tx, a_sig_tx, a_km_payload_rx, zpr::KM_ID_NOISE)
+                .start(a_ctok, a_km_tx, a_sig_tx, a_km_payload_rx, KM_ID_NOISE)
                 .await; // Start the adapter
         });
 

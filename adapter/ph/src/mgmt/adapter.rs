@@ -6,7 +6,7 @@ use crate::logging::targets::FLOW_MGMT;
 use crate::queues;
 use crate::tc;
 use tracing::*;
-use zpr::StreamId;
+use zpr::packet_info::StreamId;
 
 #[derive(Debug)]
 pub enum InstallTetherError {
