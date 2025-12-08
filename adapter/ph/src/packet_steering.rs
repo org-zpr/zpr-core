@@ -1,6 +1,8 @@
 //! OS-level control of steering packets into sockets.
 
 use std::net::UdpSocket;
+#[cfg(target_os = "linux")]
+#[allow(unused_imports)]
 use zpr::packet_info::ZPI_ENCRYPTED_HEADER_FLAG;
 
 #[allow(dead_code)]
