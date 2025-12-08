@@ -20,16 +20,7 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
             }
             VSSMsg::PushedRevocation(VisaOp::RevokeVisaId(revocation)) => {
                 debug!(target: VISA_MGMT, "Received pushed revocation, id={}", revocation);
-                // CTP TEMPORARY FIXME:
-                // visa revocation currently blocks the worker for ~1 second and causes heartbeats to be lost
-                // (see #1151), so pending a fix to that, we launch it in a blocking thread to avoid this
-                let task_asm = asm.clone();
-                if let Err(e) = tokio::task::spawn_blocking(move || {
-                    visa_mgmt::handle_revocation(&task_asm, revocation as VisaId)
-                })
-                .await
-                .unwrap()
-                {
+                if let Err(e) = visa_mgmt::handle_revocation(&asm, revocation as VisaId) {
                     error!(target: VISA_MGMT, "Error revoking visa: {e}");
                 }
             }
