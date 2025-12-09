@@ -6,10 +6,12 @@ on:
     paths:
       - 'libnode/**'
       - '.github/workflows/libnode.yml'
+      - 'zpr/**'
   pull_request:
     paths:
       - 'libnode/**'
       - '.github/workflows/libnode.yml'
+      - 'zpr/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
