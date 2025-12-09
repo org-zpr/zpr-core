@@ -5,10 +5,12 @@ on:
     branches: [ "main" ]
     paths:
       - 'libnode/**'
+      - 'zpr/**'
       - '.github/workflows/libnode.yml'
   pull_request:
     paths:
       - 'libnode/**'
+      - 'zpr/**'
       - '.github/workflows/libnode.yml'
 
 concurrency:
