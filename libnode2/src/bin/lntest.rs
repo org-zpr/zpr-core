@@ -14,7 +14,7 @@ use tracing::{error, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
 use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
-use zpr::L3Type;
+use zpr::packet_info::L3Type;
 use zpr::vsapi_types::{CommFlag, PacketDesc, VsapiFiveTuple};
 
 /// lntest: test tool for libnode2
