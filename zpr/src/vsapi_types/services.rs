@@ -76,13 +76,13 @@ impl TryFrom<vsapi::ServicesList> for AuthServicesList {
     /// Returns err if a ServiceDescriptor is badly formatted
     fn try_from(services_list: vsapi::ServicesList) -> Result<Self, Self::Error> {
         let mut expiration = None;
-        if services_list.expiration.is_some() {
+        if let Some(exp) = services_list.expiration {
             expiration =
-                Some(UNIX_EPOCH + Duration::from_secs(services_list.expiration.unwrap() as u64));
+                Some(UNIX_EPOCH + Duration::from_secs(exp as u64));
         }
         let mut services = Vec::new();
-        if services_list.services.is_some() {
-            for svc in services_list.services.unwrap() {
+        if let Some(svc_list) = services_list.services {
+            for svc in svc_list {
                 services.push(ServiceDescriptor::try_from(svc)?);
             }
         }
@@ -103,17 +103,17 @@ impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
                 "vsapi::ServiceDescriptor is not of type ACTOR_AUTHENTICATION",
             ));
         }
-        if value.address.is_none() {
-            return Err(VsapiTypeError::DeserializationError(
+        let zpr_addr = match value.address {
+            Some(address) => ip_addr_from_vec(address)?,
+            None => return Err(VsapiTypeError::DeserializationError(
                 "vsapi::ServiceDescriptor addr is empty",
-            ));
-        }
-        let zpraddr = ip_addr_from_vec(value.address.unwrap())?;
+            ))
+        };
 
         Ok(ServiceDescriptor {
             service_id: value.service_id.unwrap_or_default(),
             service_uri: value.uri.unwrap_or_default(),
-            zpr_addr: zpraddr,
+            zpr_addr,
         })
     }
 }

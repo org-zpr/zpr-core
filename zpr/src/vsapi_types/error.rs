@@ -1,3 +1,5 @@
+use std::net::AddrParseError;
+
 use thiserror::Error;
 
 /// Error type
@@ -17,4 +19,6 @@ pub enum VsapiTypeError {
     CodedError(crate::vsapi_types::ErrorCode),
     #[error("IP address conversion error: {0}")]
     TryFromSliceError(#[from] std::array::TryFromSliceError),
+    #[error("Addr Parse Error")]
+    AddrParseError(#[from] AddrParseError),
 }

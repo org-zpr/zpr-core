@@ -74,46 +74,58 @@ impl VsapiFiveTuple {
 }
 
 impl PacketDesc {
-    /// Panics on invalid IP.
-    pub fn new_tcp(source_addr: &str, dest_addr: &str, source_port: u16, dest_port: u16) -> Self {
-        let saddr: IpAddr = source_addr.parse().unwrap();
-        PacketDesc {
+    pub fn new_tcp(
+        source_addr: &str,
+        dest_addr: &str,
+        source_port: u16,
+        dest_port: u16,
+    ) -> Result<Self, VsapiTypeError> {
+        let saddr: IpAddr = source_addr.parse()?;
+        Ok(PacketDesc {
             five_tuple: VsapiFiveTuple::new(
                 L3Type::new_from_addr(&saddr),
                 saddr,
-                dest_addr.parse().unwrap(),
+                dest_addr.parse()?,
                 vsapi_ip_number::TCP,
                 source_port,
                 dest_port,
             ),
             comm_flags: CommFlag::BiDirectional,
-        }
+        })
     }
 
-    /// Panics on invalid IP.
-    pub fn new_udp(source_addr: &str, dest_addr: &str, source_port: u16, dest_port: u16) -> Self {
-        let saddr: IpAddr = source_addr.parse().unwrap();
-        PacketDesc {
+    pub fn new_udp(
+        source_addr: &str,
+        dest_addr: &str,
+        source_port: u16,
+        dest_port: u16,
+    ) -> Result<Self, VsapiTypeError> {
+        let saddr: IpAddr = source_addr.parse()?;
+        Ok(PacketDesc {
             five_tuple: VsapiFiveTuple::new(
                 L3Type::new_from_addr(&saddr),
                 saddr,
-                dest_addr.parse().unwrap(),
+                dest_addr.parse()?,
                 vsapi_ip_number::UDP,
                 source_port,
                 dest_port,
             ),
             comm_flags: CommFlag::BiDirectional,
-        }
+        })
     }
 
-    /// Panics on invalid IP.
-    pub fn new_icmp(source_addr: &str, dest_addr: &str, icmp_type: u8, icmp_code: u8) -> Self {
-        let saddr: IpAddr = source_addr.parse().unwrap();
-        PacketDesc {
+    pub fn new_icmp(
+        source_addr: &str,
+        dest_addr: &str,
+        icmp_type: u8,
+        icmp_code: u8,
+    ) -> Result<Self, VsapiTypeError> {
+        let saddr: IpAddr = source_addr.parse()?;
+        Ok(PacketDesc {
             five_tuple: VsapiFiveTuple::new(
                 L3Type::new_from_addr(&saddr),
                 saddr,
-                dest_addr.parse().unwrap(),
+                dest_addr.parse()?,
                 if saddr.is_ipv4() {
                     vsapi_ip_number::ICMP
                 } else {
@@ -123,7 +135,7 @@ impl PacketDesc {
                 icmp_code as u16,
             ),
             comm_flags: CommFlag::UniDirectional,
-        }
+        })
     }
 
     pub fn is_tcpudp(&self) -> bool {
@@ -159,7 +171,7 @@ impl TryFrom<v1::packet_desc::Reader<'_>> for PacketDesc {
     /// Returns error if fields are not set or if IP addres are badly formatted
     fn try_from(reader: v1::packet_desc::Reader<'_>) -> Result<Self, Self::Error> {
         let source_ip = reader.get_source_addr()?;
-        let source = match source_ip.which().unwrap() {
+        let source = match source_ip.which()? {
             v1::ip_addr::V4(ipv4) => {
                 let octets: [u8; 4] = ipv4?.try_into()?;
                 IpAddr::V4(Ipv4Addr::from(octets))
@@ -170,7 +182,7 @@ impl TryFrom<v1::packet_desc::Reader<'_>> for PacketDesc {
             }
         };
         let dest_ip = reader.get_dest_addr()?;
-        let dest = match dest_ip.which().unwrap() {
+        let dest = match dest_ip.which()? {
             v1::ip_addr::V4(ipv4) => {
                 let octets: [u8; 4] = ipv4?.try_into()?;
                 IpAddr::V4(Ipv4Addr::from(octets))
@@ -183,7 +195,7 @@ impl TryFrom<v1::packet_desc::Reader<'_>> for PacketDesc {
         let source_port = reader.get_source_port();
         let dest_port = reader.get_dest_port();
         let protocol = reader.get_protocol();
-        let comm_flags = match reader.get_comm_type().unwrap() {
+        let comm_flags = match reader.get_comm_type()? {
             v1::CommType::Bidirectional => CommFlag::BiDirectional,
             v1::CommType::Unidirectional => CommFlag::UniDirectional,
             v1::CommType::Rerequest => CommFlag::ReRequest(0), // TODO

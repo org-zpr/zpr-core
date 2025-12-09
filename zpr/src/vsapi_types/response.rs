@@ -89,18 +89,19 @@ impl TryFrom<vsapi::ConnectResponse> for Connection {
         match resp.status {
             Some(vsapi::StatusCode::FAIL) => Err(VsapiTypeError::CodedError(ErrorCode::Fail)),
             Some(vsapi::StatusCode::SUCCESS) => match resp.actor {
-                Some(actor) => {
-                    if actor.zpr_addr.is_some() && actor.auth_expires.is_some() {
+                Some(actor) => match (actor.zpr_addr, actor.auth_expires) {
+                    (Some(zpr_addr), Some(auth_expires)) => {
                         return Ok(Self {
-                            zpr_addr: ip_addr_from_vec(actor.zpr_addr.unwrap())?,
-                            auth_expires: actor.auth_expires.unwrap() as u64,
+                            zpr_addr: ip_addr_from_vec(zpr_addr)?,
+                            auth_expires: auth_expires as u64,
                         });
-                    } else {
+                    }
+                    _ => {
                         return Err(VsapiTypeError::DeserializationError(
                             "Required fields not set",
                         ));
                     }
-                }
+                },
                 None => return Err(VsapiTypeError::DeserializationError("No actor")),
             },
             _ => Err(VsapiTypeError::DeserializationError(
