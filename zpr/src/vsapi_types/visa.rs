@@ -184,12 +184,8 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
             v1::ip_addr::Which::V6(data) => IpAddr::from(<[u8; 16]>::try_from(data?)?),
         };
         let dest_addr = match reader.get_dest_addr()?.which()? {
-            v1::ip_addr::Which::V4(data) => {
-                IpAddr::from(<[u8; 4]>::try_from(data?)?)
-            }
-            v1::ip_addr::Which::V6(data) => {
-                IpAddr::from(<[u8; 16]>::try_from(data?)?)
-            }
+            v1::ip_addr::Which::V4(data) => IpAddr::from(<[u8; 4]>::try_from(data?)?),
+            v1::ip_addr::Which::V6(data) => IpAddr::from(<[u8; 16]>::try_from(data?)?),
         };
 
         let dock_pep = DockPep::try_from(reader.get_dock_pep()?)?;

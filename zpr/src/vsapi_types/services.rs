@@ -77,8 +77,7 @@ impl TryFrom<vsapi::ServicesList> for AuthServicesList {
     fn try_from(services_list: vsapi::ServicesList) -> Result<Self, Self::Error> {
         let mut expiration = None;
         if let Some(exp) = services_list.expiration {
-            expiration =
-                Some(UNIX_EPOCH + Duration::from_secs(exp as u64));
+            expiration = Some(UNIX_EPOCH + Duration::from_secs(exp as u64));
         }
         let mut services = Vec::new();
         if let Some(svc_list) = services_list.services {
@@ -105,9 +104,11 @@ impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
         }
         let zpr_addr = match value.address {
             Some(address) => ip_addr_from_vec(address)?,
-            None => return Err(VsapiTypeError::DeserializationError(
-                "vsapi::ServiceDescriptor addr is empty",
-            ))
+            None => {
+                return Err(VsapiTypeError::DeserializationError(
+                    "vsapi::ServiceDescriptor addr is empty",
+                ));
+            }
         };
 
         Ok(ServiceDescriptor {
