@@ -106,7 +106,7 @@ impl Visa {
         cons: Option<Constraints>,
     ) -> Self {
         Self {
-            issuer_id, 
+            issuer_id,
             config,
             expires,
             source_addr,
@@ -116,7 +116,7 @@ impl Visa {
             cons,
         }
     }
-    
+
     /// Get the FiveTuple from a Visa
     pub fn get_five_tuple(&self) -> VsapiFiveTuple {
         let source_addr = self.source_addr;
