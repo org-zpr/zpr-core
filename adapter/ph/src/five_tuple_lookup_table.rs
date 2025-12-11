@@ -71,10 +71,8 @@ impl FiveTupleLookupTable {
     }
 
     fn add_one_visa(visa_id: VisaId, visa: &Visa, table: &mut FiveTupleLookup) {
-        let five_tuple = match visa.ftuple {
-            Some(ft) => ft,
-            None => return,
-        };
+        let five_tuple = visa.ftuple;
+
         // Create array for protocol
         let mut arr = Vec::new();
         arr.push(Arc::new(ProtoAndId::new(five_tuple.l4_protocol, visa_id)));

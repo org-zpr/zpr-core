@@ -40,12 +40,12 @@ pub enum VisaTableError {
 }
 
 /// Struct that holds an instance of a visa local to a Node
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct Visa {
     // TODO add methods so that these don't have to be made pub
-    pub visa: Option<vsapi_types::Visa>,
+    pub visa: vsapi_types::Visa,
     streams: Vec<ForwardingEntry>,
-    pub ftuple: Option<VsapiFiveTuple>,
+    pub ftuple: VsapiFiveTuple,
 }
 
 /// Struct for the visa timeout queue
@@ -82,9 +82,9 @@ impl Visa {
     pub fn new(visa: vsapi_types::Visa) -> Self {
         let ftuple = visa.get_five_tuple();
         Self {
-            visa: Some(visa),
+            visa: visa,
             streams: Vec::new(),
-            ftuple: Some(ftuple),
+            ftuple: ftuple,
         }
     }
 
@@ -106,11 +106,7 @@ impl Visa {
     // Visa may have wildcards.  Eg, a visa with zero for a source port will match
     // any traffic five_tuple source port value.
     pub fn match_traffic(&self, five_tuple: &FiveTuple) -> bool {
-        if self.visa.is_none() || self.ftuple.is_none() {
-            return false;
-        }
-
-        let visa_tuple = self.ftuple.as_ref().unwrap();
+        let visa_tuple = self.ftuple;
         if visa_tuple.source_addr != IpAddr::from(five_tuple.src_address) {
             return false;
         }
@@ -211,23 +207,6 @@ impl VisaTable {
         visa_table
     }
 
-    /// Insert a dummy visa (temporary functionality until visa bootstrapping works)
-    /// TODO: This is only used in tests we should remove this and also remove the Options from the Visa struct.
-    pub fn insert_id(&mut self, visa_id: VisaId, expiration: DateTime<Utc>) {
-        debug!(target: VISA_MGMT,
-            "Dummy visa inserted into VisaTable ID: {visa_id}, Expiration: {}",
-            expiration.format("%y-%m-%d %H:%M:%S"));
-        let visa = Visa::default();
-        let timeout = VisaTimeout {
-            id: visa_id,
-            expiration: expiration,
-        };
-        let _ = self.table.insert(visa_id, visa.clone());
-        self.timeout_queue.push(timeout);
-
-        self.lookup_table.insert_visa(visa_id, visa);
-    }
-
     /// Insert a visa from the Visa Service into the Visa Table
     pub fn insert_visa(&mut self, visa: vsapi_types::Visa) -> Result<VisaId, VisaTableError> {
         let visa_id = visa.issuer_id as i32;
@@ -322,15 +301,7 @@ impl VisaTable {
             .get(&visa_id)
             .ok_or(VisaTableError::NotFound(visa_id));
         match visa_query {
-            Ok(visa) => {
-                if let Some(ftuple) = &visa.ftuple {
-                    Ok(IpAddress::from(ftuple.dest_addr.clone()))
-                } else {
-                    Err(VisaTableError::ParseError(
-                        "visa missing destination address",
-                    ))
-                }
-            }
+            Ok(visa) => Ok(IpAddress::from(visa.ftuple.dest_addr.clone())),
             Err(e) => Err(e),
         }
     }
@@ -378,6 +349,24 @@ mod tests {
     use zpr_utils::net_defs;
     use zpr_utils::net_defs::ip_number;
 
+    /// Create a new vsapi_types::Visa, only having to specify the id and the expiration
+    pub fn new_vsapi_visa_tcp_default(issuer_id: u64, expires: SystemTime) -> vsapi_types::Visa {
+        vsapi_types::Visa::new(
+            issuer_id,
+            1,
+            expires,
+            [0; 4].into(),
+            [0; 4].into(),
+            vsapi_types::DockPep::TCP(vsapi_types::TcpUdpPep {
+                source_port: 0,
+                dest_port: 0,
+                endpoint: vsapi_types::EndpointT::Any,
+            }),
+            vsapi_types::KeySet::default(),
+            None,
+        )
+    }
+
     #[test]
     fn test_timeouts() {
         let mut builder = TestAssemblyBuilder::new();
@@ -389,9 +378,12 @@ mod tests {
         let visa2 = 67890;
         let visa3 = 234;
         let mut visa_table = asm.visa_table.write().unwrap();
-        visa_table.insert_id(visa1, DateTime::<Utc>::MIN_UTC); // An element that will timeout immediately
-        visa_table.insert_id(visa2, DateTime::<Utc>::MAX_UTC); // An element that won't timeout
-        visa_table.insert_id(visa3, Utc::now() + one_second); // An element that will time out in a second
+        let v1 = new_vsapi_visa_tcp_default(visa1 as u64, DateTime::<Utc>::MIN_UTC.into()); // An element that will timeout immediately
+        let v2 = new_vsapi_visa_tcp_default(visa2 as u64, DateTime::<Utc>::MAX_UTC.into()); // An element that won't timeout
+        let v3 = new_vsapi_visa_tcp_default(visa3 as u64, (Utc::now() + one_second).into()); // An element that will time out in a second
+        let _ = visa_table.insert_visa(v1);
+        let _ = visa_table.insert_visa(v2);
+        let _ = visa_table.insert_visa(v3); // An element that will time out in a second
 
         assert_eq!(3, visa_table.table.len());
         assert_eq!(3, visa_table.timeout_queue.len());
@@ -466,8 +458,10 @@ mod tests {
         assert_eq!(2, peer_state.pft.len());
 
         let mut visa_table = asm.visa_table.write().unwrap();
-        visa_table.insert_id(visa1, DateTime::<Utc>::MAX_UTC); // An element that won't timeout
-        visa_table.insert_id(visa2, Utc::now() + one_second); // An element that will time out in a second
+        let v1 = new_vsapi_visa_tcp_default(visa1 as u64, DateTime::<Utc>::MAX_UTC.into()); // An element that won't timeout
+        let v2 = new_vsapi_visa_tcp_default(visa2 as u64, (Utc::now() + one_second).into()); // An element that will time out in a second
+        let _ = visa_table.insert_visa(v1);
+        let _ = visa_table.insert_visa(v2);
         assert!(
             visa_table
                 .link_forwarding_entry(visa1, ForwardingEntry(link_id, tether_id1))
@@ -506,8 +500,8 @@ mod tests {
 
         let visa1 = make_tcp_visa(1000, &client1_addr, 0, &service_addr, 80, expires_ms, 100);
         let visa2 = make_tcp_visa(1001, &client2_addr, 0, &service_addr, 80, expires_ms, 100);
-
-        visa_table.insert_id(12345, DateTime::<Utc>::MAX_UTC);
+        let v1 = new_vsapi_visa_tcp_default(12345, DateTime::<Utc>::MAX_UTC.into());
+        let _ = visa_table.insert_visa(v1);
 
         let vid = visa_table.insert_visa(visa1).unwrap();
         assert_eq!(vid, 1000);
