@@ -3,6 +3,7 @@
 pub mod addrs;
 pub mod dn;
 pub mod packet_info;
+pub mod policy_types;
 pub mod rpc_commands;
 pub mod vsapi_types;
 pub mod vsapi_types_writers;
