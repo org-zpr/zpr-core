@@ -3,12 +3,14 @@
 pub mod addrs;
 pub mod dn;
 pub mod packet_info;
-pub mod policy_types;
 pub mod rpc_commands;
 #[cfg(feature = "vsapi")]
 pub mod vsapi_types;
 #[cfg(feature = "vsapi")]
 pub mod vsapi_types_writers;
+#[cfg(feature = "policy")]
+pub mod policy_types;
+
 
 #[cfg(feature = "admin-api")]
 capnp::generated_code!(pub mod cli_capnp);
