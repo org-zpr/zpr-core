@@ -20,9 +20,10 @@ env:
 jobs:
   build-test-check:
     name: zpr_crate
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.2
     with:
       name: 'zpr_crate'
       path: './zpr'
       needs-capnp: true
+      features: 'all'
     secrets: inherit

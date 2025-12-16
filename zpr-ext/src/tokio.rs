@@ -15,7 +15,7 @@ pub mod net {
 
     pub trait UdpSocketExt {
         fn mtu(&self) -> io::Result<u32>;
-        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        #[cfg(any(target_os = "android", target_os = "linux"))]
         fn attach_reuse_port_cbpf(&self, filter: &[libc::sock_filter]) -> io::Result<()>;
     }
 
@@ -37,7 +37,7 @@ pub mod net {
             return Ok(1400);
         }
 
-        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        #[cfg(any(target_os = "android", target_os = "linux"))]
         fn attach_reuse_port_cbpf(&self, filter: &[libc::sock_filter]) -> io::Result<()> {
             let fprog = libc::sock_fprog {
                 len: filter.len() as u16,

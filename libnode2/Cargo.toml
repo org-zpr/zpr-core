@@ -5,18 +5,18 @@ edition = "2024"
 license = "Apache-2.0"
 
 [dependencies]
-capnp-rpc = "0.23.0"
 capnp = "0.23.0"
-thiserror = "2.0.17"
-tracing = "0.1.41"
-tokio = { version = "1.48.0", features = ["full"] }
-tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
-openssl = "0.10.74"
+capnp-rpc = "0.23.0"
 clap = { version = "4.5.23", features = ["derive"], optional = true } # lnt
-tracing-subscriber = { version = "0.3.20", optional = true } # lnt
 ipnet = "2.11.0"
-zpr = { path = "../zpr" }
+openssl = "0.10.74"
 rustyline = { version = "17.0.2", optional = true } #lnt
+thiserror = "2.0.17"
+tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
+tokio = { version = "1.48.0", features = ["full"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", optional = true } # lnt
+zpr = { path = "../zpr", features = ["vsapi"]}
 
 [features]
 build-lnt = ["clap", "tracing-subscriber", "rustyline"]
@@ -25,5 +25,3 @@ build-lnt = ["clap", "tracing-subscriber", "rustyline"]
 name = "lntest"
 path = "src/bin/lntest.rs"
 required-features = ["build-lnt"]
-
-
