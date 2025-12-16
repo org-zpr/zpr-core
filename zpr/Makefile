@@ -4,7 +4,7 @@
 all: build
 
 build:
-	cargo build --all-targets
+	cargo build --all-targets -F all
 
 test:
 	cargo test --verbose
