@@ -236,7 +236,7 @@ impl Attribute {
         } else {
             write!(f, "{}", key).unwrap();
             if self.is_multi_valued() {
-                write!(f, "{}", "{}").unwrap();
+                write!(f, "{{}}").unwrap();
             }
             if self.optional {
                 write!(f, "?").unwrap();
@@ -270,7 +270,7 @@ impl Attribute {
     ///
     /// ## Panics
     /// - if passed `name` does not start with `zpr`.
-    pub fn must_zpr_internal_attr<S: Into<String>>(name: S, value: S) -> Self {
+    pub fn must_zpr_internal_attr<S: Into<String>, T: Into<String>>(name: S, value: T) -> Self {
         if let Some(name_without_domain) = name
             .into()
             .strip_prefix(&format!("{}.", ATTR_DOMAIN_ZPR_INTERNAL))
@@ -293,7 +293,7 @@ impl Attribute {
     ///
     /// ## Panics
     /// - if passed `name` does not start with `zpr`.
-    pub fn must_zpr_internal_attr_mv<S: Into<String>>(name: S, value: S) -> Self {
+    pub fn must_zpr_internal_attr_mv<S: Into<String>, T: Into<String>>(name: S, value: T) -> Self {
         if let Some(name_without_domain) = name
             .into()
             .strip_prefix(&format!("{}.", ATTR_DOMAIN_ZPR_INTERNAL))
