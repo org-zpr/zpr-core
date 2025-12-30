@@ -63,7 +63,7 @@ jobs:
   test-ph:
     name: PH
     needs: [build-ph]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.2
     with:
       name: 'ph'
       path: './adapter/ph'
@@ -74,7 +74,7 @@ jobs:
   test-ph-cli:
     name: PH CLI
     needs: [build-ph-cli]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.2
     with:
       name: 'ph-cli'
       path: './adapter/cli'
@@ -116,7 +116,7 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v6
+    - uses: actions/download-artifact@v7
       with:
         pattern: ph-*${{ matrix.os }}
         merge-multiple: true
@@ -180,7 +180,7 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v6
+    - uses: actions/download-artifact@v7
       with:
         pattern: ph-*${{ matrix.os }}
         merge-multiple: true

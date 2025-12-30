@@ -71,7 +71,7 @@ pub enum VisaOp {
     RevokeVisaId(u64),
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Constraints {
     /// not set or none means no bandwidth constraint
     pub bw: bool,
@@ -94,6 +94,29 @@ impl KeySet {
 }
 
 impl Visa {
+    /// Create a new Visa, given values
+    pub fn new(
+        issuer_id: u64,
+        config: i64,
+        expires: SystemTime,
+        source_addr: IpAddr,
+        dest_addr: IpAddr,
+        dock_pep: DockPep,
+        session_key: KeySet,
+        cons: Option<Constraints>,
+    ) -> Self {
+        Self {
+            issuer_id,
+            config,
+            expires,
+            source_addr,
+            dest_addr,
+            dock_pep,
+            session_key,
+            cons,
+        }
+    }
+
     /// Get the FiveTuple from a Visa
     pub fn get_five_tuple(&self) -> VsapiFiveTuple {
         let source_addr = self.source_addr;

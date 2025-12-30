@@ -3,6 +3,8 @@
 pub mod addrs;
 pub mod dn;
 pub mod packet_info;
+#[cfg(feature = "policy")]
+pub mod policy_types;
 pub mod rpc_commands;
 #[cfg(feature = "vsapi")]
 pub mod vsapi_types;
