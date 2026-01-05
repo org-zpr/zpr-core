@@ -42,9 +42,6 @@ test:
 
 deps: cbpf cslab zpr-ext
 
-submodules:
-	git submodule update --init --recursive
-
 libnode:
 	$(MAKE) -C libnode
 
@@ -72,6 +69,6 @@ zpr-crate-related:
 	$(MAKE) -C adapter/ph
 
 
-.PHONY: it-so it-gone test deps submodules libnode ph ph-cli diagrams cbpf cslab zpr-ext zpr-crate-related
+.PHONY: it-so it-gone test deps libnode ph ph-cli diagrams cbpf cslab zpr-ext zpr-crate-related
 
 .DEFAULT_GOAL := info
