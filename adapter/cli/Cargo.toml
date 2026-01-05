@@ -19,7 +19,7 @@ thiserror = { version = "2.0.17" }
 tokio-util = { version = "0.7.11", features = ["compat"] }
 tokio = { version = "1.37.0", features = ["macros", "rt", "io-util", "time"] }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "zerocopy"] }
-zpr = { git = "https://github.com/org-zpr/zpr.git", tag = "v0.1.0", features = ["admin-api"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.1.0", features = ["admin-api"] }
 
 [features]
 complete = ["clap_complete"]

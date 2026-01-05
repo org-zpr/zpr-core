@@ -14,6 +14,6 @@ tokio = { version = "1.40.0", features = ["full"] }
 tokio-util = { version = "0.7.12", features = ["rt"] }
 tracing = "0.1.40"
 vsapi = { git = "https://github.com/org-zpr/zpr-vsapi-rs.git", tag = "v0.4.1" }
-zpr = { git = "https://github.com/org-zpr/zpr.git", tag = "v0.1.0" }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.1.0" }
 zerocopy = { version = "0.8.3", features = ["derive", "std"] }
 zpr-utils = { path = "../zpr-utils" }
