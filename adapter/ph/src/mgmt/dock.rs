@@ -29,7 +29,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use tracing::*;
 use zpr::packet_info::{
-    DOCK_LINK_ID, ForwardingEntry, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, VisaId,
+    DOCK_LINK_ID, ForwardingEntry, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, VisaId,
 };
 use zpr::vsapi_types;
 
@@ -111,6 +111,7 @@ pub fn bind_actor_address(
     asm: &Arc<Assembly>,
     ingress_link_id: NonZero<LinkId>,
     txn_id: TxnId,
+    l3_type: L3Type,
     packet_body: &[u8],
 ) {
     debug!(
@@ -205,7 +206,7 @@ pub fn bind_actor_address(
 
     let visa_req = vsconn::VisaRequest {
         source_tether_addr: five_tuple.src_address.into(),
-        l3_type: five_tuple.l3_type, // TODO: this should come from the bind request, not the packet body
+        l3_type,
         packet: packet_body.to_vec(),
     };
 

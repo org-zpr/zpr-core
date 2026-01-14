@@ -245,6 +245,7 @@ pub fn send_bind_actor_address_request<'a>(
     asm: &'a Assembly,
     link_id: LinkId,
     txn_id: TxnId,
+    l3_type: L3Type,
     packet_body: &[u8],
 ) -> Sent<'a> {
     debug!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest with packet_body size {}", packet_body.len());
@@ -253,6 +254,7 @@ pub fn send_bind_actor_address_request<'a>(
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindActorAddressRequestHeader>();
     let endpoint_packet_length =
         std::cmp::min(config::BIND_REQUEST_MAX_PAYLOAD_LENGTH, packet_body.len());
+    bind_req_hdr.l3_type = l3_type;
     bind_req_hdr
         .endpoint_packet_length
         .set(endpoint_packet_length as u16);

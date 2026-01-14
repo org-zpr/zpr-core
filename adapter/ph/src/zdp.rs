@@ -214,6 +214,7 @@ pub struct ZdpTerminateLinkOrDockingSessionHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindActorAddressRequestHeader {
+    pub l3_type: L3Type,
     pub endpoint_packet_length: U16,
     // Followed in memory by:
     // - <PACKET BODY starting with IP header>

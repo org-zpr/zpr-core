@@ -730,6 +730,8 @@ pub async fn handle_bind_actor_address_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
+    let l3_type = hdr.l3_type;
+
     let endpoint_packet_length = hdr.endpoint_packet_length.get() as usize;
     if endpoint_packet_length > pkt.len() {
         return Err(HandleMgmtError::BadStructure);
@@ -746,7 +748,7 @@ pub async fn handle_bind_actor_address_request(
 
     debug!(target: ZDP, "Link {ingress_link_id}: handlers.handle_bind_actor_address_request");
 
-    dock::bind_actor_address(asm, ingress_link_id, txn_id, pkt.body());
+    dock::bind_actor_address(asm, ingress_link_id, txn_id, l3_type, pkt.body());
 
     Ok(())
 }

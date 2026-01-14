@@ -83,15 +83,20 @@ fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
     match asm.ph_mode {
-        PhMode::Adapter => {
-            mgmt::requests::send_bind_actor_address_request(asm, dock_link_id, txn_id, &packet_body)
-                .enqueue()
-        }
+        PhMode::Adapter => mgmt::requests::send_bind_actor_address_request(
+            asm,
+            dock_link_id,
+            txn_id,
+            five_tuple.l3_type,
+            &packet_body,
+        )
+        .enqueue(),
 
         PhMode::Node => mgmt::dock::bind_actor_address(
             asm,
             NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
             txn_id,
+            five_tuple.l3_type,
             &packet_body,
         ),
     }
