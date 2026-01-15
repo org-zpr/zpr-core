@@ -14,7 +14,7 @@ use tracing::*;
 
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
-use zpr::vsapi_types::{DenyCode, PacketDesc, Visa};
+use zpr::vsapi_types::{DenyCode, PacketDesc, Visa, VisaOp};
 use zpr::vsapi_types_writers::WriteTo;
 
 const PARAM_ZPR_ADDR: &str = "zpr_addr";
@@ -42,6 +42,7 @@ pub enum VSVisaDecision {
 /// Returns no error if call to VSAPI authenticate was successful.
 type VSConnectResponse = Result<(), VSApiError>;
 type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
+type VSRegisterVssResponse = Result<Vec<VisaOp>, VSApiError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -52,8 +53,9 @@ enum VS2Command {
     /// Run through the connect sequence. If connect succeeds the VSHandle is kept internally.
     Connect(VSConnectRequest, oneshot::Sender<VSConnectResponse>),
 
-    // TODO: rest of the vsapi commands
     VisaRequest(VSVisaRequest, oneshot::Sender<VSVisaResponse>),
+
+    RegisterVss(SocketAddr, oneshot::Sender<VSRegisterVssResponse>),
 }
 
 pub struct VSConn {
@@ -189,6 +191,20 @@ impl VSConn {
                             };
                             if let Err(e) = resp_tx.send(resp) {
                                 error!(target: VS_RPC, "failed to send visa_request response: {:?}", e);
+                            }
+                        }
+
+                        VS2Command::RegisterVss(saddr, resp_tx) => {
+                            debug!(target: VS_RPC, "VSConn: register_vss");
+                            let resp = if vs_handle.is_none() {
+                                Err(VSApiError::CommandFailed(
+                                    "not connected to VS-API".to_string(),
+                                ))
+                            } else {
+                                self.do_register_vss(vs_handle.as_ref().unwrap(), saddr).await
+                            };
+                            if let Err(e) = resp_tx.send(resp) {
+                                error!(target: VS_RPC, "failed to send register_vss response: {:?}", e);
                             }
                         }
                     }
@@ -331,6 +347,39 @@ impl VSConn {
             }
         }
     }
+
+    async fn do_register_vss(
+        &self,
+        vs_h: &vsapi2::v_s_handle::Client,
+        saddr: SocketAddr,
+    ) -> Result<Vec<VisaOp>, VSApiError> {
+        let mut rvs_request = vs_h.register_vss_request();
+        let mut saddr_bldr = rvs_request.get().init_addr();
+        saddr_bldr.set_port(saddr.port());
+
+        let mut ip_bldr = saddr_bldr.init_addr();
+        saddr.ip().write_to(&mut ip_bldr);
+
+        let rvs_response = rvs_request.send().promise.await?;
+        let ops_or_error = rvs_response.get()?.get_res()?;
+
+        match ops_or_error.which()? {
+            vsapi2::result::Which::Ok(ops_list) => {
+                let ops_list = ops_list?;
+                let mut visa_ops = Vec::new();
+                for i in 0..ops_list.len() {
+                    let cp_visa_op = ops_list.get(i);
+                    let visa_op = VisaOp::try_from(cp_visa_op)?;
+                    visa_ops.push(visa_op);
+                }
+                Ok(visa_ops)
+            }
+            vsapi2::result::Which::Error(err_obj) => {
+                let err_obj = err_obj?;
+                Err(new_coded_error(err_obj))
+            }
+        }
+    }
 }
 
 impl VSConnHandle {
@@ -357,6 +406,13 @@ impl VSConnHandle {
     pub async fn visa_request(&self, req: VSVisaRequest) -> Result<VSVisaDecision, VSApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::VisaRequest(req, resp_tx);
+        self.send_command(cmd).await?;
+        resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
+    }
+
+    pub async fn register_vss(&self, saddr: SocketAddr) -> Result<Vec<VisaOp>, VSApiError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = VS2Command::RegisterVss(saddr, resp_tx);
         self.send_command(cmd).await?;
         resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
     }

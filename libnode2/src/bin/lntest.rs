@@ -15,7 +15,7 @@ use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
 use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
 use zpr::packet_info::L3Type;
-use zpr::vsapi_types::{CommFlag, PacketDesc, VsapiFiveTuple};
+use zpr::vsapi_types::{CommFlag, PacketDesc, VisaOp, VsapiFiveTuple};
 
 /// lntest: test tool for libnode2
 ///
@@ -47,8 +47,10 @@ struct Args {
 }
 
 enum Cmd {
+    Nop,
     Disconnect,
     VisaRequest(VsapiFiveTuple),
+    RegisterVss(SocketAddr),
 }
 
 fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
@@ -64,6 +66,15 @@ fn parse_command(input: &str) -> Result<Cmd, String> {
         return Err("does not compte".into());
     }
     match parts[0] {
+        "h" => {
+            println!("commands:");
+            println!("  h                        : print this help");
+            println!("  exit | quit | q          : disconnect and exit");
+            println!("  visa_request             : send a visa request");
+            println!("  register_vss <ADDR:PORT> : call registerVss");
+            Ok(Cmd::Nop)
+        }
+
         "exit" | "quit" | "q" => Ok(Cmd::Disconnect),
 
         // TODO: parse quit here too
@@ -93,7 +104,17 @@ fn parse_command(input: &str) -> Result<Cmd, String> {
                 dst_port,
             )))
         }
-        _ => Err("does not compute".into()),
+
+        "register_vss" => {
+            if parts.len() != 2 {
+                return Err("usage: register_vss <ADDR:PORT>".into());
+            }
+            let saddr: SocketAddr = parts[1]
+                .parse()
+                .map_err(|e| format!("invalid socket address '{}': {}", parts[1], e))?;
+            Ok(Cmd::RegisterVss(saddr))
+        }
+        _ => Err("does not compute: type 'h' for help".into()),
     }
 }
 
@@ -158,6 +179,7 @@ async fn main() {
                 tokio::select! {
                     Some(cmd) = cmd_rx.recv() => {
                         match cmd {
+                            Cmd::Nop => {}
                             Cmd::Disconnect => break,
                             Cmd::VisaRequest(five_tuple) => {
                                 let pdesc = PacketDesc {
@@ -175,6 +197,27 @@ async fn main() {
                                     }
                                     Err(e) => {
                                         println!("visa_request failed: {:?}", e);
+                                    }
+                                }
+                            },
+                            Cmd::RegisterVss(saddr) => {
+                                let res = handle.register_vss(saddr).await;
+                                match res {
+                                    Ok(ops) => {
+                                        println!("register_vss succeeded");
+                                        for vo in &ops {
+                                            match vo {
+                                                VisaOp::Grant(v) => {
+                                                    println!("  visa id: {}", v.issuer_id);
+                                                }
+                                                VisaOp::RevokeVisaId(vid) => {
+                                                    println!("  revoke visa id: {}", vid);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        println!("register_vss failed: {:?}", e);
                                     }
                                 }
                             }
