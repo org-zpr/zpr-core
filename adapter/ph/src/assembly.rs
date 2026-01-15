@@ -87,7 +87,7 @@ pub struct Assembly {
     pub peer_table: peer_table::PeerTable,
 
     // Adapter tables
-    pub alt: adapter_tables::ActorLookupTable,
+    pub elt: adapter_tables::EndpointLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
 
     pub mgmt_dispatch_factory: MgmtDispatchFactory,
@@ -461,7 +461,7 @@ pub mod test {
         pub counters: Option<Counters>,
         pub tun_ctl: Option<Box<dyn TunCtl + Send>>,
         pub peer_table: Option<peer_table::PeerTable>,
-        pub alt: Option<adapter_tables::ActorLookupTable>,
+        pub elt: Option<adapter_tables::EndpointLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub mgmt_dispatch_factory: Option<MgmtDispatchFactory>,
         pub adapter_manager_factory: Option<AdapterManagerFactory>,
@@ -522,9 +522,9 @@ pub mod test {
         let peer_table = builder
             .peer_table
             .unwrap_or_else(|| peer_table::PeerTable::new());
-        let alt = builder
-            .alt
-            .unwrap_or_else(|| adapter_tables::ActorLookupTable::new());
+        let elt = builder
+            .elt
+            .unwrap_or_else(|| adapter_tables::EndpointLookupTable::new());
         let dlt = builder
             .dlt
             .unwrap_or_else(|| adapter_tables::DockLookupTable::new());
@@ -568,7 +568,7 @@ pub mod test {
             counters,
             tun_ctl,
             peer_table,
-            alt,
+            elt,
             dlt,
             mgmt_dispatch_factory,
             adapter_manager_factory,

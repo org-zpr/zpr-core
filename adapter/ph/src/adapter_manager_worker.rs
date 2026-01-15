@@ -67,9 +67,9 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
 
     let txn_id = txn.id();
 
-    // mark ALT entry as pending to attempt to (i.e. racily) prevent
+    // mark ELT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
-    match asm.alt.insert_pending(five_tuple, pkt, &txn) {
+    match asm.elt.insert_pending(five_tuple, pkt, &txn) {
         Ok(()) => (),
 
         Err(adapter_tables::InsertPendingError::AlreadyPending(_pkt)) => {
@@ -112,9 +112,9 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
                 }
 
                 Err(err) => {
-                    // Bind failed; remove pending entry from ALT.
+                    // Bind failed; remove pending entry from ELT.
                     debug!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
-                    asm.alt.remove(&five_tuple).unwrap();
+                    asm.elt.remove(&five_tuple).unwrap();
                 }
             }
         }

@@ -3,7 +3,7 @@
 //! General rule: no fastpath operation may block.
 //! This implies that all functions here must be non-async.
 
-use crate::adapter_tables::AltEntry;
+use crate::adapter_tables::EltEntry;
 use crate::assembly::{Assembly, PhMode};
 use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
@@ -298,9 +298,9 @@ impl FastpathWorker {
     pub fn actor_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
         // note: this weird two-phase structure is needed to appease the borrow checker
         let forward = {
-            // lookup five tuple in ALT
+            // lookup five tuple in ELT
             let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
-            let Some(entry) = self.asm.alt.get(&five_tuple) else {
+            let Some(entry) = self.asm.elt.get(&five_tuple) else {
                 if !allow_bind_request {
                     // avoid the (all-but purely theoretical) chance of a packet loop,
                     // when this is initiated due to a requeue from bind setup code
@@ -320,7 +320,7 @@ impl FastpathWorker {
             };
 
             match &*entry {
-                AltEntry::Active(pep) => {
+                EltEntry::Active(pep) => {
                     // compute A2A MAC
                     // TODO: use actual A2A SAID & keyed hash
                     let a2a_said: A2aSaid = 0;
@@ -348,7 +348,7 @@ impl FastpathWorker {
                     true
                 }
 
-                AltEntry::Pending(..) => {
+                EltEntry::Pending(..) => {
                     // do not forward
                     false
                 }

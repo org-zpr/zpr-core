@@ -1,5 +1,5 @@
 use super::txn_mgr;
-use crate::adapter_tables::AltPep;
+use crate::adapter_tables::EltPep;
 use crate::assembly::Assembly;
 use crate::counters::ManagementCounterType;
 use crate::logging::targets::FLOW_MGMT;
@@ -13,7 +13,7 @@ pub enum InstallTetherError {
     NoSuchTransaction,
 }
 
-/// Install the given tether into the ALT.
+/// Install the given tether into the ELT.
 ///
 /// Completes the indicated transaction.
 ///
@@ -25,7 +25,7 @@ pub fn install_tether(
     tc: tc::Ip5TupleTc,
 ) -> Result<(), InstallTetherError> {
     let five_tuple = asm
-        .alt
+        .elt
         .lookup_pending(txn)
         .map_err(|_| InstallTetherError::NoSuchTransaction)?;
 
@@ -35,19 +35,19 @@ pub fn install_tether(
         != tc::Ip5TupleTc::new_with_compression_mode(tc.compression_mode(), five_tuple).five_tuple()
     {
         error!(target: FLOW_MGMT, "Bind of {five_tuple} falied: node supplied TC incompatible with initial packet: {tc}");
-        asm.alt.remove(&five_tuple).unwrap();
+        asm.elt.remove(&five_tuple).unwrap();
         return Ok(());
     }
 
-    // Bind succeeded; add to ALT.
+    // Bind succeeded; add to ELT.
     debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
 
-    let pep = AltPep {
+    let pep = EltPep {
         compression_mode: tc.compression_mode(),
         tether_id,
     };
 
-    let Ok(initial_packet) = asm.alt.set_active(&five_tuple, pep) else {
+    let Ok(initial_packet) = asm.elt.set_active(&five_tuple, pep) else {
         // The only way for a transaction to have exited pending (i.e.,
         // either error from set_active()) at this point (after our earlier
         // lookup of the 5t) is because we got some other response to this
@@ -82,7 +82,7 @@ pub fn deny_tether(
     reason: &str,
 ) -> Result<(), InstallTetherError> {
     let five_tuple = asm
-        .alt
+        .elt
         .lookup_pending(txn)
         .map_err(|_| InstallTetherError::NoSuchTransaction)?;
 
@@ -97,7 +97,7 @@ pub fn deny_tether(
     //
     // We ignore that possibility.
 
-    match asm.alt.remove(&five_tuple) {
+    match asm.elt.remove(&five_tuple) {
         Ok(_) => Ok(()),
         Err(_) => Err(InstallTetherError::NoSuchTransaction),
     }

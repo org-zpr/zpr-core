@@ -1,6 +1,6 @@
 //! Adapter lookup tables
 //!
-//! These tables hold the state of all tethers on an adapter, outbound (ALT) or inbound (DLT).
+//! These tables hold the state of all tethers on an adapter, outbound (ELT) or inbound (DLT).
 //!
 //! RFC 6.5 § 5.1
 
@@ -20,31 +20,31 @@ use zpr::packet_info::{CompressionMode, StreamId};
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 
 #[derive(Clone, Copy)]
-pub struct AltPep {
+pub struct EltPep {
     pub compression_mode: CompressionMode,
     pub tether_id: StreamId,
 }
 
-pub enum AltEntry {
+pub enum EltEntry {
     /// We've requested a tether ID for this flow, but haven't received one yet.
     Pending(Packet, TxnHandle),
     /// There is currently a tether allocated for this flow.
-    Active(AltPep),
+    Active(EltPep),
 }
 
-/// The Actor Lookup Table (ALT) holds all state of outbound tethers.
+/// The Endpoint Lookup Table (ELT) holds all state of outbound tethers.
 ///
 /// It is used to map five-tuples (from the endpoint) to compression
 /// specifications and tether IDs (for the dock).
-pub struct ActorLookupTable {
-    table: DashMap<FiveTuple, AltEntry>,
+pub struct EndpointLookupTable {
+    table: DashMap<FiveTuple, EltEntry>,
     pending: DashMap<TxnHandle, FiveTuple>,
 }
 
-pub struct AltEntryGuard<'a>(DashMapRef<'a, FiveTuple, AltEntry>);
+pub struct EltEntryGuard<'a>(DashMapRef<'a, FiveTuple, EltEntry>);
 
-impl std::ops::Deref for AltEntryGuard<'_> {
-    type Target = AltEntry;
+impl std::ops::Deref for EltEntryGuard<'_> {
+    type Target = EltEntry;
 
     fn deref(&self) -> &Self::Target {
         self.0.deref()
@@ -77,8 +77,8 @@ pub enum RemoveError {
 }
 
 pub enum SetActiveError {
-    NotFound(AltPep),
-    NotPending(AltPep),
+    NotFound(EltPep),
+    NotPending(EltPep),
 }
 
 impl std::fmt::Debug for SetActiveError {
@@ -90,7 +90,7 @@ impl std::fmt::Debug for SetActiveError {
     }
 }
 
-impl ActorLookupTable {
+impl EndpointLookupTable {
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),
@@ -111,7 +111,7 @@ impl ActorLookupTable {
                 if self.pending.insert(txn.clone(), five_tuple).is_some() {
                     return Err(InsertPendingError::DuplicateTransaction(init_packet));
                 }
-                entry.insert(AltEntry::Pending(init_packet, txn.clone()));
+                entry.insert(EltEntry::Pending(init_packet, txn.clone()));
                 Ok(())
             }
         }
@@ -124,25 +124,25 @@ impl ActorLookupTable {
     pub fn set_active(
         &self,
         five_tuple: &FiveTuple,
-        pep: AltPep,
+        pep: EltPep,
     ) -> Result<Packet, SetActiveError> {
         let Some(mut entry) = self.table.get_mut(five_tuple) else {
             return Err(SetActiveError::NotFound(pep));
         };
 
-        if !matches!(entry.value(), AltEntry::Pending(..)) {
+        if !matches!(entry.value(), EltEntry::Pending(..)) {
             return Err(SetActiveError::NotPending(pep));
         }
 
-        let AltEntry::Pending(packet, txn) =
-            std::mem::replace(entry.value_mut(), AltEntry::Active(pep))
+        let EltEntry::Pending(packet, txn) =
+            std::mem::replace(entry.value_mut(), EltEntry::Active(pep))
         else {
             unreachable!();
         };
 
         assert!(
             matches!(self.pending.remove(&txn), Some((_txn, ft)) if &ft == five_tuple),
-            "ALT consistency error"
+            "ELT consistency error"
         );
 
         Ok(packet)
@@ -152,24 +152,24 @@ impl ActorLookupTable {
     pub fn inspect<T>(
         &self,
         five_tuple: &FiveTuple,
-        inspector: impl FnOnce(&AltEntry) -> T,
+        inspector: impl FnOnce(&EltEntry) -> T,
     ) -> Option<T> {
         self.table.get(five_tuple).map(|entry| inspector(&*entry))
     }
 
-    pub fn get(&self, five_tuple: &FiveTuple) -> Option<AltEntryGuard<'_>> {
-        self.table.get(five_tuple).map(AltEntryGuard)
+    pub fn get(&self, five_tuple: &FiveTuple) -> Option<EltEntryGuard<'_>> {
+        self.table.get(five_tuple).map(EltEntryGuard)
     }
 
-    pub fn remove(&self, five_tuple: &FiveTuple) -> Result<AltEntry, RemoveError> {
+    pub fn remove(&self, five_tuple: &FiveTuple) -> Result<EltEntry, RemoveError> {
         let (_, entry) = self.table.remove(five_tuple).ok_or(RemoveError::NotFound)?;
 
         match &entry {
-            AltEntry::Pending(_, txn) => assert!(
+            EltEntry::Pending(_, txn) => assert!(
                 matches!(self.pending.remove(&txn), Some((_txn, ft)) if &ft == five_tuple),
-                "ALT consistency error"
+                "ELT consistency error"
             ),
-            AltEntry::Active(_) => (),
+            EltEntry::Active(_) => (),
         }
 
         Ok(entry)

@@ -557,7 +557,7 @@ fn main() -> ExitCode {
         counters: Default::default(),
         tun_ctl,
         peer_table: peer_table::PeerTable::new(),
-        alt: adapter_tables::ActorLookupTable::new(),
+        elt: adapter_tables::EndpointLookupTable::new(),
         dlt: adapter_tables::DockLookupTable::new(),
         mgmt_dispatch_factory: MgmtDispatchFactory::new(md_inq_factory),
         adapter_manager_factory: AdapterManagerFactory::new(am_inq_factory),

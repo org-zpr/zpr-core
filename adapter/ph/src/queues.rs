@@ -309,11 +309,11 @@ impl AdapterManager {
     /// specified packet.
     ///
     /// While awaiting a tether ID, the five-tuple will be marked pending in
-    /// the ALT.  (Note that this occurs asynchronously!  Ensure that this
+    /// the ELT.  (Note that this occurs asynchronously!  Ensure that this
     /// race is benign for your use case before relying on the pending mark.)
     ///
     /// After a tether ID is received, a PEP will be added to
-    /// the ALT, and an attempt will be made to send the specified packet.
+    /// the ELT, and an attempt will be made to send the specified packet.
     ///
     /// The specified packet must have already been classified.
     pub fn try_request_tether_id(&mut self, packet: Packet) -> Result<(), TryEnqueueError<Packet>> {
