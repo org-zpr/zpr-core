@@ -150,10 +150,6 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 handlers::handle_terminate_link_or_docking_session(asm, pkt).await
             }
 
-            ZdpPacketType::TerminateLinkResponse => {
-                handlers::handle_terminate_response(asm, pkt).await
-            }
-
             ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, pkt).await,
 
             ZdpPacketType::HelloResponse => handlers::handle_hello_response(asm, pkt).await,

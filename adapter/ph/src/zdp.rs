@@ -38,7 +38,7 @@ pub enum ZdpPacketType {
     EchoRequest = 131,
     Unused132 = 132,
     TerminateLinkOrDockingSession = 133,
-    TerminateLinkResponse = 134,
+    Unused134 = 134,
     Unused135 = 135,
     HelloRequest = 136,
     HelloResponse = 137,
@@ -208,14 +208,6 @@ pub struct ZdpTerminateLinkOrDockingSessionHeader {
     pub reason_code: TerminateReason,
     pub data_len: u8,
     // followed by reason detail
-}
-
-/// Terminate Link Response (§ 6.3.3)
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpTerminateLinkResponseHeader {
-    pub response_code: ResponseCode,
-    pub data_len: u8,
 }
 
 /// Bind Actor Address request (§ 6.3.11)

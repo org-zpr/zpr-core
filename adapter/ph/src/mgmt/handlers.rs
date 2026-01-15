@@ -197,43 +197,10 @@ pub async fn handle_terminate_link_or_docking_session(
 
     info!(target: ZDP, "Received Terminate Link or Docking Session for link {ingress_link_id}");
 
-    let response_code = match asm.process_link_state_event(
+    let _ = asm.process_link_state_event(
         ingress_link_id,
         LinkEvent::ReceivedTerminateLink(hdr.reason_code),
-    ) {
-        Ok(_) => zdp::ResponseCode::Success,
-        Err(_) => zdp::ResponseCode::Other,
-    };
-
-    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpTerminateLinkResponseHeader>();
-    hdr.response_code = response_code;
-
-    super::core::send_non_flow_mgmt(
-        asm,
-        ingress_link_id,
-        zdp::ZdpPacketType::TerminateLinkResponse,
-        rsp_pkt,
-    )
-    .await?;
-
-    // Tell state machine we sent a TerminateLinkResponse. This will trigger `clean_up_link_state`.
-    let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
-
-    Ok(())
-}
-
-pub async fn handle_terminate_response(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
-    let Ok(hdr) = zdp::ZdpTerminateLinkResponseHeader::read_from_buf(&mut pkt) else {
-        return Err(HandleMgmtError::BadStructure);
-    };
-
-    let link_id = pkt.metadata().ingress_link_id;
-    let resp_code = hdr.response_code;
-    debug!(target: ZDP, "Link {link_id}: received TerminateLinkResponse, status: {resp_code:?}");
-    let _ignore_errors = asm
-        .process_link_state_event(link_id, LinkEvent::ReceivedTerminateResponse(resp_code))
-        .map_err(|_| ());
+    );
 
     Ok(())
 }

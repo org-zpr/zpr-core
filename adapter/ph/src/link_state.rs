@@ -158,8 +158,7 @@ pub enum LinkEvent {
     ReceivedAuthorizeResponse(IpAddress), // from visa service
     ReceivedKeepAliveResponse,
     ReceivedTerminateLink(TerminateReason),
-    ReceivedTerminateResponse(ResponseCode),
-    SentTerminate,
+    ReceivedTerminateAck,
     Close(TerminateReason),
     CloseDone,
     Error,
@@ -453,8 +452,7 @@ impl LinkStateWrapper {
             }
 
             LinkEvent::ReceivedTerminateLink(code) => self.process_terminate_link(asm, code),
-            LinkEvent::ReceivedTerminateResponse(_) => self.process_terminate_response(asm),
-            LinkEvent::SentTerminate => Ok(self.clean_up_link_state(asm).detach_all()),
+            LinkEvent::ReceivedTerminateAck => self.process_terminate_ack(asm),
             LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
             LinkEvent::Close(code) => self.initiate_close(asm, code),
             LinkEvent::CloseDone => Ok(self.complete_close(asm)),
@@ -1448,7 +1446,23 @@ impl LinkStateWrapper {
         // If this timeout fires, we end up going to `clean_up_link_state`.
         // If we get a response to our terminate we also go to `clean_up_link_state`.
         self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_TERMINATE_TIMEOUT);
-        mgmt::requests::send_terminate_link_or_docking_session(asm, self.id, reason).enqueue();
+        let task_asm = asm.clone();
+        let ingress_link_id = self.id;
+        tokio::task::spawn_local(async move {
+            let acked = mgmt::requests::send_terminate_link_or_docking_session(
+                &task_asm,
+                ingress_link_id,
+                reason,
+            )
+            .acked();
+            match acked.await {
+                Ok(()) => {
+                    let _ = task_asm
+                        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedTerminateAck);
+                }
+                Err(mgmt::core::MgmtSendError::LinkClosed) => (),
+            }
+        });
         Ok(())
     }
 
@@ -1578,22 +1592,22 @@ impl LinkStateWrapper {
         let _ = self.clean_up_link_state(asm).join_all().await;
     }
 
-    /// Handle a terminate response packet.
+    /// Handle a terminate link acknowledgement.
     /// This means we sent a terminate request and set a timeout. Timeout is cancelled here
     /// before we proceed with shutting down the link.
-    fn process_terminate_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_terminate_ack(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,"Received terminate response for link {link_id}");
-        let state = self.locked_fsm.lock().unwrap().state;
-        match state {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        match locked_fsm.state {
             LinkState::Closing => {
-                self.locked_fsm.lock().unwrap().cancel_timeout();
+                locked_fsm.cancel_timeout();
                 self.clean_up_link_state(asm).detach_all();
                 Ok(())
             }
             _ => Err(LinkStateError::UnexpectedTransition(
-                state,
-                "ReceivedTerminateResponse",
+                locked_fsm.state,
+                "ReceivedTerminateAck",
             )),
         }
     }
@@ -1601,9 +1615,6 @@ impl LinkStateWrapper {
     /// Peer has sent a terminate-link message.
     /// May generate a thrift message (over TUN) to the visa service.
     /// Peer has shut down or shutting down so don't expect it to be there anymore.
-    ////
-    /// Transitions to closing.  The state machine is now stuck waiting for
-    /// a SentTerminate event which triggers `clean_up_link_state`.
     ///
     /// Returns Ok unless this is in a state that cannot handle this message.
     fn process_terminate_link(
