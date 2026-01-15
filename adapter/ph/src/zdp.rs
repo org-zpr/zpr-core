@@ -37,9 +37,9 @@ pub enum ZdpPacketType {
     Discard = 130,
     EchoRequest = 131,
     Unused132 = 132,
-    TerminateLinkRequest = 133,
+    TerminateLinkOrDockingSession = 133,
     TerminateLinkResponse = 134,
-    TerminateLinkIndication = 135,
+    Unused135 = 135,
     HelloRequest = 136,
     HelloResponse = 137,
     ConfigurationRequest = 138,
@@ -201,20 +201,13 @@ pub enum TerminateReason {
     Shutdown = 4, // quell any restart behavior
 }
 
-/// Terminate Link Indication (§ 6.3.3)
+/// Terminate Link or Docking Session (TODO: document)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpTerminateLinkIndicationHeader {
+pub struct ZdpTerminateLinkOrDockingSessionHeader {
     pub reason_code: TerminateReason,
     pub data_len: u8,
-}
-
-/// Terminate Link Request (§ 6.3.3)
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpTerminateLinkRequestHeader {
-    pub reason_code: TerminateReason,
-    pub data_len: u8,
+    // followed by reason detail
 }
 
 /// Terminate Link Response (§ 6.3.3)

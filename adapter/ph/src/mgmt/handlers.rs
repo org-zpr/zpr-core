@@ -181,22 +181,25 @@ pub async fn handle_init_authentication_request(
     Ok(())
 }
 
-/// handle a Terminate Request (RFC 6.5 § 6.3.3)
+/// handle a Terminate Link or Docking Session message (TODO: document in RFC 17)
 ///
-/// Sends [LinkEvent::ReceivedTerminateRequest] into the link state machine.
+/// Sends [LinkEvent::ReceivedTerminateLink] into the link state machine.
 /// Sends a ZdpTerminateResponse message back to the sender.
 /// Sends a [LinkEvent::SentTerminate] event into the link state machine.
-pub async fn handle_terminate_request(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
+pub async fn handle_terminate_link_or_docking_session(
+    asm: &Arc<Assembly>,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-    let Ok(hdr) = zdp::ZdpTerminateLinkRequestHeader::read_from_buf(&mut pkt) else {
+    let Ok(hdr) = zdp::ZdpTerminateLinkOrDockingSessionHeader::read_from_buf(&mut pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
 
-    info!(target: ZDP, "Received Terminate Request for link {ingress_link_id}");
+    info!(target: ZDP, "Received Terminate Link or Docking Session for link {ingress_link_id}");
 
     let response_code = match asm.process_link_state_event(
         ingress_link_id,
-        LinkEvent::ReceivedTerminateRequest(hdr.reason_code),
+        LinkEvent::ReceivedTerminateLink(hdr.reason_code),
     ) {
         Ok(_) => zdp::ResponseCode::Success,
         Err(_) => zdp::ResponseCode::Other,
@@ -232,22 +235,6 @@ pub async fn handle_terminate_response(asm: &Arc<Assembly>, mut pkt: Packet) -> 
         .process_link_state_event(link_id, LinkEvent::ReceivedTerminateResponse(resp_code))
         .map_err(|_| ());
 
-    Ok(())
-}
-
-/// handle a Terminate Indication (RFC 6.5 § 6.3.3)
-pub async fn handle_terminate_indication(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
-    let ingress_link_id = pkt.metadata().ingress_link_id;
-    let Ok(hdr) = zdp::ZdpTerminateLinkIndicationHeader::read_from_buf(&mut pkt) else {
-        return Err(HandleMgmtError::BadStructure);
-    };
-
-    debug!(target: ZDP, "Received Terminate Indication for link {ingress_link_id}");
-
-    let _ignore_errors = asm.process_link_state_event(
-        ingress_link_id,
-        LinkEvent::ReceivedTerminateIndication(hdr.reason_code),
-    );
     Ok(())
 }
 

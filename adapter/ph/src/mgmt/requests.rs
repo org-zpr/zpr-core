@@ -224,33 +224,21 @@ pub fn send_grant_zpr_address_request<'a>(
     )
 }
 
-/// send a Terminate Request (RFC 6.5 § 6.3.3)
-pub fn send_terminate_request<'a, 'pktbuf>(
+/// send a Terminate Link or Docking Session message (TODO: document)
+pub fn send_terminate_link_or_docking_session<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: LinkId,
     reason: zdp::TerminateReason,
 ) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
-    pkt.push_header(&zdp::ZdpTerminateLinkRequestHeader {
+    pkt.push_header(&zdp::ZdpTerminateLinkOrDockingSessionHeader {
         reason_code: reason,
         data_len: 0,
     });
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::TerminateLinkRequest, pkt)
-}
-
-/// send a Terminate Indication (RFC 6.5 § 6.3.3)
-pub fn send_terminate_indication<'a, 'pktbuf>(
-    asm: &Assembly,
-    link_id: LinkId,
-    reason: zdp::TerminateReason,
-) -> Sent<'_> {
-    let mut pkt = core::new_heap_packet();
-    let hdr = pkt.alloc_zeroed_header::<zdp::ZdpTerminateLinkIndicationHeader>();
-    hdr.reason_code = reason;
     core::send_non_flow_mgmt(
         asm,
         link_id,
-        zdp::ZdpPacketType::TerminateLinkIndication,
+        zdp::ZdpPacketType::TerminateLinkOrDockingSession,
         pkt,
     )
 }

@@ -157,9 +157,8 @@ pub enum LinkEvent {
 
     ReceivedAuthorizeResponse(IpAddress), // from visa service
     ReceivedKeepAliveResponse,
-    ReceivedTerminateRequest(TerminateReason),
+    ReceivedTerminateLink(TerminateReason),
     ReceivedTerminateResponse(ResponseCode),
-    ReceivedTerminateIndication(TerminateReason),
     SentTerminate,
     Close(TerminateReason),
     CloseDone,
@@ -453,11 +452,8 @@ impl LinkStateWrapper {
                 self.process_authorize_response(asm, zpr_addr)
             }
 
-            LinkEvent::ReceivedTerminateRequest(code) => self.process_terminate_request(asm, code),
+            LinkEvent::ReceivedTerminateLink(code) => self.process_terminate_link(asm, code),
             LinkEvent::ReceivedTerminateResponse(_) => self.process_terminate_response(asm),
-            LinkEvent::ReceivedTerminateIndication(code) => {
-                self.process_terminate_indication(asm, code)
-            }
             LinkEvent::SentTerminate => Ok(self.clean_up_link_state(asm).detach_all()),
             LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
             LinkEvent::Close(code) => self.initiate_close(asm, code),
@@ -1396,43 +1392,6 @@ impl LinkStateWrapper {
         }
     }
 
-    /// Validate a received terminate request
-    /// May generate a thrift message (over TUN) to the visa service.
-    ///
-    /// Unless we are inactive, this transitions to closing. The state machine is now
-    /// stuck waiting for a SentTerminate event which triggers `clean_up_link_state`.
-    ///
-    /// Returns Ok unless this is in a state that cannot handle this message.
-    fn process_terminate_request(
-        &self,
-        asm: &Arc<Assembly>,
-        reason: TerminateReason,
-    ) -> Result<(), LinkStateError> {
-        let link_id = self.id;
-        info!(target: LINK_STATE,
-            "Received terminate request on link {link_id} for reason {reason:?}"
-        );
-
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-
-        match (self.link_type, locked_fsm.state) {
-            (_, LinkState::Inactive) => Err(LinkStateError::UnexpectedTransition(
-                locked_fsm.state,
-                "ReceivedTerminateRequest",
-            )),
-
-            (ltype, _lstate) => {
-                if ltype == LinkType::NodeToAdapter {
-                    // If this was from our special friend, the visa service adapter, then de-register.
-                    // TODO: The de-register message never makes it across before link closes.
-                    self.disconnect_visa_service_client(asm, true);
-                }
-                locked_fsm.set_state(LinkState::Closing);
-                Ok(())
-            }
-        }
-    }
-
     /// Nodes only. Check if this is the link to the adapter in front of the visa service
     /// and if so try to de-register this node from the VS and also stop the VSConn.
     ///
@@ -1489,7 +1448,7 @@ impl LinkStateWrapper {
         // If this timeout fires, we end up going to `clean_up_link_state`.
         // If we get a response to our terminate we also go to `clean_up_link_state`.
         self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_TERMINATE_TIMEOUT);
-        mgmt::requests::send_terminate_request(asm, self.id, reason).enqueue();
+        mgmt::requests::send_terminate_link_or_docking_session(asm, self.id, reason).enqueue();
         Ok(())
     }
 
@@ -1610,7 +1569,12 @@ impl LinkStateWrapper {
             .lock()
             .unwrap()
             .set_state(LinkState::Resetting);
-        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset).enqueue();
+        mgmt::requests::send_terminate_link_or_docking_session(
+            asm,
+            link_id,
+            TerminateReason::Reset,
+        )
+        .enqueue();
         let _ = self.clean_up_link_state(asm).join_all().await;
     }
 
@@ -1634,22 +1598,30 @@ impl LinkStateWrapper {
         }
     }
 
-    /// Peer has sent a terminate-indication message.
+    /// Peer has sent a terminate-link message.
+    /// May generate a thrift message (over TUN) to the visa service.
     /// Peer has shut down or shutting down so don't expect it to be there anymore.
-    fn process_terminate_indication(
+    ////
+    /// Transitions to closing.  The state machine is now stuck waiting for
+    /// a SentTerminate event which triggers `clean_up_link_state`.
+    ///
+    /// Returns Ok unless this is in a state that cannot handle this message.
+    fn process_terminate_link(
         &self,
         asm: &Arc<Assembly>,
         reason: TerminateReason,
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,
-            "Received terminate indication for link {link_id} with reason {reason:?}"
+            "Received terminate for link {link_id} with reason {reason:?}"
         );
         self.locked_fsm
             .lock()
             .unwrap()
             .set_state(LinkState::Closing);
         if self.link_type == LinkType::NodeToAdapter {
+            // If this was from our special friend, the visa service adapter, then de-register.
+            // TODO: The de-register message never makes it across before link closes.
             self.disconnect_visa_service_client(asm, true);
         }
         self.clean_up_link_state(asm).detach_all();
