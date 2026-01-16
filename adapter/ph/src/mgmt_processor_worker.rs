@@ -41,7 +41,7 @@ pub async fn launch(
                         if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::Error) {
                             error!(target: LINK_STATE, "Error handling link error on link {link_id}: {e}");
                         }
-                        mgmt::core::count_event(&asm, err.into());
+                        mgmt::core::count_event(&asm, (&err).into());
                     }
                 }
             }

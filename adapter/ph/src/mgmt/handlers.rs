@@ -44,17 +44,21 @@ pub enum HandleMgmtError {
     #[error("unknown transaction")]
     UnknownTransaction,
 
+    #[error("link state error: {0}")]
+    LinkStateError(#[from] LinkStateError),
+
     #[error("link closed")]
     LinkClosed,
 }
 
-impl From<HandleMgmtError> for counters::ManagementCounterType {
-    fn from(err: HandleMgmtError) -> Self {
+impl From<&HandleMgmtError> for counters::ManagementCounterType {
+    fn from(err: &HandleMgmtError) -> Self {
         match err {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::MessageNotPermitted => Self::OtherError,
             HandleMgmtError::UnknownTransaction => Self::UnknownTransaction,
+            HandleMgmtError::LinkStateError(_) => Self::OtherError,
             HandleMgmtError::LinkClosed => Self::OtherError,
         }
     }
@@ -86,33 +90,6 @@ impl From<dock::InstallTetherError> for HandleMgmtError {
 }
 
 pub type HandleMgmtResult = Result<(), HandleMgmtError>;
-
-/// Fire an event into the given link state machine. If there is an event handler error
-/// it will be returned but only after we try to send in an ERROR event which should
-/// end up triggering a link shutdown.
-///
-/// The error result is returned for informational purposes only. If you are getting an
-/// error we have already logged it and have attempted to send an Error event into the
-/// link state machine.
-fn dispatch_link_state_event_or_error(
-    asm: &Arc<Assembly>,
-    link_id: LinkId,
-    event: LinkEvent,
-) -> Result<(), LinkStateError> {
-    if let Err(ls_err) = asm.process_link_state_event(link_id, event) {
-        error!(target: ZDP, "Link {link_id} failed to process link state event:  {ls_err}");
-        match asm.process_link_state_event(link_id, LinkEvent::Error) {
-            Err(e) => {
-                // TODO: I assume this is possible if we for example have async closed the link.
-                error!(target: ZDP, "Link {link_id}: failed to process Error event: {e}");
-            }
-            Ok(()) => (),
-        }
-        Err(ls_err)
-    } else {
-        Ok(())
-    }
-}
 
 /// handle a Report message (RFC 6.5 § 6.3.13)
 pub async fn handle_report(_asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
@@ -193,11 +170,10 @@ pub async fn handle_init_authentication_request(
         challenge_opt = None;
     }
 
-    let _ = dispatch_link_state_event_or_error(
-        asm,
+    asm.process_link_state_event(
         ingress_link_id,
         LinkEvent::ReceivedInitAuth((is_bootstrap, challenge_opt)),
-    );
+    )?;
 
     Ok(())
 }
@@ -218,10 +194,10 @@ pub async fn handle_terminate_link_or_docking_session(
 
     info!(target: ZDP, "Received Terminate Link or Docking Session for link {ingress_link_id}");
 
-    let _ = asm.process_link_state_event(
+    asm.process_link_state_event(
         ingress_link_id,
         LinkEvent::ReceivedTerminateLink(hdr.reason_code),
-    );
+    )?;
 
     Ok(())
 }
@@ -262,11 +238,13 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    let response_status =
-        match asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest) {
-            Err(_) => zdp::ResponseCode::Other,
-            Ok(()) => zdp::ResponseCode::Success,
-        };
+    let hello_status =
+        asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest);
+
+    let response_status = match hello_status {
+        Err(_) => zdp::ResponseCode::Other,
+        Ok(()) => zdp::ResponseCode::Success,
+    };
 
     let mut aaa_address: Option<IpAddress> = None;
 
@@ -331,29 +309,9 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
     )
     .await?;
 
-    let close_link = if response_status == zdp::ResponseCode::Success {
-        match asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse) {
-            Err(e) => {
-                error!(target: ZDP, "Link {ingress_link_id}: Failed to process SentHelloResponse event: {:?}", e);
-                true
-            }
-            Ok(()) => false,
-        }
-    } else {
-        // TODO: The framework within which this function is called does not allow us to
-        // return an error back which would trigger a link shutdown.  So we do it manually
-        // and just return Ok() though things are not in fact OK.
-        info!(target: ZDP, "Link {ingress_link_id}: HelloRequest processing failed, shutting down link");
-        true
-    };
-    if close_link {
-        match asm.process_link_state_event(ingress_link_id, LinkEvent::Error) {
-            Err(e) => {
-                error!(target: ZDP, "Link {ingress_link_id}: failed to process Error event: {e}");
-            }
-            Ok(()) => (),
-        }
-    }
+    hello_status?;
+
+    asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse)?;
 
     Ok(())
 }
@@ -447,11 +405,10 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
         Some(asa_addresses)
     };
 
-    let _ = dispatch_link_state_event_or_error(
-        asm,
+    asm.process_link_state_event(
         link_id,
         LinkEvent::ReceivedHelloResponse(status, aaa_address.unwrap(), maybe_asa_addrs),
-    );
+    )?;
 
     Ok(())
 }
@@ -519,11 +476,10 @@ pub async fn handle_acquire_zpr_address_request(
 
     debug!(target: ZDP, "Link {}: received Acquire ZPR Address Request for link with addresses {:?}", ingress_link_id, actor_addresses);
 
-    let _ = dispatch_link_state_event_or_error(
-        asm,
+    asm.process_link_state_event(
         ingress_link_id,
         LinkEvent::ReceivedAcquireZprAddressRequest(actor_addresses, blob),
-    );
+    )?;
 
     Ok(())
 }
@@ -563,16 +519,11 @@ pub async fn handle_grant_zpr_address_request(
         }
     };
 
-    let processing_result = asm.process_link_state_event(
+    asm.process_link_state_event(
         ingress_link_id,
         LinkEvent::ReceivedGrantZprAddressRequest(grant_event_payload),
-    );
+    )?;
 
-    // If we got an error from the state machine, send an error back into it.
-    if let Err(e) = processing_result {
-        error!(target: ZDP, "Link {ingress_link_id}: Failed to process GrantZprAddressRequest event: {:?}", e);
-        let _ignore_errors = asm.process_link_state_event(ingress_link_id, LinkEvent::Error);
-    }
     Ok(())
 }
 
