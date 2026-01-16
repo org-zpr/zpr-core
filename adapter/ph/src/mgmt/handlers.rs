@@ -5,7 +5,7 @@
 //! "smarts" in this module.  (FIXME: this is currently not true!)
 
 use super::txn_mgr::TxnId;
-use super::{adapter, dock, txn_mgr};
+use super::{adapter, dock};
 use crate::assembly::{Assembly, PhMode, VERSION};
 use crate::auth;
 use crate::config;
@@ -764,7 +764,7 @@ fn parse_grant_zpr_address_request(
 /// handle a Bind Actor Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_actor_address_request(
     asm: &Arc<Assembly>,
-    txn_id: txn_mgr::TxnId,
+    txn_id: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     if !matches!(asm.ph_mode, PhMode::Node) {

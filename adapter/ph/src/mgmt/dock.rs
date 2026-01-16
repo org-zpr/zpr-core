@@ -486,13 +486,13 @@ fn requested_tether_granted(
     // Send a success response to the requestor with the tether ID.
 
     if ingress_peer_state.is_internal() {
-        let dock_peer_state = asm.peer_table.get(DOCK_LINK_ID).unwrap();
-        let Some(txn) = dock_peer_state.txn_mgr.get(txn_id) else {
-            // adapter no longer has this transaction; ignore
-            return;
-        };
-
-        let _ = adapter::install_tether(asm, &txn, ingress_tether_id, tc); // ignore missing transaction
+        let adapter_peer_state = asm.peer_table.get(DOCK_LINK_ID).unwrap();
+        let txn = adapter_peer_state
+            .txn_mgr
+            .get(txn_id)
+            .expect("local adapter lost transaction");
+        adapter::install_tether(asm, &txn, ingress_tether_id, tc)
+            .expect("local adapter rejected tether response");
     } else {
         requests::send_bind_actor_address_success_response(
             asm,
@@ -560,13 +560,12 @@ fn bind_actor_address_reject(
     // Send an error response to the requestor.
 
     if ingress_peer_state.is_internal() {
-        let dock_peer_state = asm.peer_table.get(DOCK_LINK_ID).unwrap();
-        let Some(txn) = dock_peer_state.txn_mgr.get(txn_id) else {
-            // adapter no longer has this transaction; ignore
-            return;
-        };
-
-        let _ = adapter::deny_tether(asm, &txn, reason); // ignore missing transaciton
+        let adapter_peer_state = asm.peer_table.get(DOCK_LINK_ID).unwrap();
+        let txn = adapter_peer_state
+            .txn_mgr
+            .get(txn_id)
+            .expect("local adapter lost transaction");
+        adapter::deny_tether(asm, &txn, reason).expect("local adapter rejected tether response");
     } else {
         requests::send_bind_actor_address_error_response(
             asm,
