@@ -15,7 +15,7 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{DenyCode, PacketDesc, Visa, VisaOp};
-use zpr::vsapi_types_writers::WriteTo;
+use zpr::write_to::WriteTo;
 
 const PARAM_ZPR_ADDR: &str = "zpr_addr";
 const PARAM_AAA_PREFIX: &str = "aaa_prefix";
