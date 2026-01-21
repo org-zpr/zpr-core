@@ -13,46 +13,37 @@ use zpr::packet_info::{
 pub enum ZdpPacketType {
     // Flow-based
     TransitPacket = 0,
-    Unused1 = 1,
-    DestinationUnreachable = 2,
-    VisaHeraldRequest = 3,
-    VisaHeraldResponse = 4,
-    VisaUpdateRequest = 5,
-    VisaUpdateResponse = 6,
-    VisaRetractRequest = 7,
-    VisaRetractResponse = 8,
-    VisaDeacceptIndication = 9,
-    VisaDeacceptAcknowledgement = 10,
-    BindActorAddressRequest = 11,
-    BindActorAddressResponse = 12,
-    UnbindActorAddressRequest = 13,
-    UnbindActorAddressResponse = 14,
-    SetPathMtu = 17,
-    BindEgressStreamRequest = 19,  // TODO: add to RFC 17
-    BindEgressStreamResponse = 20, // TODO: add to RFC 17
+    DestinationUnreachable = 1,
+    SetPathMtu = 2,
+    StreamIdRequest = 3,
+    StreamIdResponse = 4,
+    StreamIdWithdrawl = 5,
+    BindActorAddressRequest = 6,
+    BindActorAddressResponse = 7,
+    BindEgressStreamRequest = 8,  // TODO: add to RFC 17
+    BindEgressStreamResponse = 9, // TODO: add to RFC 17
+    // UnbindActorAddressRequest = 13,
+    // UnbindActorAddressResponse = 14,
 
     // Not flow-based
     ZprArp = 128,
     KeyManagement = 129,
     Discard = 130,
     EchoRequest = 131,
-    Unused132 = 132,
-    TerminateLinkRequest = 133,
-    TerminateLinkResponse = 134,
-    TerminateLinkIndication = 135,
-    HelloRequest = 136,
-    HelloResponse = 137,
-    ConfigurationRequest = 138,
-    ConfigurationResponse = 139,
-    AcquireZprAddressRequest = 140, // TODO: add to RFC 6
-    Unused142 = 142,
-    UnregisterActorAddressRequest = 143,
-    UnregisterActorAddressResponse = 144,
-    Report = 145,
-    InitAuthenticationRequest = 146, // TODO: add to RFC 6
-    Unused147 = 147,
-    GrantZprAddressRequest = 148, // TODO: add to RFC 6
-    Unused149 = 149,
+    Report = 132,
+    TerminateLinkOrDocking = 133,
+    HelloRequest = 134,
+    HelloResponse = 135,
+    ConfigurationRequest = 136,
+    ConfigurationResponse = 137,
+    AcquireZprAddress = 138, // TODO: add to RFC 6
+    GrantZprAddress = 139,   // TODO: add to RFC 6
+    RevokeZprAddress = 140,
+    InitAuthenticationRequest = 141, // TODO: add to RFC 6
+
+    // Should these be deleted? They are still in use, but no longer in RFC 17
+    TerminateLinkResponse = 142,
+    TerminateLinkIndication = 143,
 
     Acknowledgement = 254,
     Reserved255 = 255,
@@ -171,7 +162,7 @@ pub struct ZdpInitAuthenticationRequestHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpAcquireZprAddressRequestHeader {
+pub struct ZdpAcquireZprAddressHeader {
     pub blob_len: U16,
     pub ip_version: L3Type, // Length of address determined by IP type
     pub addr_count: u8,
@@ -182,7 +173,7 @@ pub struct ZdpAcquireZprAddressRequestHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpGrantZprAddressRequestHeader {
+pub struct ZdpGrantZprAddressHeader {
     pub status_code: ResponseCode,
     pub ip_version: L3Type, // Length of address determined by IP type
     pub addr_count: u8,

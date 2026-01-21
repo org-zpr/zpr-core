@@ -329,7 +329,7 @@ function get_tlv_val_type(type, len)
     return tlv_val_bytes
 end
 
-function handle_bind_agent_addr_req(management)
+function handle_bind_actor_addr_req(management)
     management:add_field(trans_id, BIND_TRANS_ID)
     local version = management:add_field_and_return(ip_version, IP_VERSION)
     local compression_mode = management:add_field_and_return(comp_mode, COMP_MODE)
@@ -359,7 +359,7 @@ function handle_bind_agent_addr_req(management)
     end
 end
 
-function handle_bind_agent_addr_res(management)
+function handle_bind_actor_addr_res(management)
     management:add_field(trans_id, BIND_TRANS_ID)
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     local info = management:add_field_and_return(info_len, INFO_LEN)
@@ -470,18 +470,18 @@ end
 
 management_table = 
 {
-    [11] = handle_bind_agent_addr_req,
-    [12] = handle_bind_agent_addr_res,
+    [6] = handle_bind_actor_addr_req,
+    [7] = handle_bind_actor_addr_res,
     [131] = handle_echo,
     [133] = handle_terminate_ind_req,
-    [134] = handle_terminate_res,
-    [135] = handle_terminate_ind_req,
-    [136] = handle_hello_req,
-    [137] = handle_hello_res,
-    [140] = handle_acquire_zpr_addr_req,
-    [145] = handle_report,
-    [146] = handle_init_authentication_req,
-    [148] = handle_grant_zpr_addr_req,
+    [142] = handle_terminate_res,
+    [143] = handle_terminate_ind_req,
+    [134] = handle_hello_req,
+    [135] = handle_hello_res,
+    [138] = handle_acquire_zpr_addr_req,
+    [132] = handle_report,
+    [141] = handle_init_authentication_req,
+    [139] = handle_grant_zpr_addr_req,
 }
 
 presence_value = 
@@ -496,10 +496,10 @@ function get_type_name(type)
     local type_name = type_name_table[type]
 
     if type_name ~= nil then return type_name
-    elseif type >= 19 and type <= 95 then type_name = "Unallocated"
-    elseif type >= 96 and type <= 126 then type_name = "Reserved for private use and experimentation"
-    elseif type >= 150 and type <= 223 then type_name = "Unallocated"
-    elseif type >= 224 and type <= 254 then type_name = "Experimental and Private Use" end
+    elseif type >= 10 and type <= 95 then type_name = "Unallocated"
+    elseif type >= 96 and type <= 126 then type_name = "Reserved: Experimental and Private Use"
+    elseif type >= 142 and type <= 223 then type_name = "Unallocated"
+    elseif type >= 224 and type <= 253 then type_name = "Reserved: Experimental and Private Use" end
 
     return type_name
 end 
@@ -507,49 +507,36 @@ end
 type_name_table =
 {
     [0] = "Transit Packet",
-    [1] = "Unused",
-    [2] = "Destination Unreachable",
-    [3] = "Visa Herald Request",
-    [4] = "Visa Herald Response",
-    [5] = "Visa Update Request", -- not in rfc
-    [6] = "Visa Update Response", -- not in rfc
-    [7] = "Visa Retract Request",
-    [8] = "Visa Retract Response",
-    [9] = "Visa Deaccept Indication", -- differs from rfc
-    [10] = "Visa Deaccept Acknowledgement", -- differs from rfc
+    [1] = "Destination Unreachable",
+    [2] = "Set Path MTU",
+    [3] = "Stream ID Request",
+    [4] = "Stream ID Response",
+    [5] = "Stream ID Withdrawl",
+    [6] = "Bind Actor Address Request",
+    [7] = "Bind Actor Address Response",
+    [8] = "Bind Egress Stream Request",
+    [9] = "Bind Egress Stream Response",
+    [10] = "Visa Deaccept Acknowledgement",
     [11] = "Bind Actor Address Request",
-    [12] = "Bind Actor Address Response",
-    [13] = "Unbind Actor Address Request",
-    [14] = "Unbind Actor Address Response",
-    [15] = "Unused",
-    [16] = "Unused",
-    [17] = "Set Path MTU",
-    [18] = "Unused",
-    [127] = "Reserved, Discard", -- not in zdp.rs
+    [127] = "Reserved: Must not be used",
     [128] = "ZPR ARP",
     [129] = "Key Management",
     [130] = "Discard",
     [131] = "Echo Request",
-    [132] = "Unused", -- not in rfc
-    [133] = "Terminate Link Request", -- rfcs also include docking in terminate
-    [134] = "Terminate Link Response",
-    [135] = "Terminate Link Indication",
-    [136] = "Hello Request",
-    [137] = "Hello Response",
-    [138] = "Configuration Request",
-    [139] = "Configuration Response",
-    [140] = "Acquire ZPR Address Request",
-    [141] = "Unused",
-    [142] = "Unused", -- differs from rfc
-    [143] = "Unregister Actor Address Request", -- differs from rfc
-    [144] = "Unregister Actor Address Response", -- differs from rfc
-    [145] = "Report",
-    [146] = "Init Authentication Request",
-    [147] = "Unused", -- differs from rfc
-    [148] = "Grant ZPR Address Request",
-    [149] = "Unused", -- differs from rfc
+    [132] = "Report",
+    [133] = "Terminate Link or Docking Session",
+    [134] = "Hello Request",
+    [135] = "Hello Response",
+    [136] = "Configuration Request",
+    [137] = "Configuration Response",
+    [138] = "Acquire ZPR Address",
+    [139] = "Grant ZPR Address",
+    [140] = "Revoke ZPR Address",
+    [141] = "Init Authentication Request",
+    [142] = "Terminate Link Response", -- not in rfc
+    [143] = "Terminate Link Indication", -- not in rfc
     [254] = "Acknowledgement",
-    [255] = "Reserved, must not be used",
+    [255] = "Reserved: Must not be used",
 }
 
 terminate_reason_table =

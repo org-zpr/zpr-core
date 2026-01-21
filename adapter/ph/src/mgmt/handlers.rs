@@ -610,7 +610,7 @@ pub async fn handle_grant_zpr_address_request(
 fn parse_acquire_zpr_address_request(
     pkt: &mut Packet,
 ) -> Result<(Option<Vec<IpAddress>>, String), HandleMgmtError> {
-    let Ok(hdr) = zdp::ZdpAcquireZprAddressRequestHeader::read_from_buf(pkt) else {
+    let Ok(hdr) = zdp::ZdpAcquireZprAddressHeader::read_from_buf(pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
 
@@ -690,7 +690,7 @@ fn parse_acquire_zpr_address_request(
 fn parse_grant_zpr_address_request(
     pkt: &mut Packet,
 ) -> Result<Result<Vec<IpAddress>, zdp::ResponseCode>, HandleMgmtError> {
-    let Ok(hdr) = zdp::ZdpGrantZprAddressRequestHeader::read_from_buf(pkt) else {
+    let Ok(hdr) = zdp::ZdpGrantZprAddressHeader::read_from_buf(pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
 

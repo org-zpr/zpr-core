@@ -129,7 +129,7 @@ pub fn send_acquire_zpr_address_request<'a>(
     } else {
         actor_addrs[0].l3_type()
     };
-    let hdr = zdp::ZdpAcquireZprAddressRequestHeader {
+    let hdr = zdp::ZdpAcquireZprAddressHeader {
         blob_len: (blob.len() as u16).into(),
         ip_version,
         addr_count: actor_addrs.len() as u8,
@@ -157,12 +157,7 @@ pub fn send_acquire_zpr_address_request<'a>(
         }
     }
 
-    core::send_non_flow_mgmt(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::AcquireZprAddressRequest,
-        req,
-    )
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::AcquireZprAddress, req)
 }
 
 /// Send an GrantZprAddressRequest (TODO: not yet in RFC 6)
@@ -189,7 +184,7 @@ pub fn send_grant_zpr_address_request<'a>(
     } else {
         actor_addrs[0].l3_type()
     };
-    let hdr = zdp::ZdpGrantZprAddressRequestHeader {
+    let hdr = zdp::ZdpGrantZprAddressHeader {
         status_code,
         ip_version,
         addr_count: actor_addrs.len() as u8,
@@ -216,12 +211,7 @@ pub fn send_grant_zpr_address_request<'a>(
         }
     }
 
-    core::send_non_flow_mgmt(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::GrantZprAddressRequest,
-        req,
-    )
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::GrantZprAddress, req)
 }
 
 /// send a Terminate Request (RFC 6.5 § 6.3.3)
@@ -235,7 +225,12 @@ pub fn send_terminate_request<'a, 'pktbuf>(
         reason_code: reason,
         data_len: 0,
     });
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::TerminateLinkRequest, pkt)
+    core::send_non_flow_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::TerminateLinkOrDocking,
+        pkt,
+    )
 }
 
 /// send a Terminate Indication (RFC 6.5 § 6.3.3)
