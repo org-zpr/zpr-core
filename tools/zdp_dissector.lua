@@ -3,79 +3,86 @@
 zdp_proto = Proto("zdp", "ZDP Header Dissector")
 
 -- ZDP Headers 
-zpi_val = ProtoField.uint8("zdp.zpi", "ZPI", base.DEC)
-zdp_type = ProtoField.uint8("zdp.type", "Type", base.DEC)
-excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
-seq_num = ProtoField.uint64("zdp.seq_num", "Sequence Number", base.DEC)
-stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
-pad = ProtoField.bytes("zdp.pad", "Pad")
-hmac = ProtoField.bytes("zdp.mac", "HMAC")
+a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.HEX)
 a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.HEX)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
-a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.HEX)
+excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
+hmac = ProtoField.bytes("zdp.mac", "HMAC")
 management_packet = ProtoField.bytes("zdp.management", "Management Packet")
+pad = ProtoField.bytes("zdp.pad", "Pad")
+seq_num = ProtoField.uint64("zdp.seq_num", "Sequence Number", base.DEC)
+stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
+zdp_type = ProtoField.uint8("zdp.type", "Type", base.DEC)
+zpi_val = ProtoField.uint8("zdp.zpi", "ZPI", base.DEC)
 
 -- Agent Packet Headers
-ip_version = ProtoField.uint8("zdp.ip_version", "IP Version", base.DEC)
-ihl = ProtoField.uint8("zdp.ihl", "Internet Header Length", base.DEC)
+fl = ProtoField.uint32("zdp.fl", "Flow Label", base.DEC)
 frag_id = ProtoField.uint16("zdp.frag_id", "Fragment ID", base.DEC)
 frag_offset = ProtoField.uint16("zdp.frag_offset", "Fragment Offset", base.DEC)
-ttl = ProtoField.uint8("zdp.ttl", "Time to Live", base.DEC)
-tc = ProtoField.uint8("zdp.tc", "Traffic Class", base.DEC)
-fl = ProtoField.uint32("zdp.fl", "Flow Label", base.DEC)
 hop_limit = ProtoField.uint8("zdp.hop_limit", "Hop Limit", base.DEC)
+ihl = ProtoField.uint8("zdp.ihl", "Internet Header Length", base.DEC)
+ip_version = ProtoField.uint8("zdp.ip_version", "IP Version", base.DEC)
+tc = ProtoField.uint8("zdp.tc", "Traffic Class", base.DEC)
+ttl = ProtoField.uint8("zdp.ttl", "Time to Live", base.DEC)
 -- dscp = ProtoField.uint8("zdp.dscp", "Differentiated Services Code Point", base.DEC)
 -- ip_options = ProtoField.bytes("zdp.ip_options", "IP Options")
 
 -- Management Data
-trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
+additional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
+addr_count = ProtoField.uint8("zdp.addr_count", "Address Count", base.DEC)
 adl = ProtoField.uint16("zdp.adl", "Additional Data Length", base.DEC)
-reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
-response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
+blob = ProtoField.bytes("zdp.blob", "Blob")
+blob_len = ProtoField.uint16("zdp.blob_len", "Blob Length", base.DEC)
+bootstrap_support = ProtoField.uint8("zdp.bootstrap", "Bootstrap Support Flag")
+comp_mode = ProtoField.uint8("zdp.comp_mode", "Compression Mode", base.HEX)
+ctime = ProtoField.uint64("zdp.ctime", "CTime", base.DEC)
 data_length_u8 = ProtoField.uint8("zdp.data_len_t", "Data Length", base.DEC)
 data_length_u16 = ProtoField.uint16("zdp.data_len_i", "Data Length", base.DEC)
-additional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
-source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
-dest_port_present = ProtoField.uint8("zdp.dest_port_present", "Destination Port Information Present", base.DEC)
-source_addr_v4 = ProtoField.ipv4("zdp.source_addr_v4", "Source IP Address")
 dest_addr_v4 = ProtoField.ipv4("zdp.dest_addr_v4", "Destination IP Address")
-source_addr_v6 = ProtoField.ipv6("zdp.source_addr_v6", "Source IP Address")
 dest_addr_v6 = ProtoField.ipv6("zdp.dest_addr_v6", "Destination IP Address")
+dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
+dest_port_present = ProtoField.uint8("zdp.dest_port_present", "Destination Port Information Present", base.DEC)
+info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
 ipv4_addr = ProtoField.ipv4("zdp.ipv4", "IP Address")
 ipv6_addr = ProtoField.ipv6("zdp.ipv6", "IP Address")
+nonce = ProtoField.uint64("zdp.nonce", "Nonce", base.HEX)
+reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
+response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
+source_addr_v4 = ProtoField.ipv4("zdp.source_addr_v4", "Source IP Address")
+source_addr_v6 = ProtoField.ipv6("zdp.source_addr_v6", "Source IP Address")
 source_info = ProtoField.uint16("zdp.source_info", "Source Port Information", base.DEC)
-dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
+source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
 status_code = ProtoField.uint8("zdp.status_code", "Status Code", base.DEC)
-info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
 status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
-comp_mode = ProtoField.uint8("zdp.comp_mode", "Compression Mode", base.HEX)
-tlv_type = ProtoField.uint8("zdp.tlv_type", "TLV Type", base.DEC)
 tlv_len = ProtoField.uint8("zdp.tlv_length", "TLV Length", base.DEC)
-tlv_val_u16 = ProtoField.uint16("zdp.tlv_u16", "TLV Value", base.DEC)
+tlv_type = ProtoField.uint8("zdp.tlv_type", "TLV Type", base.DEC)
+tlv_val_bytes = ProtoField.bytes("zdp.tlv_bytes", "TLV Value")
 tlv_val_i64 = ProtoField.int64("zdp.tlv_u64", "TLV Value", base.DEC)
-tlv_val_str = ProtoField.string("zdp.tlv_string", "TLV Value", base.ASCII)
 tlv_val_ipv4 = ProtoField.ipv4("zdp.tlv_ipv4", "TLV Value", base.DEC)
 tlv_val_ipv6 = ProtoField.ipv6("zdp.tlv_ipv6", "TLV Value", base.DEC)
-tlv_val_bytes = ProtoField.bytes("zdp.tlv_bytes", "TLV Value")
-bootstrap_support = ProtoField.uint8("zdp.bootstrap", "Bootstrap Support Flag")
-blob_len = ProtoField.uint16("zdp.blob_len", "Blob Length", base.DEC)
-addr_count = ProtoField.uint8("zdp.addr_count", "Address Count", base.DEC)
-blob = ProtoField.bytes("zdp.blob", "Blob")
-nonce = ProtoField.uint64("zdp.nonce", "Nonce", base.HEX)
-ctime = ProtoField.uint64("zdp.ctime", "CTime", base.DEC)
+tlv_val_str = ProtoField.string("zdp.tlv_string", "TLV Value", base.ASCII)
+tlv_val_u16 = ProtoField.uint16("zdp.tlv_u16", "TLV Value", base.DEC)
+trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
 -- ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
 -- req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
 -- ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
 
-zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
-                     hmac, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
-                     ihl, frag_id, frag_offset, ttl, tc, fl, hop_limit, trans_id,
-                     adl, additional_data, source_port_present, nonce, ctime,
-                     dest_port_present, source_addr_v4, source_addr_v6, dest_addr_v4, dest_addr_v6, source_info, 
-                     dest_info, status_code, info_len, status_info, reason_code, response_code, data_length_u8, data_length_u16,
-                     comp_mode, tlv_type, tlv_len, tlv_val_u16, tlv_val_i64, tlv_val_str, tlv_val_ipv4, 
-                     tlv_val_ipv6, tlv_val_bytes, bootstrap_support, blob_len, addr_count, blob, ipv4_addr, ipv6_addr, }
-                     --  dscp, ip_options, req_seq_num, ip_protocol_present, ip_protocol
+
+
+zdp_proto.fields = { 
+    -- ZDP Headers
+    a2a_mac, a2a_said, agent_packet, excess_len, hmac, management_packet, pad,
+    seq_num, stream_id, zdp_type, zpi_val,
+    -- Agent Packet Headers
+    fl, frag_id, frag_offset, hop_limit, ihl, ip_version, tc, ttl,
+    -- Management Data
+    additional_data, addr_count, adl, blob, blob_len, bootstrap_support, comp_mode,
+    ctime, data_length_u8, data_length_u16, dest_addr_v4, dest_addr_v6, dest_info, 
+    dest_port_present, info_len, ipv4_addr, ipv6_addr, nonce, reason_code, 
+    response_code, source_addr_v4, source_addr_v6, source_info, source_port_present,
+    status_code, status_info, tlv_len, tlv_type, tlv_val_bytes, tlv_val_i64, 
+    tlv_val_ipv4, tlv_val_ipv6, tlv_val_str, tlv_val_u16, trans_id,
+}
 
 -- Lengths of fields when using Noise Encryption
 A2A_SAID = 1
