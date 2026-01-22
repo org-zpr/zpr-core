@@ -238,41 +238,33 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    let hello_status =
-        asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest);
+    asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)?;
 
-    let response_status = match hello_status {
-        Err(_) => zdp::ResponseCode::Other,
-        Ok(()) => zdp::ResponseCode::Success,
+    // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
+    // or if we do not have an external authentication service available.  For simplicity we just
+    // always hand one out.
+    let mut address_pool = asm.address_pool.lock().unwrap();
+    let Some(pool) = address_pool.as_mut() else {
+        // Programming error: if we are a node, we must have a pool.
+        panic!("adapter (node) handling a hello-request missing address pool");
     };
 
-    let mut aaa_address: Option<IpAddress> = None;
+    let aaa_address = pool.get_aaa_address();
+    debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
+        pool.len());
 
-    if response_status == zdp::ResponseCode::Success {
-        // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
-        // or if we do not have an external authentication service available.  For simplicity we just
-        // always hand one out.
-        if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
-            let addr = pool.get_aaa_address();
-            debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr} (active pool size: {})",
-                pool.len());
-            aaa_address = Some(addr);
-
-            // Store the AAA in the link memory so we can free it later.
-            match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(addr)) {
-                Err(e) => {
-                    // Highly improbable
-                    panic!("Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
-                }
-                Ok(()) => (),
-            }
-        } else {
-            // Programming error: if we are a node, we must have a pool.
-            panic!("adapter (node) handling a hello-request missing address pool");
+    // Store the AAA in the link memory so we can free it later.
+    match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(aaa_address)) {
+        Err(e) => {
+            // Highly improbable
+            panic!("Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
         }
+        Ok(()) => (),
     }
 
-    hdr.status = response_status;
+    drop(address_pool);
+
+    hdr.status = zdp::ResponseCode::Success;
 
     // Policy ID and version are always included, even if not SUCCESS.
     let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
@@ -280,26 +272,24 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
     TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
     super::helpers::put_window_size_tlv(&asm, ingress_link_id, &mut rsp_pkt);
 
-    if response_status == zdp::ResponseCode::Success {
-        let svclist = asm.vs_auth_services.read().unwrap();
-        if svclist.is_valid() {
-            // If we have a list of services, include them in the response.
-            // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
-            for authservice in &svclist.services {
-                if let Some(sa) = authservice.get_socket_addr() {
-                    debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - adding ASA address: {sa}");
-                    TlvEncoding::new_asa(sa).put(&mut rsp_pkt);
-                } else {
-                    warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
-                }
+    let svclist = asm.vs_auth_services.read().unwrap();
+    if svclist.is_valid() {
+        // If we have a list of services, include them in the response.
+        // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
+        for authservice in &svclist.services {
+            if let Some(sa) = authservice.get_socket_addr() {
+                debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - adding ASA address: {sa}");
+                TlvEncoding::new_asa(sa).put(&mut rsp_pkt);
+            } else {
+                warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
             }
-        } else {
-            warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - no valid auth services available");
         }
-        if let Some(aaa_addr) = aaa_address {
-            TlvEncoding::new_aaa(aaa_addr).put(&mut rsp_pkt);
-        }
+    } else {
+        warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - no valid auth services available");
     }
+    drop(svclist);
+
+    TlvEncoding::new_aaa(aaa_address).put(&mut rsp_pkt);
 
     super::core::send_non_flow_mgmt(
         asm,
@@ -308,8 +298,6 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         rsp_pkt,
     )
     .await?;
-
-    hello_status?;
 
     asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse)?;
 
