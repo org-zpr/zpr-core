@@ -1,20 +1,19 @@
 //! Handlers for management requests.
 //!
 //! These handlers just decode the packet and forward work to whatever
-//! internal API is responsible for handling it.  There are (should be) no
-//! "smarts" in this module.  (FIXME: this is currently not true!)
+//! internal API is responsible for handling it.  There are no "smarts" in
+//! this module.
 
 use super::txn_mgr::TxnId;
 use super::{adapter, dock};
-use crate::assembly::{Assembly, PhMode, VERSION};
+use crate::assembly::{Assembly, PhMode};
 use crate::auth;
-use crate::config;
 use crate::counters;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::packet::Packet;
 use crate::tc;
-use crate::tlv::{self, TlvEncoding};
+use crate::tlv;
 use crate::zdp;
 use bytes::Buf;
 use std::net::SocketAddr;
@@ -235,71 +234,7 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         }
     }
 
-    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
-
     asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)?;
-
-    // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
-    // or if we do not have an external authentication service available.  For simplicity we just
-    // always hand one out.
-    let mut address_pool = asm.address_pool.lock().unwrap();
-    let Some(pool) = address_pool.as_mut() else {
-        // Programming error: if we are a node, we must have a pool.
-        panic!("adapter (node) handling a hello-request missing address pool");
-    };
-
-    let aaa_address = pool.get_aaa_address();
-    debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
-        pool.len());
-
-    // Store the AAA in the link memory so we can free it later.
-    match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(aaa_address)) {
-        Err(e) => {
-            // Highly improbable
-            panic!("Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
-        }
-        Ok(()) => (),
-    }
-
-    drop(address_pool);
-
-    hdr.status = zdp::ResponseCode::Success;
-
-    // Policy ID and version are always included, even if not SUCCESS.
-    let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
-    TlvEncoding::new_policy_id(policy_id).put(&mut rsp_pkt);
-    TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
-    super::helpers::put_window_size_tlv(&asm, ingress_link_id, &mut rsp_pkt);
-
-    let svclist = asm.vs_auth_services.read().unwrap();
-    if svclist.is_valid() {
-        // If we have a list of services, include them in the response.
-        // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
-        for authservice in &svclist.services {
-            if let Some(sa) = authservice.get_socket_addr() {
-                debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - adding ASA address: {sa}");
-                TlvEncoding::new_asa(sa).put(&mut rsp_pkt);
-            } else {
-                warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
-            }
-        }
-    } else {
-        warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - no valid auth services available");
-    }
-    drop(svclist);
-
-    TlvEncoding::new_aaa(aaa_address).put(&mut rsp_pkt);
-
-    super::core::send_non_flow_mgmt(
-        asm,
-        ingress_link_id,
-        zdp::ZdpPacketType::HelloResponse,
-        rsp_pkt,
-    )
-    .await?;
-
-    asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse)?;
 
     Ok(())
 }

@@ -143,7 +143,6 @@ pub enum LinkEvent {
     ReceivedHelloRequest,
     AssignedAAA(IpAddress), // Assigned AAA address for this link
     ReceivedHelloResponse(ResponseCode, IpAddress, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
-    SentHelloResponse,
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
     ReceivedInitAuthAck,
@@ -446,8 +445,6 @@ impl LinkStateWrapper {
                 self.process_hello_response(asm, code, aaa_addr, maybe_asa_addrs)
             }
 
-            LinkEvent::SentHelloResponse => self.process_sent_hello_response(asm),
-
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
                 self.process_acquire_zpr_address_request(asm, addrs, blob)
             }
@@ -622,7 +619,7 @@ impl LinkStateWrapper {
     /// Update link state based on received hello request
     /// Transitions from Helloing to Registering Actor Address
     /// Does not generate any packets
-    fn process_hello_request(&self, _asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_hello_request(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         let link_id = self.id;
         match (self.link_type, locked_fsm.state) {
@@ -636,15 +633,59 @@ impl LinkStateWrapper {
                     target: LINK_STATE,
                     "Link {link_id} received hello request",
                 );
-                // State transition processing happens in [LinkStateWrapper::process_sent_hello_response]
+
+                // Reply with a Hello Response.
+
+                // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
+                // or if we do not have an external authentication service available.  For simplicity we just
+                // always hand one out.
+                let mut address_pool = asm.address_pool.lock().unwrap();
+                let Some(pool) = address_pool.as_mut() else {
+                    // Programming error: if we are a node, we must have a pool.
+                    panic!("adapter (node) handling a hello-request missing address pool");
+                };
+
+                let aaa_address = pool.get_aaa_address();
+                debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
+                    pool.len());
+
+                drop(address_pool);
+
+                // Store the AAA in the link memory so we can free it later.
+                self.process_assigned_aaa(asm, aaa_address)?;
+
+                let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
+                let asa_addresses = get_available_asa_addresses(&asm, link_id);
+
+                mgmt::requests::send_hello_success_response(
+                    &asm,
+                    link_id,
+                    policy_id,
+                    &asa_addresses,
+                    aaa_address.into(),
+                )
+                .enqueue();
+
+                // Now follow with an init auth request.
+
+                locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
+                self.send_init_authentication_request(asm);
+                // short timeout until we at least get the ACK
+                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
+                debug!(
+                    target: LINK_STATE,
+                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
+                );
                 Ok(())
             }
+
             (LinkType::AdapterToNode, _) => {
                 // Adapters should not be receiving these messages from nodes
                 Err(LinkStateError::InvalidOperation(
                     "Discarded unsolicited Hello Request".to_string(),
                 ))
             }
+
             (_, _) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
                 "ReceivedHelloRequest",
@@ -665,36 +706,6 @@ impl LinkStateWrapper {
         let mut link_data = self.locked_data.lock().unwrap();
         link_data.aaa_address = Some(aaa_addr);
         Ok(())
-    }
-
-    fn process_sent_hello_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        let link_id = self.id;
-        match (self.link_type, locked_fsm.state) {
-            // Node->Adapter - we are in helloing state until we have fired off our
-            // HelloResponse.  At that point we can send an init-auth request.
-            (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
-                self.send_init_authentication_request(asm);
-                // short timeout until we at least get the ACK
-                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
-                debug!(
-                    target: LINK_STATE,
-                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
-                );
-                Ok(())
-            }
-            (LinkType::AdapterToNode, _) => {
-                // Adapters should not be sending hello-response to a node.
-                Err(LinkStateError::InvalidOperation(
-                    "Adapter should not send hello-response".to_string(),
-                ))
-            }
-            (_, _) => Err(LinkStateError::UnexpectedTransition(
-                locked_fsm.state,
-                "SentHelloResponse",
-            )),
-        }
     }
 
     /// This is kicked off by [LinkEvent::ReceivedHelloResponse].
@@ -1715,6 +1726,28 @@ impl LinkStateWrapper {
         });
         Ok(())
     }
+}
+
+fn get_available_asa_addresses(asm: &Assembly, link_id: LinkId) -> Vec<SocketAddr> {
+    let mut asa_addresses = Vec::new();
+
+    let svclist = asm.vs_auth_services.read().unwrap();
+    if svclist.is_valid() {
+        // If we have a list of services, include them in the response.
+        // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
+        for authservice in &svclist.services {
+            if let Some(sa) = authservice.get_socket_addr() {
+                debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - adding ASA address: {sa}");
+                asa_addresses.push(sa);
+            } else {
+                warn!(target: LINK_STATE, "Link {link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
+            }
+        }
+    } else {
+        warn!(target: LINK_STATE, "Link {link_id}: HelloResponse - no valid auth services available");
+    }
+
+    asa_addresses
 }
 
 impl Display for LinkStateWrapper {

@@ -6,14 +6,16 @@
 
 use super::core::{self, Sent};
 use super::txn_mgr::TxnId;
+use crate::assembly;
 use crate::config;
 use crate::logging::targets::ZDP;
 use crate::tc;
+use crate::tlv;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
 use bytes::BufMut;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use tracing::*;
 use zpr::packet_info::{KmId, L3Type, L3TypeDeriveable, LinkId, StreamId, Tcst};
 use zpr_ext::zerocopy::IntoBytesExt;
@@ -50,7 +52,7 @@ pub fn send_echo_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::EchoRequest, pkt)
 }
 
-/// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
+/// send a Hello Request (RFC 6.5 § 6.3.4)
 ///
 /// Originally this was used to send the pre-configured ZPR address of the
 /// remote adapter into the node.  This is no longer necessary.
@@ -60,6 +62,32 @@ pub fn send_hello_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     pkt.alloc_zeroed_header::<zdp::ZdpHelloRequestHeader>();
     super::helpers::put_window_size_tlv(asm, link_id, &mut pkt);
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, pkt)
+}
+
+pub fn send_hello_success_response<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    policy_id: i64,
+    asa_addresses: &[SocketAddr],
+    aaa_address: IpAddr,
+) -> Sent<'a> {
+    let mut pkt = core::new_heap_packet();
+    let hdr = pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
+    hdr.status = zdp::ResponseCode::Success;
+
+    // Policy ID and version are always included, even if not SUCCESS.
+    tlv::TlvEncoding::new_policy_id(policy_id).put(&mut pkt);
+    tlv::TlvEncoding::new_version(assembly::VERSION).put(&mut pkt);
+
+    super::helpers::put_window_size_tlv(&asm, link_id, &mut pkt);
+
+    for asa_address in asa_addresses {
+        tlv::TlvEncoding::new_asa(*asa_address).put(&mut pkt);
+    }
+
+    tlv::TlvEncoding::new_aaa(aaa_address.into()).put(&mut pkt);
+
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloResponse, pkt)
 }
 
 /// Send Init Authentication (NOT YET IN RFC 6)
