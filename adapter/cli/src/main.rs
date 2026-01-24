@@ -5,6 +5,8 @@
 mod main_args;
 
 use crate::main_args::{CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkCommands};
+use admin_api::rpc_commands::RpcCommands;
+use admin_api::v1 as cli;
 use cbpf_rs;
 use clap::Parser;
 use cli::cmd_line_inter as svc;
@@ -19,8 +21,6 @@ use std::os::unix::net::UnixStream;
 use thiserror::Error;
 use tokio::time::{Duration, sleep};
 use tokio_util::compat::*;
-use zpr::admin_api::v1 as cli;
-use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
 
 #[allow(unused_imports)]

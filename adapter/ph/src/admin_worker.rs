@@ -13,6 +13,8 @@ use crate::logging::targets::RPC;
 use crate::logging::{levels, targets};
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
+use admin_api::rpc_commands::RpcCommands;
+use admin_api::v1 as cli;
 use cbpf_rs;
 use cli::cmd_line_inter as svc;
 use core::future::Future;
@@ -35,9 +37,7 @@ use tokio::time::interval;
 use tokio_util::compat::*;
 use tracing::error;
 use tracing::*;
-use zpr::admin_api::v1 as cli;
 use zpr::packet_info::LinkId;
-use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 
