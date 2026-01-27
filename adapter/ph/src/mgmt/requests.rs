@@ -253,7 +253,7 @@ pub fn send_terminate_link_or_docking_session<'a, 'pktbuf>(
     core::send_non_flow_mgmt(
         asm,
         link_id,
-        zdp::ZdpPacketType::TerminateLinkOrDockingSession,
+        zdp::ZdpPacketType::TerminateLinkOrDocking,
         pkt,
     )
 }
