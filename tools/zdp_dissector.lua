@@ -41,19 +41,20 @@ data_length_u16 = ProtoField.uint16("zdp.data_len_i", "Data Length", base.DEC)
 dest_addr_v4 = ProtoField.ipv4("zdp.dest_addr_v4", "Destination IP Address")
 dest_addr_v6 = ProtoField.ipv6("zdp.dest_addr_v6", "Destination IP Address")
 dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
-dest_port_present = ProtoField.uint8("zdp.dest_port_present", "Destination Port Information Present", base.DEC)
 info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
+ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
 ipv4_addr = ProtoField.ipv4("zdp.ipv4", "IP Address")
 ipv6_addr = ProtoField.ipv6("zdp.ipv6", "IP Address")
 nonce = ProtoField.uint64("zdp.nonce", "Nonce", base.HEX)
+pkt_len = ProtoField.uint16("zdp.pkt_len", "Endpoint Packet Length", base.DEC)
 reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
 response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
 source_addr_v4 = ProtoField.ipv4("zdp.source_addr_v4", "Source IP Address")
 source_addr_v6 = ProtoField.ipv6("zdp.source_addr_v6", "Source IP Address")
 source_info = ProtoField.uint16("zdp.source_info", "Source Port Information", base.DEC)
-source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
 status_code = ProtoField.uint8("zdp.status_code", "Status Code", base.DEC)
 status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
+tcst = ProtoField.uint8("zdp.tcst", "TCST", base.DEC)
 tlv_len = ProtoField.uint8("zdp.tlv_length", "TLV Length", base.DEC)
 tlv_type = ProtoField.uint8("zdp.tlv_type", "TLV Type", base.DEC)
 tlv_val_bytes = ProtoField.bytes("zdp.tlv_bytes", "TLV Value")
@@ -63,9 +64,10 @@ tlv_val_ipv6 = ProtoField.ipv6("zdp.tlv_ipv6", "TLV Value", base.DEC)
 tlv_val_str = ProtoField.string("zdp.tlv_string", "TLV Value", base.ASCII)
 tlv_val_u16 = ProtoField.uint16("zdp.tlv_u16", "TLV Value", base.DEC)
 trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
--- ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
--- req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
+-- dest_port_present = ProtoField.uint8("zdp.dest_port_present", "Destination Port Information Present", base.DEC)
 -- ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
+-- req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
+-- source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
 
 
 
@@ -78,10 +80,10 @@ zdp_proto.fields = {
     -- Management Data
     additional_data, addr_count, adl, blob, blob_len, bootstrap_support, comp_mode,
     ctime, data_length_u8, data_length_u16, dest_addr_v4, dest_addr_v6, dest_info, 
-    dest_port_present, info_len, ipv4_addr, ipv6_addr, nonce, reason_code, 
-    response_code, source_addr_v4, source_addr_v6, source_info, source_port_present,
-    status_code, status_info, tlv_len, tlv_type, tlv_val_bytes, tlv_val_i64, 
-    tlv_val_ipv4, tlv_val_ipv6, tlv_val_str, tlv_val_u16, trans_id,
+    ip_protocol, info_len, ipv4_addr, ipv6_addr, nonce, pkt_len, 
+    reason_code,  response_code, source_addr_v4, source_addr_v6, source_info, 
+    status_code, status_info, tcst, tlv_len, tlv_type, tlv_val_bytes, 
+    tlv_val_i64, tlv_val_ipv4, tlv_val_ipv6, tlv_val_str, tlv_val_u16, trans_id,
 }
 
 -- Lengths of fields when using Noise Encryption
@@ -95,9 +97,12 @@ EXCESS_LEN = 1
 FLAGS = 1
 HOP_LIMIT = 1
 IP_VERSION = 1
+IP_PROTOCOL = 1
 INFO_LEN = 1
 REASON_CODE = 1
 RESPONSE_CODE = 1
+TC = 1
+TCST = 1
 TLV_LEN = 1
 TLV_TYPE = 1
 TTL = 1
@@ -105,7 +110,7 @@ TYPE = 1
 ZPI = 1
 
 ADL = 2
-BIND_TRANS_ID = 2
+PKT_LEN = 2
 BLOB_LEN = 2
 DL_INIT = 2
 FRAG_ID = 2
@@ -337,42 +342,48 @@ function get_tlv_val_type(type, len)
 end
 
 function handle_bind_actor_addr_req(management)
-    management:add_field(trans_id, BIND_TRANS_ID)
-    local version = management:add_field_and_return(ip_version, IP_VERSION)
-    local compression_mode = management:add_field_and_return(comp_mode, COMP_MODE)
-
-    local source_present = get_second_bit(compression_mode)
-    local dest_present = get_third_bit(compression_mode)
-    management:add_field_with_text_no_buffer(source_port_present, source_present, presence_value[source_present])
-    management:add_field_with_text_no_buffer(dest_port_present, dest_present, presence_value[dest_present])
+    management:add_field(pkt_len, PKT_LEN)
+    local version_ihl = management:get_curr_buffer_section(1)
+    local version = get_first_four(version_ihl)
+    management:add_field_no_buffer(ip_version, version)
+    -- Got verison and added it to the buffer, need to increase past
+    management:increase_pos(1) 
 
     -- TODO Here we just dissect the src addr and dest addr, do we want other parts of the IP header?
     if version == 4 then
-        management:increase_pos(12)
+        -- Current position is at byte 1 in the pkt, need to get to byte 9 (protocol)
+        management:increase_pos(8)
+        management:add_field(ip_protocol, IP_PROTOCOL)
+        -- Skip past checksum
+        management:increase_pos(2)
         management:add_field(source_addr_v4, IPV4_LEN)
         management:add_field(dest_addr_v4, IPV4_LEN)
     elseif version == 6 then
-        management:increase_pos(8)
+        -- Current position is at byte 1 in the pkt, need to get to byte 8 (source addr)
+        management:increase_pos(7)
         management:add_field(source_addr_v6, IPV6_LEN)
         management:add_field(dest_addr_v6, IPV6_LEN)
-    end
-    
-    if source_present == 1 then
-        management:add_field(source_info, PORT_LEN)
-    end
-
-    if dest_present == 1 then 
-        management:add_field(dest_info, PORT_LEN)
     end
 end
 
 function handle_bind_actor_addr_res(management)
-    management:add_field(trans_id, BIND_TRANS_ID)
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     local info = management:add_field_and_return(info_len, INFO_LEN)
     if info > 0 then 
         management:add_field(status_info, info)
     end
+    management:add_field(tcst, TCST)
+    management:add_field(tc, TC)
+end
+
+function handle_bind_egress_stream_req(management)
+    management:add_field(tcst, TCST)
+    management:add_field(tc, TC)
+end
+
+function handle_bind_egress_stream_res(management)
+    management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
+    management:add_field(info_len, INFO_LEN)
 end
 
 function handle_init_authentication_req(management) 
@@ -428,6 +439,9 @@ function Dissector(init_tree, init_buffer)
             self.tree:add(field, self.buffer(self.pos, len))
             self.pos = self.pos + len
         end,
+        add_field_no_buffer = function(self, field, val)
+            self.tree:add(field, val)
+        end,
         add_field_and_return = function(self, field, len)
             local val = self.buffer(self.pos, len)
             self.tree:add(field, val)
@@ -479,6 +493,8 @@ management_table =
 {
     [6] = handle_bind_actor_addr_req,
     [7] = handle_bind_actor_addr_res,
+    [8] = handle_bind_egress_stream_req,
+    [9] = handle_bind_egress_stream_res,
     [131] = handle_echo,
     [133] = handle_terminate_ind_req,
     [142] = handle_terminate_res,

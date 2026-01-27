@@ -5,7 +5,7 @@ Installation instructions for Lua dissectors
 - When the new window pops up, click folders
 - Find where it says 'Personal Lua Plugins' and copy the path it shows under Location
 - Copy both the zdp dissector and the link layer header dissector into that folder
-- Restart Wireshark
+- Restart Wireshark, or press Ctrl + Shift + L (Cmd + Shift + L on macos)
 - In the Wireshark menu bar again, click Edit -> Preferences
 - In the preferences window, expand the Protocols section
 - Scroll until you find DLT_USER
