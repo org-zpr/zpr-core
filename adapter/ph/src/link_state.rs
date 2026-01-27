@@ -143,7 +143,6 @@ pub enum LinkEvent {
     ReceivedHelloRequest,
     AssignedAAA(IpAddress), // Assigned AAA address for this link
     ReceivedHelloResponse(ResponseCode, IpAddress, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
-    SentHelloResponse,
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
     ReceivedInitAuthAck,
@@ -157,10 +156,8 @@ pub enum LinkEvent {
 
     ReceivedAuthorizeResponse(IpAddress), // from visa service
     ReceivedKeepAliveResponse,
-    ReceivedTerminateRequest(TerminateReason),
-    ReceivedTerminateResponse(ResponseCode),
-    ReceivedTerminateIndication(TerminateReason),
-    SentTerminate,
+    ReceivedTerminateLink(TerminateReason),
+    ReceivedTerminateAck,
     Close(TerminateReason),
     CloseDone,
     Error,
@@ -395,6 +392,26 @@ impl LinkStateWrapper {
         addr_list
     }
 
+    /// Returns true if the specified address matches any of this link's assigned actor addresses.
+    pub fn has_actor_address(&self, addr: &IpAddress) -> bool {
+        self.locked_fsm
+            .lock()
+            .unwrap()
+            .actor_addresses
+            .iter()
+            .any(|a| a == addr)
+            || self.locked_data.lock().unwrap().aaa_address.as_ref() == Some(addr)
+    }
+
+    /// Sets the actor address of an internal link.
+    pub fn add_internal_actor_address(&self, addr: IpAddress) {
+        assert!(
+            self.is_internal(),
+            "attempt to directly set actor address of non-internal link"
+        );
+        self.locked_fsm.lock().unwrap().actor_addresses.push(addr);
+    }
+
     /// Tell the VS that this actor has disconnected.
     /// Used in a NODE context only.
     fn deregister_actor_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
@@ -428,8 +445,6 @@ impl LinkStateWrapper {
                 self.process_hello_response(asm, code, aaa_addr, maybe_asa_addrs)
             }
 
-            LinkEvent::SentHelloResponse => self.process_sent_hello_response(asm),
-
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
                 self.process_acquire_zpr_address_request(asm, addrs, blob)
             }
@@ -453,12 +468,8 @@ impl LinkStateWrapper {
                 self.process_authorize_response(asm, zpr_addr)
             }
 
-            LinkEvent::ReceivedTerminateRequest(code) => self.process_terminate_request(asm, code),
-            LinkEvent::ReceivedTerminateResponse(_) => self.process_terminate_response(asm),
-            LinkEvent::ReceivedTerminateIndication(code) => {
-                self.process_terminate_indication(asm, code)
-            }
-            LinkEvent::SentTerminate => Ok(self.clean_up_link_state(asm).detach_all()),
+            LinkEvent::ReceivedTerminateLink(code) => self.process_terminate_link(asm, code),
+            LinkEvent::ReceivedTerminateAck => self.process_terminate_ack(asm),
             LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
             LinkEvent::Close(code) => self.initiate_close(asm, code),
             LinkEvent::CloseDone => Ok(self.complete_close(asm)),
@@ -608,7 +619,7 @@ impl LinkStateWrapper {
     /// Update link state based on received hello request
     /// Transitions from Helloing to Registering Actor Address
     /// Does not generate any packets
-    fn process_hello_request(&self, _asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_hello_request(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         let link_id = self.id;
         match (self.link_type, locked_fsm.state) {
@@ -622,15 +633,59 @@ impl LinkStateWrapper {
                     target: LINK_STATE,
                     "Link {link_id} received hello request",
                 );
-                // State transition processing happens in [LinkStateWrapper::process_sent_hello_response]
+
+                // Reply with a Hello Response.
+
+                // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
+                // or if we do not have an external authentication service available.  For simplicity we just
+                // always hand one out.
+                let mut address_pool = asm.address_pool.lock().unwrap();
+                let Some(pool) = address_pool.as_mut() else {
+                    // Programming error: if we are a node, we must have a pool.
+                    panic!("adapter (node) handling a hello-request missing address pool");
+                };
+
+                let aaa_address = pool.get_aaa_address();
+                debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
+                    pool.len());
+
+                drop(address_pool);
+
+                // Store the AAA in the link memory so we can free it later.
+                self.process_assigned_aaa(asm, aaa_address)?;
+
+                let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
+                let asa_addresses = get_available_asa_addresses(&asm, link_id);
+
+                mgmt::requests::send_hello_success_response(
+                    &asm,
+                    link_id,
+                    policy_id,
+                    &asa_addresses,
+                    aaa_address.into(),
+                )
+                .enqueue();
+
+                // Now follow with an init auth request.
+
+                locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
+                self.send_init_authentication_request(asm);
+                // short timeout until we at least get the ACK
+                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
+                debug!(
+                    target: LINK_STATE,
+                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
+                );
                 Ok(())
             }
+
             (LinkType::AdapterToNode, _) => {
                 // Adapters should not be receiving these messages from nodes
                 Err(LinkStateError::InvalidOperation(
                     "Discarded unsolicited Hello Request".to_string(),
                 ))
             }
+
             (_, _) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
                 "ReceivedHelloRequest",
@@ -651,36 +706,6 @@ impl LinkStateWrapper {
         let mut link_data = self.locked_data.lock().unwrap();
         link_data.aaa_address = Some(aaa_addr);
         Ok(())
-    }
-
-    fn process_sent_hello_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        let link_id = self.id;
-        match (self.link_type, locked_fsm.state) {
-            // Node->Adapter - we are in helloing state until we have fired off our
-            // HelloResponse.  At that point we can send an init-auth request.
-            (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
-                self.send_init_authentication_request(asm);
-                // short timeout until we at least get the ACK
-                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
-                debug!(
-                    target: LINK_STATE,
-                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
-                );
-                Ok(())
-            }
-            (LinkType::AdapterToNode, _) => {
-                // Adapters should not be sending hello-response to a node.
-                Err(LinkStateError::InvalidOperation(
-                    "Adapter should not send hello-response".to_string(),
-                ))
-            }
-            (_, _) => Err(LinkStateError::UnexpectedTransition(
-                locked_fsm.state,
-                "SentHelloResponse",
-            )),
-        }
     }
 
     /// This is kicked off by [LinkEvent::ReceivedHelloResponse].
@@ -1396,43 +1421,6 @@ impl LinkStateWrapper {
         }
     }
 
-    /// Validate a received terminate request
-    /// May generate a thrift message (over TUN) to the visa service.
-    ///
-    /// Unless we are inactive, this transitions to closing. The state machine is now
-    /// stuck waiting for a SentTerminate event which triggers `clean_up_link_state`.
-    ///
-    /// Returns Ok unless this is in a state that cannot handle this message.
-    fn process_terminate_request(
-        &self,
-        asm: &Arc<Assembly>,
-        reason: TerminateReason,
-    ) -> Result<(), LinkStateError> {
-        let link_id = self.id;
-        info!(target: LINK_STATE,
-            "Received terminate request on link {link_id} for reason {reason:?}"
-        );
-
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-
-        match (self.link_type, locked_fsm.state) {
-            (_, LinkState::Inactive) => Err(LinkStateError::UnexpectedTransition(
-                locked_fsm.state,
-                "ReceivedTerminateRequest",
-            )),
-
-            (ltype, _lstate) => {
-                if ltype == LinkType::NodeToAdapter {
-                    // If this was from our special friend, the visa service adapter, then de-register.
-                    // TODO: The de-register message never makes it across before link closes.
-                    self.disconnect_visa_service_client(asm, true);
-                }
-                locked_fsm.set_state(LinkState::Closing);
-                Ok(())
-            }
-        }
-    }
-
     /// Nodes only. Check if this is the link to the adapter in front of the visa service
     /// and if so try to de-register this node from the VS and also stop the VSConn.
     ///
@@ -1489,7 +1477,23 @@ impl LinkStateWrapper {
         // If this timeout fires, we end up going to `clean_up_link_state`.
         // If we get a response to our terminate we also go to `clean_up_link_state`.
         self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_TERMINATE_TIMEOUT);
-        mgmt::requests::send_terminate_request(asm, self.id, reason).enqueue();
+        let task_asm = asm.clone();
+        let ingress_link_id = self.id;
+        tokio::task::spawn_local(async move {
+            let acked = mgmt::requests::send_terminate_link_or_docking_session(
+                &task_asm,
+                ingress_link_id,
+                reason,
+            )
+            .acked();
+            match acked.await {
+                Ok(()) => {
+                    let _ = task_asm
+                        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedTerminateAck);
+                }
+                Err(mgmt::core::MgmtSendError::LinkClosed) => (),
+            }
+        });
         Ok(())
     }
 
@@ -1610,46 +1614,56 @@ impl LinkStateWrapper {
             .lock()
             .unwrap()
             .set_state(LinkState::Resetting);
-        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset).enqueue();
+        mgmt::requests::send_terminate_link_or_docking_session(
+            asm,
+            link_id,
+            TerminateReason::Reset,
+        )
+        .enqueue();
         let _ = self.clean_up_link_state(asm).join_all().await;
     }
 
-    /// Handle a terminate response packet.
+    /// Handle a terminate link acknowledgement.
     /// This means we sent a terminate request and set a timeout. Timeout is cancelled here
     /// before we proceed with shutting down the link.
-    fn process_terminate_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_terminate_ack(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,"Received terminate response for link {link_id}");
-        let state = self.locked_fsm.lock().unwrap().state;
-        match state {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        match locked_fsm.state {
             LinkState::Closing => {
-                self.locked_fsm.lock().unwrap().cancel_timeout();
+                locked_fsm.cancel_timeout();
                 self.clean_up_link_state(asm).detach_all();
                 Ok(())
             }
             _ => Err(LinkStateError::UnexpectedTransition(
-                state,
-                "ReceivedTerminateResponse",
+                locked_fsm.state,
+                "ReceivedTerminateAck",
             )),
         }
     }
 
-    /// Peer has sent a terminate-indication message.
+    /// Peer has sent a terminate-link message.
+    /// May generate a thrift message (over TUN) to the visa service.
     /// Peer has shut down or shutting down so don't expect it to be there anymore.
-    fn process_terminate_indication(
+    ///
+    /// Returns Ok unless this is in a state that cannot handle this message.
+    fn process_terminate_link(
         &self,
         asm: &Arc<Assembly>,
         reason: TerminateReason,
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,
-            "Received terminate indication for link {link_id} with reason {reason:?}"
+            "Received terminate for link {link_id} with reason {reason:?}"
         );
         self.locked_fsm
             .lock()
             .unwrap()
             .set_state(LinkState::Closing);
         if self.link_type == LinkType::NodeToAdapter {
+            // If this was from our special friend, the visa service adapter, then de-register.
+            // TODO: The de-register message never makes it across before link closes.
             self.disconnect_visa_service_client(asm, true);
         }
         self.clean_up_link_state(asm).detach_all();
@@ -1712,6 +1726,28 @@ impl LinkStateWrapper {
         });
         Ok(())
     }
+}
+
+fn get_available_asa_addresses(asm: &Assembly, link_id: LinkId) -> Vec<SocketAddr> {
+    let mut asa_addresses = Vec::new();
+
+    let svclist = asm.vs_auth_services.read().unwrap();
+    if svclist.is_valid() {
+        // If we have a list of services, include them in the response.
+        // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
+        for authservice in &svclist.services {
+            if let Some(sa) = authservice.get_socket_addr() {
+                debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - adding ASA address: {sa}");
+                asa_addresses.push(sa);
+            } else {
+                warn!(target: LINK_STATE, "Link {link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
+            }
+        }
+    } else {
+        warn!(target: LINK_STATE, "Link {link_id}: HelloResponse - no valid auth services available");
+    }
+
+    asa_addresses
 }
 
 impl Display for LinkStateWrapper {

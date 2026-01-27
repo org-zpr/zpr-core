@@ -21,17 +21,14 @@ pub async fn launch(
                 let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
                 drop(msg);
 
-                // for now, perform these sequentially...
-                // ideally, we place these into a JoinSet,
-                // but let's work out how message sequencing works before doing that!!
-                do_request_tether_id(&asm, mgmt_pkt).await;
+                do_request_tether_id(&asm, mgmt_pkt);
             }
         }
     }
 }
 
 // RFC 6.5 § 6.3.11
-async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
+fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     let dock_link_id = DOCK_LINK_ID;
 
     // copy out five tuple so we can give away packet
@@ -86,37 +83,21 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
     match asm.ph_mode {
-        PhMode::Adapter => {
-            mgmt::requests::send_bind_actor_address_request(
-                asm,
-                dock_link_id,
-                txn_id,
-                &five_tuple,
-                &packet_body,
-            )
-            .enqueue();
-        }
+        PhMode::Adapter => mgmt::requests::send_bind_actor_address_request(
+            asm,
+            dock_link_id,
+            txn_id,
+            five_tuple.l3_type,
+            &packet_body,
+        )
+        .enqueue(),
 
-        PhMode::Node => {
-            let bind_result = mgmt::dock::bind_actor_address(
-                asm,
-                NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
-                &five_tuple,
-                &packet_body,
-            )
-            .await;
-
-            match bind_result {
-                Ok((tether_id, tc)) => {
-                    mgmt::adapter::install_tether(asm, &txn, tether_id, tc).unwrap()
-                }
-
-                Err(err) => {
-                    // Bind failed; remove pending entry from ELT.
-                    debug!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
-                    asm.elt.remove(&five_tuple).unwrap();
-                }
-            }
-        }
+        PhMode::Node => mgmt::dock::bind_actor_address(
+            asm,
+            NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
+            txn_id,
+            five_tuple.l3_type,
+            &packet_body,
+        ),
     }
 }

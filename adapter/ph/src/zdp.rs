@@ -192,34 +192,20 @@ pub enum TerminateReason {
     Shutdown = 4, // quell any restart behavior
 }
 
-/// Terminate Link Indication (§ 6.3.3)
+/// Terminate Link or Docking Session (TODO: document)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpTerminateLinkIndicationHeader {
+pub struct ZdpTerminateLinkOrDockingSessionHeader {
     pub reason_code: TerminateReason,
     pub data_len: u8,
-}
-
-/// Terminate Link Request (§ 6.3.3)
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpTerminateLinkRequestHeader {
-    pub reason_code: TerminateReason,
-    pub data_len: u8,
-}
-
-/// Terminate Link Response (§ 6.3.3)
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpTerminateLinkResponseHeader {
-    pub response_code: ResponseCode,
-    pub data_len: u8,
+    // followed by reason detail
 }
 
 /// Bind Actor Address request (§ 6.3.11)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindActorAddressRequestHeader {
+    pub l3_type: L3Type,
     pub endpoint_packet_length: U16,
     // Followed in memory by:
     // - <PACKET BODY starting with IP header>

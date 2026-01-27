@@ -6,20 +6,19 @@
 
 use super::core::{self, Sent};
 use super::txn_mgr::TxnId;
+use crate::assembly;
 use crate::config;
-use crate::counters::ManagementCounterType;
-use crate::defs::*;
 use crate::logging::targets::ZDP;
 use crate::tc;
+use crate::tlv;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
-use bytes::{Buf, BufMut};
-use std::net::IpAddr;
-use thiserror::Error;
+use bytes::BufMut;
+use std::net::{IpAddr, SocketAddr};
 use tracing::*;
 use zpr::packet_info::{KmId, L3Type, L3TypeDeriveable, LinkId, StreamId, Tcst};
-use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
+use zpr_ext::zerocopy::IntoBytesExt;
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)
 pub fn send_key_management(asm: &Assembly, link_id: LinkId, km_id: KmId, payload: &[u8]) {
@@ -53,7 +52,7 @@ pub fn send_echo_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::EchoRequest, pkt)
 }
 
-/// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
+/// send a Hello Request (RFC 6.5 § 6.3.4)
 ///
 /// Originally this was used to send the pre-configured ZPR address of the
 /// remote adapter into the node.  This is no longer necessary.
@@ -63,6 +62,32 @@ pub fn send_hello_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     pkt.alloc_zeroed_header::<zdp::ZdpHelloRequestHeader>();
     super::helpers::put_window_size_tlv(asm, link_id, &mut pkt);
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, pkt)
+}
+
+pub fn send_hello_success_response<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    policy_id: i64,
+    asa_addresses: &[SocketAddr],
+    aaa_address: IpAddr,
+) -> Sent<'a> {
+    let mut pkt = core::new_heap_packet();
+    let hdr = pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
+    hdr.status = zdp::ResponseCode::Success;
+
+    // Policy ID and version are always included, even if not SUCCESS.
+    tlv::TlvEncoding::new_policy_id(policy_id).put(&mut pkt);
+    tlv::TlvEncoding::new_version(assembly::VERSION).put(&mut pkt);
+
+    super::helpers::put_window_size_tlv(&asm, link_id, &mut pkt);
+
+    for asa_address in asa_addresses {
+        tlv::TlvEncoding::new_asa(*asa_address).put(&mut pkt);
+    }
+
+    tlv::TlvEncoding::new_aaa(aaa_address.into()).put(&mut pkt);
+
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloResponse, pkt)
 }
 
 /// Send Init Authentication (NOT YET IN RFC 6)
@@ -175,7 +200,7 @@ pub fn send_grant_zpr_address_request<'a>(
     status_code: zdp::ResponseCode,
     actor_addrs: &'_ [IpAddr],
 ) -> Sent<'a> {
-    info!(target: ZDP, "Link {link_id} - sending GrantZprAddressRequest, status: {status_code:?}");
+    debug!(target: ZDP, "Link {link_id} - sending GrantZprAddressRequest, status: {status_code:?}");
 
     let mut req = core::new_heap_packet();
 
@@ -214,74 +239,40 @@ pub fn send_grant_zpr_address_request<'a>(
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::GrantZprAddress, req)
 }
 
-/// send a Terminate Request (RFC 6.5 § 6.3.3)
-pub fn send_terminate_request<'a, 'pktbuf>(
+/// send a Terminate Link or Docking Session message (TODO: document)
+pub fn send_terminate_link_or_docking_session<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: LinkId,
     reason: zdp::TerminateReason,
 ) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
-    pkt.push_header(&zdp::ZdpTerminateLinkRequestHeader {
+    pkt.push_header(&zdp::ZdpTerminateLinkOrDockingSessionHeader {
         reason_code: reason,
         data_len: 0,
     });
     core::send_non_flow_mgmt(
         asm,
         link_id,
-        zdp::ZdpPacketType::TerminateLinkOrDocking,
+        zdp::ZdpPacketType::TerminateLinkOrDockingSession,
         pkt,
     )
 }
 
-/// send a Terminate Indication (RFC 6.5 § 6.3.3)
-pub fn send_terminate_indication<'a, 'pktbuf>(
-    asm: &Assembly,
-    link_id: LinkId,
-    reason: zdp::TerminateReason,
-) -> Sent<'_> {
-    let mut pkt = core::new_heap_packet();
-    let hdr = pkt.alloc_zeroed_header::<zdp::ZdpTerminateLinkIndicationHeader>();
-    hdr.reason_code = reason;
-    core::send_non_flow_mgmt(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::TerminateLinkIndication,
-        pkt,
-    )
-}
-
-#[derive(Debug, Error)]
-pub enum BindActorAddressError {
-    #[error("bad structure")]
-    BadStructure,
-    #[error("{0}")]
-    BindActorAddressError(String),
-    #[error("link closed")]
-    LinkClosed,
-}
-
-impl From<core::MgmtSendError> for BindActorAddressError {
-    fn from(err: core::MgmtSendError) -> Self {
-        match err {
-            core::MgmtSendError::LinkClosed => Self::LinkClosed,
-        }
-    }
-}
-
-/// send a Bind Actor Address Request and wait for the Response (RFC 6.5 § 6.3.11)
+/// send a Bind Actor Address Request (RFC 6.5 § 6.3.11)
 pub fn send_bind_actor_address_request<'a>(
     asm: &'a Assembly,
     link_id: LinkId,
     txn_id: TxnId,
-    five_tuple: &FiveTuple,
+    l3_type: L3Type,
     packet_body: &[u8],
 ) -> Sent<'a> {
-    info!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest for {five_tuple} with packet_body size {}", packet_body.len());
+    debug!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest with packet_body size {}", packet_body.len());
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindActorAddressRequestHeader>();
     let endpoint_packet_length =
         std::cmp::min(config::BIND_REQUEST_MAX_PAYLOAD_LENGTH, packet_body.len());
+    bind_req_hdr.l3_type = l3_type;
     bind_req_hdr
         .endpoint_packet_length
         .set(endpoint_packet_length as u16);
@@ -297,28 +288,74 @@ pub fn send_bind_actor_address_request<'a>(
     )
 }
 
-pub async fn send_bind_egress_stream_request(
-    asm: &Assembly,
+pub fn send_bind_actor_address_success_response<'a>(
+    asm: &'a Assembly,
     link_id: LinkId,
+    txn_id: TxnId,
+    tether_id: StreamId,
     tc: tc::Ip5TupleTc,
-) -> Result<StreamId, BindActorAddressError> {
-    info!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {tc}");
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending BindActorAddressResponse [success] for {txn_id}");
 
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let mut rsp_pkt = core::new_heap_packet();
 
-    let Some(peer_state) = asm.peer_table.get(link_id) else {
-        return Err(BindActorAddressError::LinkClosed);
-    };
+    zdp::ZdpBindActorAddressResponseHeader {
+        status_code: zdp::ResponseCode::Success,
+        info_len: 0,
+    }
+    .write_to_buf(&mut rsp_pkt)
+    .unwrap();
 
-    let txn = peer_state.txn_mgr.open().await;
-    let txn_id = txn.id();
-    peer_state
-        .bind_req_state
-        .lock()
-        .unwrap()
-        .insert(txn, sender);
+    Tcst::Ip5Tuple.write_to_buf(&mut rsp_pkt).unwrap();
+    tc.serialize(&mut rsp_pkt);
 
-    drop(peer_state);
+    super::core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::BindActorAddressResponse,
+        tether_id,
+        txn_id,
+        rsp_pkt,
+    )
+}
+
+pub fn send_bind_actor_address_error_response<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    txn_id: TxnId,
+    reason: &str,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending BindActorAddressResponse [error] for {txn_id}");
+
+    let mut rsp_pkt = core::new_heap_packet();
+
+    let reason = &reason[..=std::cmp::min(u8::MAX as usize + 1, reason.len())];
+    zdp::ZdpBindActorAddressResponseHeader {
+        status_code: zdp::ResponseCode::Other,
+        info_len: reason.len() as u8,
+    }
+    .write_to_buf(&mut rsp_pkt)
+    .unwrap();
+
+    rsp_pkt.put(reason.as_bytes());
+
+    super::core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::BindActorAddressResponse,
+        0,
+        txn_id,
+        rsp_pkt,
+    )
+}
+
+pub fn send_bind_egress_stream_request<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    txn_id: TxnId,
+    tc: tc::Ip5TupleTc,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {tc}");
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
@@ -333,39 +370,63 @@ pub async fn send_bind_egress_stream_request(
         txn_id,
         req,
     )
-    .await?;
+}
 
-    let Ok(mut resp) = receiver.await else {
-        return Err(BindActorAddressError::LinkClosed);
-    };
+pub fn send_bind_egress_stream_success_response<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    txn_id: TxnId,
+    tether_id: StreamId,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending BindEgressStreamResponse [success] for {txn_id}");
 
-    let Ok(hdr) = zdp::ZdpBindEgressStreamResponseHeader::read_from_buf(&mut resp) else {
-        core::count_event(asm, ManagementCounterType::BadStructure);
-        return Err(BindActorAddressError::BadStructure);
-    };
+    let mut rsp_pkt = core::new_heap_packet();
 
-    match hdr.status_code {
-        zdp::ResponseCode::Success => Ok(resp.metadata().ingress_stream_id),
-
-        zdp::ResponseCode::Other => {
-            if hdr.info_len as usize > resp.remaining() {
-                core::count_event(asm, ManagementCounterType::BadStructure);
-                return Err(BindActorAddressError::BadStructure);
-            }
-
-            let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
-                core::count_event(asm, ManagementCounterType::BadStructure);
-                return Err(BindActorAddressError::BadStructure);
-            };
-
-            Err(BindActorAddressError::BindActorAddressError(msg.to_owned()))
-        }
-
-        _ => {
-            core::count_event(asm, ManagementCounterType::BadStructure);
-            Err(BindActorAddressError::BadStructure)
-        }
+    zdp::ZdpBindEgressStreamResponseHeader {
+        status_code: zdp::ResponseCode::Success,
+        info_len: 0,
     }
+    .write_to_buf(&mut rsp_pkt)
+    .unwrap();
+
+    super::core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::BindEgressStreamResponse,
+        tether_id,
+        txn_id,
+        rsp_pkt,
+    )
+}
+
+pub fn send_bind_egress_stream_error_response<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    txn_id: TxnId,
+    reason: &str,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending BindEgressStreamResponse [error] for {txn_id}");
+
+    let mut rsp_pkt = core::new_heap_packet();
+
+    let reason = &reason[..=std::cmp::min(u8::MAX as usize + 1, reason.len())];
+    zdp::ZdpBindEgressStreamResponseHeader {
+        status_code: zdp::ResponseCode::Other,
+        info_len: reason.len() as u8,
+    }
+    .write_to_buf(&mut rsp_pkt)
+    .unwrap();
+
+    rsp_pkt.put(reason.as_bytes());
+
+    super::core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::BindEgressStreamResponse,
+        0,
+        txn_id,
+        rsp_pkt,
+    )
 }
 
 /// send a Report message (RFC 6.5 § 6.3.13)

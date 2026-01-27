@@ -27,6 +27,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "512761e0bb2578dd7380c6baaa0f4ce03e84f95e960231d1dec8bf4d7d6e2627"
 
 [[package]]
+name = "admin-api"
+version = "0.1.0"
+dependencies = [
+ "capnp",
+ "capnpc",
+ "strum 0.26.3",
+]
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1613,6 +1622,7 @@ name = "ph"
 version = "0.6.0"
 dependencies = [
  "aarc",
+ "admin-api",
  "arc-swap",
  "arrayref",
  "base64 0.22.1",

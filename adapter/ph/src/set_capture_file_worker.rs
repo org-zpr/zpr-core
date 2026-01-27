@@ -5,6 +5,7 @@
 use crate::assembly::Assembly;
 use crate::config;
 use crate::logging::targets::RPC;
+use admin_api::rpc_commands::RpcCommands;
 use std::io::Error;
 use std::io::IoSliceMut;
 use std::str::FromStr;
@@ -14,7 +15,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::task::JoinSet;
 use tracing::error;
-use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 

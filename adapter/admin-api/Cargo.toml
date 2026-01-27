@@ -1,0 +1,12 @@
+[package]
+name = "admin-api"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+capnp = "0.23"
+strum = { version = "0.26", features = ["derive"] }
+
+[build-dependencies]
+capnpc = "0.23"
