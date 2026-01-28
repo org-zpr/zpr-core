@@ -30,6 +30,7 @@ pub enum ListProcessingResponse {
 type SetServicesResponse = Result<(), ApiResponseError>;
 
 /// VSS Messages arrive from the visa service.
+#[derive(Debug)]
 pub enum VSSMessage {
     PushVisaOp(Vec<VisaOp>, oneshot::Sender<ListProcessingResponse>),
     RevokeAuth(Vec<IpAddr>, oneshot::Sender<ListProcessingResponse>),
@@ -43,6 +44,7 @@ pub enum VSSMessage {
 /// Launch the VSS. Pings are responded to internally. Other VSS messages are sent
 /// over the provided channel.
 ///
+/// This needs to run in a LocalSet (uses spawn_local).
 pub async fn launch_vss(
     saddr: &SocketAddr,
     from_vs: mpsc::Sender<VSSMessage>,
@@ -134,7 +136,6 @@ impl VSSHandleImpl {
                 processed,
                 e: err_code,
             }) => {
-                //let mut res_builder = results.get().init_ack();
                 ack_builder.set_ok(processed > 0);
                 ack_builder.set_processed(processed);
                 let mut err_builder = ack_builder.reborrow().init_error();
@@ -142,7 +143,7 @@ impl VSSHandleImpl {
                     .write_to(&mut err_builder);
             }
             Err(e) => {
-                //let mut res_builder = results.get().init_ack();
+                warn!(target: VSS_RPC, "failed to receive list processing response from handler: {}", e);
                 ack_builder.set_ok(false);
                 ack_builder.set_processed(0);
                 let mut err_builder = ack_builder.reborrow().init_error();

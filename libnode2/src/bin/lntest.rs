@@ -17,6 +17,8 @@ use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
 use zpr::packet_info::L3Type;
 use zpr::vsapi_types::{CommFlag, PacketDesc, VisaOp, VsapiFiveTuple};
 
+use libnode2::vss::{ListProcessingResponse, VSSMessage, launch_vss};
+
 /// lntest: test tool for libnode2
 ///
 /// This will attempt to register as a node to the visa service.
@@ -46,11 +48,28 @@ struct Args {
     aaa_prefix: String,
 }
 
+struct Config {
+    node_zpr_addr: IpAddr,
+}
+
 enum Cmd {
     Nop,
     Disconnect,
     VisaRequest(VsapiFiveTuple),
     RegisterVss(SocketAddr),
+}
+
+fn help() {
+    println!("commands:");
+    println!("  h                          : print this help");
+    println!("  exit | quit | q            : disconnect and exit");
+    println!("  visa_request               : send a visa request");
+    println!(
+        "  register_vss [<ADDR:PORT>] : call registerVss (default sock addr is <self_addr>:8183)"
+    );
+    println!("                               Note lntest starts a VSS server on <self_addr>:8183");
+    println!("                               automatically at startup so adding a socket addr is");
+    println!("                               only serves to send bad data to the visa service.");
 }
 
 fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
@@ -60,18 +79,15 @@ fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
     Ok((sockaddr.ip(), sockaddr.port()))
 }
 
-fn parse_command(input: &str) -> Result<Cmd, String> {
+/// Parse user input and return a "command".
+fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
     if parts.is_empty() {
         return Err("does not compte".into());
     }
     match parts[0] {
         "h" => {
-            println!("commands:");
-            println!("  h                        : print this help");
-            println!("  exit | quit | q          : disconnect and exit");
-            println!("  visa_request             : send a visa request");
-            println!("  register_vss <ADDR:PORT> : call registerVss");
+            help();
             Ok(Cmd::Nop)
         }
 
@@ -106,14 +122,19 @@ fn parse_command(input: &str) -> Result<Cmd, String> {
         }
 
         "register_vss" => {
-            if parts.len() != 2 {
-                return Err("usage: register_vss <ADDR:PORT>".into());
-            }
-            let saddr: SocketAddr = parts[1]
-                .parse()
-                .map_err(|e| format!("invalid socket address '{}': {}", parts[1], e))?;
+            let saddr: SocketAddr = if parts.len() == 2 {
+                parts[1]
+                    .parse()
+                    .map_err(|e| format!("invalid socket address '{}': {}", parts[1], e))?
+            } else if parts.len() > 2 {
+                return Err("usage: register_vss [<ADDR:PORT>]".into());
+            } else {
+                // Default to self address with port 8183
+                SocketAddr::new(cfg.node_zpr_addr, 8183)
+            };
             Ok(Cmd::RegisterVss(saddr))
         }
+
         _ => Err("does not compute: type 'h' for help".into()),
     }
 }
@@ -126,6 +147,8 @@ async fn main() {
     let vs_sa: SocketAddr = args.vs_addr.parse().expect("failed to parse vs-addr");
     let node_zpr_addr: IpAddr = args.self_addr.parse().expect("failed to parse self_addr");
     let node_aaa_prefix: IpNet = args.aaa_prefix.parse().expect("failed to parse aaa_prefix");
+
+    let cfg = Config { node_zpr_addr };
 
     let mut vsc = VSConn::new(
         8,
@@ -147,6 +170,19 @@ async fn main() {
             e
         })
     });
+
+    let (vss_tx, mut vss_rx) = mpsc::channel(32);
+    // Launch VSS server
+    let vss_aborter = {
+        let vss_saddr = SocketAddr::new(node_zpr_addr, 8183);
+        info!("launching VSS server on {}", vss_saddr);
+        js.spawn_local(async move {
+            launch_vss(&vss_saddr, vss_tx).await.map_err(|e| {
+                error!("VSS server exited with error: {:?}", e);
+                e
+            })
+        })
+    };
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Cmd>();
 
@@ -204,7 +240,7 @@ async fn main() {
                                 let res = handle.register_vss(saddr).await;
                                 match res {
                                     Ok(ops) => {
-                                        println!("register_vss succeeded");
+                                        println!("register_vss succeeded: got {} VisaOps", ops.len());
                                         for vo in &ops {
                                             match vo {
                                                 VisaOp::Grant(v) => {
@@ -220,6 +256,22 @@ async fn main() {
                                         println!("register_vss failed: {:?}", e);
                                     }
                                 }
+                            },
+                        }
+                    }
+                    Some(vss_msg) = vss_rx.recv() => {
+                        match vss_msg {
+                            VSSMessage::PushVisaOp(visa_ops, resp_tx) => {
+                                println!("[VSS incomming] PushVisaOp with {} ops", visa_ops.len());
+                                let _ = resp_tx.send(ListProcessingResponse::Ack { processed: visa_ops.len() as u32});
+                            }
+                            VSSMessage::RevokeAuth(ip_addrs, resp_tx) => {
+                                println!("[VSS incomming] RevokeAuth for {} addresses", ip_addrs.len());
+                                let _ = resp_tx.send(ListProcessingResponse::Ack { processed: ip_addrs.len() as u32});
+                            }
+                            VSSMessage::SetServices(version, services, resp_tx) => {
+                                println!("[VSS incomming] SetServices v{} with {} services", version, services.len());
+                                let _ = resp_tx.send(Ok(()));
                             }
                         }
                     }
@@ -238,6 +290,7 @@ async fn main() {
                 println!("failed to stop VSConn: {:?}", e);
             }
         }
+        vss_aborter.abort();
 
         Ok(())
     });
@@ -255,7 +308,7 @@ async fn main() {
                         continue;
                     }
                     rl.add_history_entry(trimmed).unwrap();
-                    match parse_command(trimmed) {
+                    match parse_command(&cfg, trimmed) {
                         Ok(cmd) => match cmd {
                             Cmd::Disconnect => {
                                 do_disconnect = true;
