@@ -34,7 +34,7 @@ impl fmt::Display for VSSMsg {
 
 #[allow(dead_code)]
 /// Human readable version of the MSSMsg which includes some interior details of the visa.
-fn summarize_visa_hop(f: &mut Formatter<'_>, vh: &vsapi::VisaHop) -> fmt::Result {
+fn summarize_visa_hop(f: &mut Formatter<'_>, vh: &vsapi_thrift::VisaHop) -> fmt::Result {
     write!(
         f,
         "VisaHop(issuer_id: {}, hop_count: {}, visa: ",
@@ -83,7 +83,7 @@ fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi_types::Visa) -> fmt::Result {
 
 #[allow(dead_code)]
 /// Attempt to surface the most critical bits of a visa.
-fn summarize_vsapi_visa(f: &mut Formatter<'_>, v: &vsapi::Visa) -> fmt::Result {
+fn summarize_vsapi_visa(f: &mut Formatter<'_>, v: &vsapi_thrift::Visa) -> fmt::Result {
     let mut icmp = false;
     let proto: String;
     let sport: String;
@@ -91,7 +91,7 @@ fn summarize_vsapi_visa(f: &mut Formatter<'_>, v: &vsapi::Visa) -> fmt::Result {
 
     match v.dock_pep {
         Some(pep) => match pep {
-            vsapi::PEPIndex::UDP | vsapi::PEPIndex::TCP => {
+            vsapi_thrift::PEPIndex::UDP | vsapi_thrift::PEPIndex::TCP => {
                 match &v.tcpudp_pep_args {
                     Some(args) => {
                         sport = to_string_or(&args.source_port, "(?)");
@@ -102,13 +102,13 @@ fn summarize_vsapi_visa(f: &mut Formatter<'_>, v: &vsapi::Visa) -> fmt::Result {
                         dport = "(none)".to_string();
                     }
                 }
-                if pep == vsapi::PEPIndex::UDP {
+                if pep == vsapi_thrift::PEPIndex::UDP {
                     proto = "UDP".to_string();
                 } else {
                     proto = "TCP".to_string();
                 }
             }
-            vsapi::PEPIndex::ICMP => {
+            vsapi_thrift::PEPIndex::ICMP => {
                 icmp = true;
                 proto = "ICMP".to_string();
                 match &v.icmp_pep_args {
