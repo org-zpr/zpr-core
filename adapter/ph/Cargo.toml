@@ -50,7 +50,7 @@ url = "2.5.4"
 zerocopy = { version = "0.8.3", features = ["derive", "std"] }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "zerocopy"] }
 zpr-utils = { path = "../../zpr-utils" }
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.1.0", features = ["vsapi"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.6.0", features = ["vsapi"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7.4", optional = true }

@@ -1315,7 +1315,7 @@ dependencies = [
  "tracing",
  "vsapi",
  "zerocopy 0.8.9",
- "zpr",
+ "zpr 0.4.0",
  "zpr-utils",
 ]
 
@@ -1669,7 +1669,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "zerocopy 0.8.9",
- "zpr",
+ "zpr 0.5.0",
  "zpr-ext",
  "zpr-utils",
 ]
@@ -3179,6 +3179,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "zpr"
+version = "0.5.0"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.5.0#55a97cbe63a8d951e8aab7b196737f6a900a7616"
+dependencies = [
+ "capnp",
+ "capnpc",
+ "open-enum",
+ "thiserror",
+ "url",
+ "vsapi",
+ "zerocopy 0.8.9",
+]
+
+[[package]]
 name = "zpr-ext"
 version = "0.5.3"
 dependencies = [
@@ -3195,5 +3209,5 @@ name = "zpr-utils"
 version = "0.1.0"
 dependencies = [
  "zerocopy 0.8.9",
- "zpr",
+ "zpr 0.4.0",
 ]

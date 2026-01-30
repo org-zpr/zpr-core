@@ -74,9 +74,7 @@ pub fn build_connect_request(
     }
 
     // The visa service expects to find the BLOBs in the challenge response buffers.
-    let mut ss = vsapi_types::ZprSelfSignedBlob::default();
-    ss.challenge = blob.as_bytes().to_vec();
-    let crbufs: Vec<vsapi_types::AuthBlob> = vec![vsapi_types::AuthBlob::SS(ss)];
+    let crbufs = vsapi_types::AuthBlobV1::new(vec![blob.as_bytes().to_vec()]);
 
     let mut claims = Vec::new();
     if addr != IpAddress::UNSPECIFIED {
@@ -94,7 +92,7 @@ pub fn build_connect_request(
     let connect_req = vsapi_types::ConnectRequest {
         substrate_addr: asm.get_local_dock_addr(),
         claims: claims,
-        blobs: crbufs,
+        blobs: vsapi_types::AuthBlobs::V1(crbufs),
         dock_interface: 0,
     };
     Ok(Some(connect_req))
