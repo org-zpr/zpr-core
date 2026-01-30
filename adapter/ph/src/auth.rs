@@ -147,7 +147,7 @@ pub struct ZdpAuthCodeBlob {
 /// Enum used to return different blob types based on their blob_type field.
 #[allow(dead_code)]
 #[derive(Debug)]
-pub enum DecodedBlob {
+pub enum AuthBlob {
     SelfSigned(ZdpSelfSignedBlob),
     AuthCode(ZdpAuthCodeBlob),
 }
@@ -202,6 +202,12 @@ impl ZdpAuthCodeBlob {
 }
 
 impl ZdpSelfSignedBlob {
+    /// Gets the "encoded" form of the blob: base64 encoded JSON.
+    pub fn encode(&self) -> String {
+        let json_txt = serde_json::to_string(self).unwrap();
+        BASE64_STANDARD.encode(&json_txt)
+    }
+
     /// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].
     /// This extracts that data and checks that:
     ///   - The CN in the provided `peer_cert` matches the CN in the blob.
@@ -286,9 +292,9 @@ impl ZdpInitAuthenticationPayload {
     }
 }
 
-/// Decode a blob string into a [DecodedBlob] object.
+/// Decode a blob string into a [AuthBlob] object.
 /// The blob string is base64 encoded JSON which contains a "blob_type" field.
-pub fn decode_blob(blob_str: &str) -> Result<DecodedBlob, AuthError> {
+pub fn decode_blob(blob_str: &str) -> Result<AuthBlob, AuthError> {
     let json_txt = BASE64_STANDARD.decode(blob_str)?;
 
     let jobj: Value = serde_json::from_slice(&json_txt)?;
@@ -299,11 +305,11 @@ pub fn decode_blob(blob_str: &str) -> Result<DecodedBlob, AuthError> {
     match blob_type.as_str() {
         Some(BLOB_TYPE_SS) => {
             let ss_blob = serde_json::from_slice::<ZdpSelfSignedBlob>(&json_txt)?;
-            Ok(DecodedBlob::SelfSigned(ss_blob))
+            Ok(AuthBlob::SelfSigned(ss_blob))
         }
         Some(BLOB_TYPE_AC) => {
             let ac_blob = serde_json::from_slice::<ZdpAuthCodeBlob>(&json_txt)?;
-            Ok(DecodedBlob::AuthCode(ac_blob))
+            Ok(AuthBlob::AuthCode(ac_blob))
         }
         _ => Err(AuthError::FormatError(format!(
             "unknown blob_type: {:?}",
@@ -386,10 +392,7 @@ impl RsaBootstrapAuth {
             challenge: BASE64_STANDARD.encode(&challenge),
             sig: sig_str,
         };
-
-        let json_txt = serde_json::to_string(&blob)?;
-        let blob_str = BASE64_STANDARD.encode(&json_txt);
-        Ok(blob_str)
+        Ok(blob.encode())
     }
 }
 

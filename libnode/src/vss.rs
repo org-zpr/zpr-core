@@ -13,7 +13,9 @@ use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info};
 
 use crate::logging::targets::VSS_RPC;
-use vsapi::{self, PolicyInfo, ServicesList, VisaSupportSyncHandler, VisaSupportSyncProcessor};
+use vsapi_thrift::{
+    self, PolicyInfo, ServicesList, VisaSupportSyncHandler, VisaSupportSyncProcessor,
+};
 use zpr::vsapi_types::{AuthServicesList, Visa, VisaOp, VsapiTypeError};
 
 /// Default port for the visa support service. Note that the visa support service
@@ -83,7 +85,7 @@ pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: SocketAddr) {
 
 impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     /// Accept the visa service message and put in on the message channel.
-    fn handle_network_policy_installed(&self, pi: vsapi::PolicyInfo) -> thrift::Result<()> {
+    fn handle_network_policy_installed(&self, pi: vsapi_thrift::PolicyInfo) -> thrift::Result<()> {
         debug!(target: VSS_RPC, "handle_network_policy_installed: {pi:?}");
         self.msg_chan_out
             .blocking_send(VSSMsg::PolicyInstall(pi))
@@ -94,7 +96,7 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     }
 
     /// Accept the pushed visa(s) and put on to the message channel.
-    fn handle_install_visas(&self, vh: Vec<vsapi::VisaHop>) -> thrift::Result<()> {
+    fn handle_install_visas(&self, vh: Vec<vsapi_thrift::VisaHop>) -> thrift::Result<()> {
         debug!(target: VSS_RPC, "handle_install_visas, count={}", vh.len());
         for v in vh {
             let visa = match Visa::try_from(v) {
@@ -116,7 +118,7 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     }
 
     /// Accept the visa revocation(s) and put on to the message channel.
-    fn handle_revoke_visas(&self, vr: Vec<vsapi::VisaRevocation>) -> thrift::Result<()> {
+    fn handle_revoke_visas(&self, vr: Vec<vsapi_thrift::VisaRevocation>) -> thrift::Result<()> {
         debug!(target: VSS_RPC, "handle_revoke_visas, count={}", vr.len());
         for r in vr {
             let vo = VisaOp::try_from(r);

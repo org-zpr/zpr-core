@@ -3165,13 +3165,12 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.4.0"
-source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.1.0#7edfe8212acc1d661db01a7f8bb60302f441695e"
+version = "0.6.0"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.6.0#d5eb7cfc362e3f70a035758b6fa92b4735cbe988"
 dependencies = [
  "capnp",
  "capnpc",
  "open-enum",
- "strum 0.26.3",
  "thiserror",
  "url",
  "vsapi",
