@@ -922,7 +922,8 @@ s5JVZ48=
             challenge: Some(vec![1, 2, 3, 4]),
             challenge_responses: Some(vec![vec![5, 6, 7, 8]]),
         };
-        let resp = conn_handle.authorize_connect(req.into().unwrap());
+
+        let resp = conn_handle.authorize_connect(req.try_into().unwrap());
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(_resp) => {
@@ -942,7 +943,7 @@ s5JVZ48=
         {
             // Run again check that we get the error:
             let req = vsapi_thrift::ConnectRequest {
-                connection_id: None,
+                connection_id: Some(100),
                 dock_addr: Some(vec![10, 0, 0, 1]),
                 claims: Some(claims.clone()),
                 challenge: None,
