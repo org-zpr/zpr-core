@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::auth::AuthBlob;
 use crate::counters::ManagementCounterType;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
@@ -9,6 +10,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 use tracing::*;
+
 use zpr::dn::VISA_SERVICE_CN;
 use zpr::packet_info::{LinkId, VisaId};
 use zpr::vsapi_types::{self, AuthServicesList};
@@ -17,7 +19,7 @@ use zpr_utils::net_defs::IpAddress;
 pub fn authorize_connect(
     asm: &Arc<Assembly>,
     link_id: LinkId,
-    connect_req: vsapi_types::ConnectRequest,
+    connect_req: vsapi_types::ConnectRequestV1,
 ) {
     let task_asm = asm.clone();
     tokio::task::spawn_local(async move {
@@ -65,18 +67,28 @@ pub fn build_connect_request(
     asm: &Arc<Assembly>,
     id: LinkId,
     addr: IpAddress,
-    blob: &str,
-) -> Result<Option<vsapi_types::ConnectRequest>, LinkStateError> {
+    blob: &AuthBlob,
+) -> Result<Option<vsapi_types::ConnectRequestV1>, LinkStateError> {
     let cn = get_common_name(asm, id)?;
 
     if cn == VISA_SERVICE_CN {
         return Ok(None);
     }
 
-    // The visa service expects to find the BLOBs in the challenge response buffers.
-    let mut ss = vsapi_types::ZprSelfSignedBlob::default();
-    ss.challenge = blob.as_bytes().to_vec();
-    let crbufs: Vec<vsapi_types::AuthBlob> = vec![vsapi_types::AuthBlob::SS(ss)];
+    // In v2 the blobs are transported to the VS in a typed structure.
+    // In v1 (prototype) the blobs are b64 encoded json.
+    let mut crbufs: Vec<Vec<u8>> = Vec::new();
+    match blob {
+        AuthBlob::SelfSigned(ss_blob) => {
+            crbufs.push(ss_blob.encode().as_bytes().to_vec());
+        }
+        AuthBlob::AuthCode(ac_blob) => {
+            crbufs.push(ac_blob.encode().as_bytes().to_vec());
+        }
+    }
+
+    //let mut ss = vsapi_types::ZprSelfSignedBlob::default();
+    //ss.challenge = blob.as_bytes().to_vec();
 
     let mut claims = Vec::new();
     if addr != IpAddress::UNSPECIFIED {
@@ -91,11 +103,11 @@ pub fn build_connect_request(
     });
 
     // issue an Authorize Connect Request to the visa service for this adapter
-    let connect_req = vsapi_types::ConnectRequest {
-        substrate_addr: asm.get_local_dock_addr(),
+    let connect_req = vsapi_types::ConnectRequestV1 {
+        challenge_responses: crbufs,
         claims: claims,
-        blobs: crbufs,
-        dock_interface: 0,
+        dock_addr: asm.get_local_dock_addr(),
+        connection_id: 1,
     };
     Ok(Some(connect_req))
 }

@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::auth::{self, AUTH_KEY_SIZE_BYTES, DecodedBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob};
+use crate::auth::{self, AUTH_KEY_SIZE_BYTES, AuthBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob};
 use crate::config;
 use crate::counters::ManagementCounterType;
 use crate::km::{PeerCertificate, ZPIPair};
@@ -832,10 +832,10 @@ impl LinkStateWrapper {
             return self.process_error_response(asm);
         };
 
-        match d_blob {
-            DecodedBlob::AuthCode(_) => {}
-            DecodedBlob::SelfSigned(ss_blob) => {
-                if !self.check_self_signed_blob(asm, link_id, &ss_blob) {
+        match &d_blob {
+            AuthBlob::AuthCode(_) => {}
+            AuthBlob::SelfSigned(ss_blob) => {
+                if !self.check_self_signed_blob(asm, link_id, ss_blob) {
                     drop(locked_fsm);
                     return self.process_error_response(asm);
                 }
@@ -849,7 +849,7 @@ impl LinkStateWrapper {
             "About to build connect request"
         );
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
-        match visa_mgmt::build_connect_request(asm, link_id, requested_addr, &blob) {
+        match visa_mgmt::build_connect_request(asm, link_id, requested_addr, &d_blob) {
             Ok(Some(conn_req)) => {
                 drop(locked_fsm);
                 Ok(visa_mgmt::authorize_connect(asm, link_id, conn_req))
