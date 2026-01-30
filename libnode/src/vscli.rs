@@ -9,7 +9,7 @@ use tracing::*;
 use crate::errors::VSClientError;
 use crate::logging::targets::VS_RPC;
 use crate::m2;
-use vsapi::{self, TVisaServiceSyncClient, VisaServiceSyncClient};
+use vsapi_thrift::{self, TVisaServiceSyncClient, VisaServiceSyncClient};
 use zpr::packet_info::L3Type;
 use zpr::vsapi_types::VisaResponse;
 
@@ -36,11 +36,11 @@ pub struct VSClient {
 pub trait VSClientI: Send {
     fn authenticate(
         &mut self,
-        actor: &vsapi::Actor,
+        actor: &vsapi_thrift::Actor,
         cert_pem_data: &str,
         vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError>;
-    fn ping_vs(&mut self) -> Result<vsapi::Pong, VSClientError>;
+    fn ping_vs(&mut self) -> Result<vsapi_thrift::Pong, VSClientError>;
     fn de_register(&mut self) -> Result<(), VSClientError>;
     fn request_visa(
         &mut self,
@@ -50,10 +50,10 @@ pub trait VSClientI: Send {
     ) -> Result<VisaResponse, VSClientError>;
     fn authorize_connect(
         &mut self,
-        req: vsapi::ConnectRequest,
-    ) -> Result<vsapi::ConnectResponse, VSClientError>;
+        req: vsapi_thrift::ConnectRequest,
+    ) -> Result<vsapi_thrift::ConnectResponse, VSClientError>;
     fn actor_disconnect(&mut self, actor_zpr_addr: IpAddr) -> Result<(), VSClientError>;
-    fn request_services(&mut self) -> Result<vsapi::ServicesResponse, VSClientError>;
+    fn request_services(&mut self) -> Result<vsapi_thrift::ServicesResponse, VSClientError>;
 }
 
 /// Wrapper on top of the the THRIFT generated code.
@@ -70,7 +70,7 @@ impl VSClient {
         let o_prot = TBinaryOutputProtocol::new(TFramedWriteTransport::new(o_chan), true);
 
         debug!(target: VS_RPC, "VSClient.new creating VisaServiceSyncClient");
-        let tcli = vsapi::VisaServiceSyncClient::new(i_prot, o_prot);
+        let tcli = vsapi_thrift::VisaServiceSyncClient::new(i_prot, o_prot);
 
         Ok(VSClient {
             service: service.to_string(),
@@ -103,7 +103,7 @@ impl VSClientI for VSClient {
     ///
     fn authenticate(
         &mut self,
-        actor: &vsapi::Actor,
+        actor: &vsapi_thrift::Actor,
         cert_pem_data: &str,
         vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError> {
@@ -121,7 +121,7 @@ impl VSClientI for VSClient {
         let hmac =
             m2::milestone2_create_hmac(hrchal, hello_response.session_id.unwrap(), timestamp);
 
-        let authreq = vsapi::NodeAuthRequest {
+        let authreq = vsapi_thrift::NodeAuthRequest {
             session_id: hello_response.session_id,
             challenge: Some(chal_copy),
             timestamp: Some(timestamp as i64),
@@ -152,7 +152,7 @@ impl VSClientI for VSClient {
     }
 
     /// Synchronous ping.
-    fn ping_vs(&mut self) -> Result<vsapi::Pong, VSClientError> {
+    fn ping_vs(&mut self) -> Result<vsapi_thrift::Pong, VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }
@@ -197,8 +197,8 @@ impl VSClientI for VSClient {
     /// Synchronous authorize connect request.
     fn authorize_connect(
         &mut self,
-        req: vsapi::ConnectRequest,
-    ) -> Result<vsapi::ConnectResponse, VSClientError> {
+        req: vsapi_thrift::ConnectRequest,
+    ) -> Result<vsapi_thrift::ConnectResponse, VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }
@@ -227,7 +227,7 @@ impl VSClientI for VSClient {
         }
     }
 
-    fn request_services(&mut self) -> Result<vsapi::ServicesResponse, VSClientError> {
+    fn request_services(&mut self) -> Result<vsapi_thrift::ServicesResponse, VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }

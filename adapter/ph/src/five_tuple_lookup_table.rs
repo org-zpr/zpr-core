@@ -348,7 +348,7 @@ impl ProtoAndId {
 mod tests {
     use super::*;
 
-    use libnode::vsapi;
+    use libnode::vsapi_thrift;
     use zpr::packet_info::L3Type;
     use zpr::vsapi_types;
     use zpr::vsapi_types::vsapi_ip_number;
@@ -356,13 +356,19 @@ mod tests {
     fn make_visa(
         src_addr: [u8; 16],
         dst_addr: [u8; 16],
-        l4proto: vsapi::PEPIndex,
+        l4proto: vsapi_thrift::PEPIndex,
         src_port: i32,
         dst_port: i32,
     ) -> Visa {
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let visa: vsapi::Visa = vsapi::Visa::new(
+        let src_dst = vsapi_thrift::PEPArgsTCPUDP::new(
+            Vec::new(),
+            Vec::new(),
+            src_port,
+            dst_port,
+            None,
+            None,
+        );
+        let visa: vsapi_thrift::Visa = vsapi_thrift::Visa::new(
             0,
             0,
             0,
@@ -386,7 +392,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -446,8 +452,8 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto1 = vsapi::PEPIndex::TCP;
-        let l4proto2 = vsapi::PEPIndex::UDP;
+        let l4proto1 = vsapi_thrift::PEPIndex::TCP;
+        let l4proto2 = vsapi_thrift::PEPIndex::UDP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -526,7 +532,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port1 = 10;
         let src_port2 = 14;
         let dst_port = 11;
@@ -642,7 +648,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port1 = 11;
         let dst_port2 = 14;
@@ -728,7 +734,7 @@ mod tests {
         let src_addr2 = [3u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -831,7 +837,7 @@ mod tests {
         let dst_addr1 = [2u8; 16];
         let dst_addr2 = [3u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -932,7 +938,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -961,7 +967,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -974,7 +980,7 @@ mod tests {
             dst_port as u16,
         );
 
-        let l4proto_diff = vsapi::PEPIndex::UDP;
+        let l4proto_diff = vsapi_thrift::PEPIndex::UDP;
         let src_port_diff = 13;
         let dst_port_diff = 14;
         let src_addr_diff = [3u8; 16];
@@ -1004,7 +1010,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -1073,7 +1079,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -1086,7 +1092,7 @@ mod tests {
             dst_port as u16,
         );
 
-        let l4proto_diff = vsapi::PEPIndex::UDP;
+        let l4proto_diff = vsapi_thrift::PEPIndex::UDP;
         let src_port_diff = 13;
         let dst_port_diff = 14;
         let src_addr_diff = [3u8; 16];
@@ -1162,7 +1168,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 0;
         let dst_port = 11;
 
@@ -1251,7 +1257,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 0;
 
@@ -1341,8 +1347,8 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto1 = vsapi::PEPIndex::UDP;
-        let l4proto2 = vsapi::PEPIndex::TCP;
+        let l4proto1 = vsapi_thrift::PEPIndex::UDP;
+        let l4proto2 = vsapi_thrift::PEPIndex::TCP;
         let src_port_specified = 10;
         let src_port_wild = 0;
         let dst_port = 11;
@@ -1418,8 +1424,8 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto1 = vsapi::PEPIndex::UDP;
-        let l4proto2 = vsapi::PEPIndex::TCP;
+        let l4proto1 = vsapi_thrift::PEPIndex::UDP;
+        let l4proto2 = vsapi_thrift::PEPIndex::TCP;
         let src_port_specified = 10;
         let src_port_wild = 0;
         let dst_port = 11;
@@ -1495,7 +1501,7 @@ mod tests {
         let src_addr = [1u8; 16];
         let dst_addr = [2u8; 16];
 
-        let l4proto = vsapi::PEPIndex::TCP;
+        let l4proto = vsapi_thrift::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
 
@@ -1508,7 +1514,7 @@ mod tests {
             dst_port as u16,
         );
 
-        let l4proto_diff = vsapi::PEPIndex::UDP;
+        let l4proto_diff = vsapi_thrift::PEPIndex::UDP;
         let src_port_diff = 13;
         let dst_port_diff = 14;
         let src_addr_diff = [3u8; 16];
