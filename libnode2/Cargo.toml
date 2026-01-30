@@ -16,7 +16,7 @@ tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
 tokio = { version = "1.48.0", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", optional = true } # lnt
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.2.0", features = ["vsapi"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.6.0", features = ["vsapi"] }
 
 [features]
 build-lnt = ["clap", "tracing-subscriber", "rustyline"]
