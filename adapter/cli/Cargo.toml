@@ -8,8 +8,8 @@ license = "Apache-2.0"
 
 [dependencies]
 admin-api = { path = "../admin-api" }
-capnp-rpc = { version = "0.23" }
-capnp = { version = "0.23" }
+capnp-rpc = { version = "0.25.0" }
+capnp = { version = "0.25.0" }
 cbpf-rs = { path = "../../cbpf-rs", features = ['pcap'] }
 clap_complete = { version = "4.5.57", optional = true}
 clap = { version = "4.5.7", features = ["derive"] }

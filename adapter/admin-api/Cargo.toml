@@ -5,8 +5,8 @@ edition = "2024"
 license = "Apache-2.0"
 
 [dependencies]
-capnp = "0.23"
+capnp = "0.25"
 strum = { version = "0.26", features = ["derive"] }
 
 [build-dependencies]
-capnpc = "0.23"
+capnpc = "0.25"
