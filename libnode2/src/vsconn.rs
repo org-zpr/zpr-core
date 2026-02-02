@@ -99,11 +99,11 @@ impl VSConn {
 
         let sock = tokio::net::TcpStream::connect(self.vs_addr).await?;
         sock.set_nodelay(true)?;
-        println!("VS ADDR {}", self.vs_addr.ip());
 
         let connector = tls_connect();
         let tls = connector.connect(self.vs_addr.ip().into(), sock).await?;
         let (reader, writer) = tokio::io::split(tls);
+        debug!(target: VS_RPC, "VS RPC service connected to {} (TLS)", self.vs_addr);
 
         let network = capnp_rpc::twoparty::VatNetwork::new(
             tokio::io::BufReader::new(reader).compat(),
