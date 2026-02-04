@@ -147,7 +147,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     -- TODO shorten main    
     local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
 
-    local zdp_header = DissectorBuilder(zdp_header_subtree, buffer, pinfo)
+    local zdp_header = TreeBuilder(buffer, pinfo, zdp_header_subtree)
     zdp_header:add_field(zpi_val, ZPI)
 
     local type = zdp_header:get_curr_buffer_section(TYPE):uint()
@@ -178,7 +178,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         
         local v4_v6 = get_first_four(buffer(PKT_START, 1):uint())
         agent_header_subtree:add(ip_version, v4_v6)
-        local agent_header = DissectorBuilder(agent_header_subtree, buffer)
+        local agent_header = TreeBuilder(buffer, pinfo, agent_header_subtree)
         agent_header:set_pos(PKT_START)
 
         -- NOTE No updates to this section RE size/position of values, assuming they stayed the same for now
@@ -246,7 +246,7 @@ end
 -- have to forward basically the whole packet, or create a new tvb with the type and the management packet and forward that
 function decode_management(type, buffer, pinfo, tree)
     local management_subtree = tree:add(zdp_proto, buffer(), "Management Packet Data")
-    local management = DissectorBuilder(management_subtree, buffer, pinfo)
+    local management = TreeBuilder(buffer, pinfo, management_subtree)
     local func = management_table[type]
     if(func) then
         func(management)
@@ -418,8 +418,8 @@ function handle_grant_zpr_addr_req(management)
 end
 
 -- "Class" that contains the tree, buffer, and current position
-function DissectorBuilder(init_tree, init_buffer, init_pinfo) 
-    local dissector = { tree = init_tree, buffer = init_buffer, pinfo = init_pinfo, pos = 0, real_len = 0 }
+function TreeBuilder(init_buffer, init_pinfo, init_tree) 
+    local dissector = { buffer = init_buffer, pinfo = init_pinfo, tree = init_tree, pos = 0, real_len = 0 }
 
     local methods = {
         add_field = function(self, field, len)
