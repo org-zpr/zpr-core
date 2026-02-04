@@ -147,7 +147,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     -- TODO shorten main    
     local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
 
-    local zdp_header = Dissector(zdp_header_subtree, buffer)
+    local zdp_header = DissectorBuilder(zdp_header_subtree, buffer, pinfo)
     zdp_header:add_field(zpi_val, ZPI)
 
     local type = zdp_header:get_curr_buffer_section(TYPE):uint()
@@ -178,7 +178,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         
         local v4_v6 = get_first_four(buffer(PKT_START, 1):uint())
         agent_header_subtree:add(ip_version, v4_v6)
-        local agent_header = Dissector(agent_header_subtree, buffer)
+        local agent_header = DissectorBuilder(agent_header_subtree, buffer)
         agent_header:set_pos(PKT_START)
 
         -- NOTE No updates to this section RE size/position of values, assuming they stayed the same for now
@@ -224,7 +224,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         if real_len > PER_FLOW_NON_AGENT_DATA then
             local mgmt_start = zdp_header:get_pos()
             zdp_header:add_field(management_packet, real_len - PER_FLOW_NON_AGENT_DATA)
-            decode_management(type, buffer(mgmt_start, real_len - PER_FLOW_NON_AGENT_DATA), tree)
+            decode_management(type, buffer(mgmt_start, real_len - PER_FLOW_NON_AGENT_DATA), pinfo, tree)
         end
         -- NOTE I believe that both the Pad and the MAC are removed before the packets are captured
     else -- Non-per-flow management message
@@ -236,7 +236,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         if real_len > NON_FLOW_NON_AGENT_DATA then
             local mgmt_start = zdp_header:get_pos()
             zdp_header:add_field(management_packet, real_len - NON_FLOW_NON_AGENT_DATA)
-            decode_management(type, buffer(mgmt_start, real_len - NON_FLOW_NON_AGENT_DATA), tree)
+            decode_management(type, buffer(mgmt_start, real_len - NON_FLOW_NON_AGENT_DATA), pinfo, tree)
         end
     end
 end
@@ -244,9 +244,9 @@ end
 -- Idiomatic way of doing this may be to actually create a whole new dissector, although that might be challenging
 -- becuase we couldn't just forward the managament packet, the type would also have to be forwarded, meaning we would either
 -- have to forward basically the whole packet, or create a new tvb with the type and the management packet and forward that
-function decode_management(type, buffer, tree)
+function decode_management(type, buffer, pinfo, tree)
     local management_subtree = tree:add(zdp_proto, buffer(), "Management Packet Data")
-    local management = Dissector(management_subtree, buffer)
+    local management = DissectorBuilder(management_subtree, buffer, pinfo)
     local func = management_table[type]
     if(func) then
         func(management)
@@ -342,28 +342,15 @@ function get_tlv_val_type(type, len)
 end
 
 function handle_bind_actor_addr_req(management)
-    management:add_field(pkt_len, PKT_LEN)
-    local version_ihl = management:get_curr_buffer_section(1)
-    local version = get_first_four(version_ihl)
-    management:add_field_no_buffer(ip_version, version)
-    -- Got verison and added it to the buffer, need to increase past
-    management:increase_pos(1) 
+    -- I think there are 2 bytes at the beginning of the packet, but I am not sure what is supposed to be there
+    -- The format is supposed to be l3type (1 byte) then pkt len (2 bytes), but they are two bytes after they should be
+    management:increase_pos(2)
+    local version = management:add_field_and_return(ip_version, IP_VERSION)
+    local length = management:add_field_and_return(pkt_len, PKT_LEN)
 
-    -- TODO Here we just dissect the src addr and dest addr, do we want other parts of the IP header?
-    if version == 4 then
-        -- Current position is at byte 1 in the pkt, need to get to byte 9 (protocol)
-        management:increase_pos(8)
-        management:add_field(ip_protocol, IP_PROTOCOL)
-        -- Skip past checksum
-        management:increase_pos(2)
-        management:add_field(source_addr_v4, IPV4_LEN)
-        management:add_field(dest_addr_v4, IPV4_LEN)
-    elseif version == 6 then
-        -- Current position is at byte 1 in the pkt, need to get to byte 8 (source addr)
-        management:increase_pos(7)
-        management:add_field(source_addr_v6, IPV6_LEN)
-        management:add_field(dest_addr_v6, IPV6_LEN)
-    end
+    -- Full IP packet inside, can just hand off to IP dissector
+    local ip_dissector = Dissector.get("ip")
+    ip_dissector:call(management:get_curr_buffer_section(length):tvb(), management:get_pinfo(), management:get_tree())
 end
 
 function handle_bind_actor_addr_res(management)
@@ -431,8 +418,8 @@ function handle_grant_zpr_addr_req(management)
 end
 
 -- "Class" that contains the tree, buffer, and current position
-function Dissector(init_tree, init_buffer) 
-    local dissector = { tree = init_tree, buffer = init_buffer, pos = 0, real_len = 0 }
+function DissectorBuilder(init_tree, init_buffer, init_pinfo) 
+    local dissector = { tree = init_tree, buffer = init_buffer, pinfo = init_pinfo, pos = 0, real_len = 0 }
 
     local methods = {
         add_field = function(self, field, len)
@@ -477,6 +464,12 @@ function Dissector(init_tree, init_buffer)
         end,
         get_buffer_len = function(self) 
             return self.buffer:len()
+        end,
+        get_pinfo = function(self)
+            return self.pinfo
+        end,
+        get_tree = function(self)
+            return self.tree
         end
     }
 
