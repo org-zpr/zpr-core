@@ -174,13 +174,13 @@ mod test {
 
     impl TempFile {
         fn new_toml(contents: &str) -> TempFile {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let tstamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
             let dir = env::temp_dir();
-            let num: u32 = rng.r#gen();
+            let num: u32 = rng.random();
             let path = dir.join(format!("org_zpr_ph_test_main_{}_{}.toml", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
             TempFile {

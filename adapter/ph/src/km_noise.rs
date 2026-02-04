@@ -416,9 +416,11 @@ impl KeyManagerStateMachine for KmNoise {
         self.send_hmac_key = None;
         if self.initiate {
             let rpk = self.peer_pub_key.as_ref().unwrap();
+            // TODO do we want ? here, or nested match statements with custom error message?
+            // Or do we want to replace the match completely and but a ? on build_initiator()
             let mut initiator = match snow::Builder::new(np)
-                .local_private_key(self.local_keypair.private.as_ref())
-                .remote_public_key(rpk)
+                .local_private_key(self.local_keypair.private.as_ref())?
+                .remote_public_key(rpk)?
                 .build_initiator()
             {
                 Ok(i) => i,
@@ -443,7 +445,7 @@ impl KeyManagerStateMachine for KmNoise {
             Ok(Some(hs_msg))
         } else {
             let responder = match snow::Builder::new(np)
-                .local_private_key(self.local_keypair.private.as_ref())
+                .local_private_key(self.local_keypair.private.as_ref())?
                 .build_responder()
             {
                 Ok(r) => r,
