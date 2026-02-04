@@ -12,8 +12,8 @@ arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
 bytes = { version = "1.10" }
-capnp-rpc = { version = "0.23" }
-capnp = { version = "0.23" }
+capnp-rpc = { version = "0.25.0" }
+capnp = { version = "0.25.0" }
 cbpf-rs = { path = "../../cbpf-rs" }
 chrono = "0.4.39"
 clap_complete = { version = "4.5.57", optional = true}
@@ -50,7 +50,7 @@ url = "2.5.4"
 zerocopy = { version = "0.8.3", features = ["derive", "std"] }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "zerocopy"] }
 zpr-utils = { path = "../../zpr-utils" }
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.1.0", features = ["vsapi"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.7.0", features = ["vsapi"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7.4", optional = true }

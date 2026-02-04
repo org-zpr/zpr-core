@@ -20,9 +20,9 @@ use crate::errors::{VSClientError, VSError};
 use crate::logging::targets::VS_RPC;
 use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
-use zpr::vsapi_types::{ConnectRequest, Connection, VisaResponse};
+use zpr::vsapi_types::{ConnectRequestV1, Connection, VisaResponse};
 
-use vsapi;
+use vsapi_thrift;
 use zpr::packet_info::L3Type;
 
 const PING_INTERVAL: Duration = Duration::from_millis(10000);
@@ -38,7 +38,7 @@ pub struct VisaRequest {
 type VisaRequestResponse = Result<VisaResponse, VSClientError>;
 type AuthorizeConnectResponse = Result<Connection, VSClientError>;
 type DisconnectStatus = Result<(), VSClientError>;
-type RequestServicesResponse = Result<vsapi::ServicesResponse, VSClientError>;
+type RequestServicesResponse = Result<vsapi_thrift::ServicesResponse, VSClientError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -46,7 +46,7 @@ type RequestServicesResponse = Result<vsapi::ServicesResponse, VSClientError>;
 enum VSCommand {
     Stop(bool), // Stop the run loop, optionally de-register from the visa service first.
     RequestVisa(VisaRequest, oneshot::Sender<VisaRequestResponse>),
-    AuthorizeConnect(ConnectRequest, oneshot::Sender<AuthorizeConnectResponse>),
+    AuthorizeConnect(ConnectRequestV1, oneshot::Sender<AuthorizeConnectResponse>),
     ActorDisconnect(IpAddr, oneshot::Sender<DisconnectStatus>), // takes a ZPR address assigned to the actor
     RequestServices(oneshot::Sender<RequestServicesResponse>),
 }
@@ -67,13 +67,13 @@ pub struct VSConn {
     output_tx: mpsc::Sender<VSOutput>,
     client_fac: vscli::VSClientFactory,
     vss_service_addr: SocketAddr, // visa support service listen address
-    actor: vsapi::Actor,
+    actor: vsapi_thrift::Actor,
 }
 
 /// Helper function to create a basic node actor. Probably only useful for early versions
 /// of the node.  In the future the node will create it's own actor datastructure and
 /// had it to [VSConn::new].
-pub fn new_node_actor(node_addr: IpAddr, claims: &BTreeMap<String, String>) -> vsapi::Actor {
+pub fn new_node_actor(node_addr: IpAddr, claims: &BTreeMap<String, String>) -> vsapi_thrift::Actor {
     // In prototype, the node zpr address is the same as its tether address. May not be true going forward.
     let zaddr_bytes = match node_addr {
         IpAddr::V4(a) => a.octets().to_vec(),
@@ -92,8 +92,8 @@ pub fn new_node_actor(node_addr: IpAddr, claims: &BTreeMap<String, String>) -> v
     }
     augmented_claims.insert(claims::KATTR_EPID.into(), node_addr.to_string());
 
-    vsapi::Actor {
-        actor_type: Some(vsapi::ActorType::NODE),
+    vsapi_thrift::Actor {
+        actor_type: Some(vsapi_thrift::ActorType::NODE),
         attrs: Some(augmented_claims),
         auth_expires: Some((timestamp + 60 * 60) as i64),
         zpr_addr: Some(zaddr_bytes),
@@ -118,7 +118,7 @@ impl VSConn {
     ///   support service. If not set, then we will advertise `<NODE_ZPR_ADDR>:<DEFAULT_VSS_PORT>`.
     //
     pub fn new(
-        node_actor: vsapi::Actor,
+        node_actor: vsapi_thrift::Actor,
         output_tx: mpsc::Sender<VSOutput>,
         service_addr: &str,
         node_cert_file: &Path,
@@ -274,7 +274,7 @@ impl VSConn {
 
     fn handle_authorize_connect(
         client: &mut Box<dyn VSClientI>,
-        cr: vsapi::ConnectRequest,
+        cr: vsapi_thrift::ConnectRequest,
     ) -> AuthorizeConnectResponse {
         match client.authorize_connect(cr) {
             Ok(acr) => {
@@ -336,7 +336,7 @@ impl VSConnHandle {
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn authorize_connect(&self, req: ConnectRequest) -> AuthorizeConnectResponse {
+    pub async fn authorize_connect(&self, req: ConnectRequestV1) -> AuthorizeConnectResponse {
         let (tx, rx) = oneshot::channel();
         self.send_command(VSCommand::AuthorizeConnect(req, tx))
             .await?;
@@ -514,7 +514,7 @@ s5JVZ48=
     impl VSClientI for TestVSCli {
         fn authenticate(
             &mut self,
-            _actor: &vsapi::Actor,
+            _actor: &vsapi_thrift::Actor,
             _cert_pem_data: &str,
             _vss_service_addr: SocketAddr,
         ) -> Result<String, VSClientError> {
@@ -525,12 +525,12 @@ s5JVZ48=
             Ok(String::from("le_key"))
         }
 
-        fn ping_vs(&mut self) -> Result<vsapi::Pong, VSClientError> {
+        fn ping_vs(&mut self) -> Result<vsapi_thrift::Pong, VSClientError> {
             incr(CounterT::Ping);
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
-            Ok(vsapi::Pong {
+            Ok(vsapi_thrift::Pong {
                 configuration: Some(1),
                 policy_version: Some(2),
             })
@@ -553,8 +553,8 @@ s5JVZ48=
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
-            let vrr = vsapi::VisaResponse {
-                status: Some(vsapi::StatusCode::FAIL),
+            let vrr = vsapi_thrift::VisaResponse {
+                status: Some(vsapi_thrift::StatusCode::FAIL),
                 visa: None,
                 reason: Some(format!("addr: {}, type: {}", source_tether_addr, l3_type)),
             };
@@ -564,8 +564,8 @@ s5JVZ48=
 
         fn authorize_connect(
             &mut self,
-            req: vsapi::ConnectRequest,
-        ) -> Result<vsapi::ConnectResponse, VSClientError> {
+            req: vsapi_thrift::ConnectRequest,
+        ) -> Result<vsapi_thrift::ConnectResponse, VSClientError> {
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
@@ -578,8 +578,8 @@ s5JVZ48=
                 }
                 None => {}
             };
-            let agnt = vsapi::Actor {
-                actor_type: Some(vsapi::ActorType::ADAPTER),
+            let agnt = vsapi_thrift::Actor {
+                actor_type: Some(vsapi_thrift::ActorType::ADAPTER),
                 attrs: Some(attrs),
                 auth_expires: Some(0),
                 zpr_addr: None,
@@ -587,9 +587,9 @@ s5JVZ48=
                 ident: None,
                 provides: None,
             };
-            let cr = vsapi::ConnectResponse {
+            let cr = vsapi_thrift::ConnectResponse {
                 connection_id: req.connection_id,
-                status: Some(vsapi::StatusCode::SUCCESS),
+                status: Some(vsapi_thrift::StatusCode::SUCCESS),
                 actor: Some(agnt),
                 reason: Some(format!("")),
             };
@@ -604,13 +604,13 @@ s5JVZ48=
             Ok(())
         }
 
-        fn request_services(&mut self) -> Result<vsapi::ServicesResponse, VSClientError> {
+        fn request_services(&mut self) -> Result<vsapi_thrift::ServicesResponse, VSClientError> {
             incr(CounterT::RequestServices);
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
-            let response = vsapi::ServicesResponse {
-                services: Some(vsapi::ServicesList {
+            let response = vsapi_thrift::ServicesResponse {
+                services: Some(vsapi_thrift::ServicesList {
                     expiration: Some(
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)
@@ -915,13 +915,14 @@ s5JVZ48=
         claims.insert("foo".to_string(), "fee".to_string());
         claims.insert("hello".to_string(), "goodbye".to_string());
 
-        let req = vsapi::ConnectRequest {
+        let req = vsapi_thrift::ConnectRequest {
             connection_id: Some(456),
             dock_addr: Some(vec![10, 0, 0, 1]),
             claims: Some(claims.clone()),
             challenge: Some(vec![1, 2, 3, 4]),
             challenge_responses: Some(vec![vec![5, 6, 7, 8]]),
         };
+
         let resp = conn_handle.authorize_connect(req.try_into().unwrap());
 
         match timeout(Duration::from_millis(100), resp).await {
@@ -941,8 +942,8 @@ s5JVZ48=
 
         {
             // Run again check that we get the error:
-            let req = vsapi::ConnectRequest {
-                connection_id: None,
+            let req = vsapi_thrift::ConnectRequest {
+                connection_id: Some(100),
                 dock_addr: Some(vec![10, 0, 0, 1]),
                 claims: Some(claims.clone()),
                 challenge: None,

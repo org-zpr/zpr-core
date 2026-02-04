@@ -3,12 +3,17 @@ use zpr::vsapi::v1 as vsapi2;
 use ipnet::IpNet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
 use openssl::sign::Signer;
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::sync::{mpsc, oneshot};
+use tokio_rustls::TlsConnector;
 use tokio_util::compat::*;
 use tracing::*;
 
@@ -95,7 +100,10 @@ impl VSConn {
         let sock = tokio::net::TcpStream::connect(self.vs_addr).await?;
         sock.set_nodelay(true)?;
 
-        let (reader, writer) = sock.into_split();
+        let connector = tls_connect();
+        let tls = connector.connect(self.vs_addr.ip().into(), sock).await?;
+        let (reader, writer) = tokio::io::split(tls);
+        debug!(target: VS_RPC, "VS RPC service connected to {} (TLS)", self.vs_addr);
 
         let network = capnp_rpc::twoparty::VatNetwork::new(
             tokio::io::BufReader::new(reader).compat(),
@@ -454,4 +462,72 @@ fn new_coded_error(rdr: vsapi2::error::Reader) -> VSApiError {
     };
     let retry = rdr.get_retry_in();
     VSApiError::CodedError(err_code, err_msg, retry)
+}
+
+#[derive(Debug)]
+struct NoVerification;
+
+// Implement the dangerous trait ServerCertVerifier NoVerification which will
+// just always approve the connection
+impl ServerCertVerifier for NoVerification {
+    fn verify_server_cert(
+        &self,
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
+        _: &[u8],
+        _: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        Ok(HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        vec![
+            SignatureScheme::RSA_PKCS1_SHA1,
+            SignatureScheme::ECDSA_SHA1_Legacy,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::ECDSA_NISTP256_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
+            SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA512,
+            SignatureScheme::ECDSA_NISTP521_SHA512,
+            SignatureScheme::RSA_PSS_SHA256,
+            SignatureScheme::RSA_PSS_SHA384,
+            SignatureScheme::RSA_PSS_SHA512,
+            SignatureScheme::ED25519,
+            SignatureScheme::ED448,
+            SignatureScheme::ML_DSA_44,
+            SignatureScheme::ML_DSA_65,
+            SignatureScheme::ML_DSA_87,
+        ]
+    }
+}
+
+// Create a dangerous connector - the verifier will always approve
+// TODO decide if we want to use an actual certificate
+fn tls_connect() -> TlsConnector {
+    let cfg = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoVerification))
+        .with_no_client_auth();
+
+    TlsConnector::from(Arc::new(cfg))
 }
