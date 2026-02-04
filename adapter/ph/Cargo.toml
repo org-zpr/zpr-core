@@ -11,7 +11,7 @@ arc-swap = { version = "1.7", optional = true }
 arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
-bytes = { version = "1.10" }
+bytes = { version = "1.11.1" }
 capnp-rpc = { version = "0.25.0" }
 capnp = { version = "0.25.0" }
 cbpf-rs = { path = "../../cbpf-rs" }
