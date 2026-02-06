@@ -1128,7 +1128,7 @@ mod test {
         let codec = Arc::new(CopyCodec {});
 
         let hdr = ZdpBaseHeader {
-            packet_type: ZdpPacketType::EchoRequest,
+            packet_type: ZdpPacketType::Echo,
             excess_length: 0u8,
         };
         let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
@@ -1169,7 +1169,7 @@ mod test {
         let mut pkt = Packet::new(buf, 64);
 
         let hdr = ZdpBaseHeader {
-            packet_type: ZdpPacketType::EchoRequest,
+            packet_type: ZdpPacketType::Echo,
             excess_length: 0u8,
         };
         //let hbytes = hdr.as_bytes();

@@ -49,7 +49,7 @@ pub fn send_discard(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
 pub fn send_echo_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::EchoRequest, pkt)
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Echo, pkt)
 }
 
 /// send a Hello Request (RFC 6.5 § 6.3.4)
@@ -253,7 +253,7 @@ pub fn send_terminate_link_or_docking_session<'a, 'pktbuf>(
     core::send_non_flow_mgmt(
         asm,
         link_id,
-        zdp::ZdpPacketType::TerminateLinkOrDocking,
+        zdp::ZdpPacketType::TerminateLinkOrDockingSession,
         pkt,
     )
 }

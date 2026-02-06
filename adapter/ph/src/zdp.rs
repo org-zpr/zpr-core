@@ -17,21 +17,21 @@ pub enum ZdpPacketType {
     SetPathMtu = 2,
     StreamIdRequest = 3,
     StreamIdResponse = 4,
-    StreamIdWithdrawl = 5,
+    StreamIdWithdrawal = 5,
     BindActorAddressRequest = 6,
     BindActorAddressResponse = 7,
     BindEgressStreamRequest = 8,  // TODO: add to RFC 17
     BindEgressStreamResponse = 9, // TODO: add to RFC 17
-    // UnbindActorAddressRequest = 13,
-    // UnbindActorAddressResponse = 14,
+    UnbindActorAddressRequest = 13,
+    UnbindActorAddressResponse = 14,
 
     // Not flow-based
     ZprArp = 128,
     KeyManagement = 129,
     Discard = 130,
-    EchoRequest = 131,
+    Echo = 131,
     Report = 132,
-    TerminateLinkOrDocking = 133,
+    TerminateLinkOrDockingSession = 133,
     HelloRequest = 134,
     HelloResponse = 135,
     ConfigurationRequest = 136,
@@ -40,10 +40,6 @@ pub enum ZdpPacketType {
     GrantZprAddress = 139,   // TODO: add to RFC 6
     RevokeZprAddress = 140,
     InitAuthenticationRequest = 141, // TODO: add to RFC 6
-
-    // Should these be deleted? They are still in use, but no longer in RFC 17
-    TerminateLinkResponse = 142,
-    TerminateLinkIndication = 143,
 
     Acknowledgement = 254,
     Reserved255 = 255,
