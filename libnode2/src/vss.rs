@@ -59,10 +59,10 @@ pub async fn launch_vss(
         Ok(l) => l,
         Err(e) => return Err(VSApiError::TLSError(format!("TCP Bind failed {}", e))),
     };
-    info!(target: VSS_RPC, "TLS acceptor on {}", saddr);
+    debug!(target: VSS_RPC, "TLS acceptor on {}", saddr);
 
     let listener = tokio::net::TcpListener::bind(*saddr).await?;
-    info!(target: VSS_RPC, "TCP listener on {}", saddr);
+    debug!(target: VSS_RPC, "TCP listener on {}", saddr);
 
     loop {
         let (sock, addr) = listener.accept().await?;
