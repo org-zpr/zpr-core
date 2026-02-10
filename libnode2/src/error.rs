@@ -32,6 +32,9 @@ pub enum VSApiError {
 
     #[error("vsapi type error: {0}")]
     ApiTypeError(#[from] VsapiTypeError),
+
+    #[error("TLS error: {0}")]
+    TLSError(String),
 }
 
 #[derive(Debug, Error)]

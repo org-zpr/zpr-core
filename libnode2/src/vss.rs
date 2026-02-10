@@ -2,9 +2,13 @@
 //! Arriving VSS messages are placed on a channel to be handled by (presumably) the PH.
 //!
 
+use rustls::ServerConfig;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
+use tokio_rustls::TlsAcceptor;
 use tokio_util::compat::*;
 use tracing::{debug, error, info, warn};
 use zpr::vsapi::v1;
@@ -51,8 +55,15 @@ pub async fn launch_vss(
 ) -> Result<(), VSApiError> {
     info!(target: VSS_RPC, "VSS starts on {}", saddr);
 
-    // TODO: TLS
-    let listener = tokio::net::TcpListener::bind(saddr).await?;
+    let acceptor = match tls_acceptor(*saddr) {
+        Ok(l) => l,
+        Err(e) => return Err(VSApiError::TLSError(format!("TCP Bind failed {}", e))),
+    };
+    info!(target: VSS_RPC, "TLS acceptor on {}", saddr);
+
+    let listener = tokio::net::TcpListener::bind(*saddr).await?;
+    info!(target: VSS_RPC, "TCP listener on {}", saddr);
+
     loop {
         let (sock, addr) = listener.accept().await?;
         info!(target: VSS_RPC, "connection from {}", addr);
@@ -60,7 +71,10 @@ pub async fn launch_vss(
             warn!(target: VSS_RPC, "set_nodelay failed: {}", e);
         }
 
-        let (reader, writer) = sock.into_split();
+        let tls = acceptor.accept(sock).await?;
+        info!(target: VSS_RPC, "TLS connection");
+        let (reader, writer) = tokio::io::split(tls);
+        // let (reader, writer) = sock.into_split();
 
         let network = capnp_rpc::twoparty::VatNetwork::new(
             tokio::io::BufReader::new(reader).compat(),
@@ -83,6 +97,25 @@ pub async fn launch_vss(
         });
     }
     // TODO: Some way to cancel this loop?
+}
+
+// This function creates a certificate, and the clients will not require verification of the
+// cert. In the future, we may actually want to share a cert between the VSAPI and VSS in VS/VSConn in Libnode2
+fn tls_acceptor(listen: SocketAddr) -> Result<TlsAcceptor, Box<dyn std::error::Error>> {
+    let self_signed_cert = rcgen::generate_simple_self_signed(vec![listen.to_string()])?;
+    // Create self signed certificate that does not require client authentication
+    let cert_der = self_signed_cert.cert.der();
+    let key_der = self_signed_cert.signing_key.serialize_der();
+
+    // Convert the cert into a format the
+    let chain = vec![CertificateDer::from(cert_der.clone())];
+    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_der));
+
+    let cfg = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(chain, key)?;
+
+    Ok(TlsAcceptor::from(Arc::new(cfg)))
 }
 
 struct VisaSupportServiceImpl {
