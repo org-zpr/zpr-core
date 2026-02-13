@@ -9,7 +9,7 @@ zpr_address = "fd5a:5052:90de::1"
 
 [bootstrap]
 "node.zpr.org" = "include/node-public-key.pem"
-
+"user.zpr.org" = "include/user-public-key.pem"
 
 
 [protocols.http]

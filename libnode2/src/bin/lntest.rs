@@ -1,21 +1,28 @@
 use clap::Parser;
 use ipnet::IpNet;
+use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
+use openssl::rand::rand_bytes;
 use openssl::rsa::Rsa;
+use openssl::sign::Signer;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use std::fs;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
-use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
+use libnode2::vsconn::{VSConn, VSConnectRequest, VSDisconnectNotice, VSVisaRequest};
 use zpr::packet_info::L3Type;
-use zpr::vsapi_types::{CommFlag, PacketDesc, VisaOp, VsapiFiveTuple};
+use zpr::vsapi_types::{
+    AuthBlob, ChallengeAlg, Claim, CommFlag, ConnectRequest, DisconnectReason, PacketDesc,
+    SelfSignedBlob, VisaOp, VsapiFiveTuple,
+};
 
 use libnode2::vss::{ListProcessingResponse, VSSMessage, launch_vss};
 
@@ -57,6 +64,8 @@ enum Cmd {
     Disconnect,
     VisaRequest(VsapiFiveTuple),
     RegisterVss(SocketAddr),
+    AuthorizeConnect(PathBuf, Vec<Claim>),
+    NotifyDisconnect(IpAddr),
 }
 
 fn help() {
@@ -70,6 +79,37 @@ fn help() {
     println!("                               Note lntest starts a VSS server on <self_addr>:8183");
     println!("                               automatically at startup so adding a socket addr is");
     println!("                               only serves to send bad data to the visa service.");
+    println!("  authorize_connect <KEY_PATH> [<CLAIM> ...] :");
+    println!("                               authorize an adapter connection");
+    println!("                               Claims are key:value pairs (split on first ':').");
+    println!("                               The endpoint.zpr.adapter.cn claim is required.");
+    println!(
+        "                               Example: authorize_connect /path/to/adapter.key endpoint.zpr.adapter.cn:adapter1 zpr.addr:fd5a::100"
+    );
+    println!("  notify_disconnect <ZPR_ADDR>  : notify VS to disconnect an adapter");
+}
+
+/// Tokenize input splitting on whitespace, but keeping double-quoted substrings as single tokens.
+fn tokenize(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            c if c.is_whitespace() && !in_quotes => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }
 
 fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
@@ -81,11 +121,11 @@ fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
 
 /// Parse user input and return a "command".
 fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
-    let parts: Vec<&str> = input.split_whitespace().collect();
+    let parts = tokenize(input);
     if parts.is_empty() {
         return Err("does not compte".into());
     }
-    match parts[0] {
+    match parts[0].as_str() {
         "h" => {
             help();
             Ok(Cmd::Nop)
@@ -93,7 +133,6 @@ fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
 
         "exit" | "quit" | "q" => Ok(Cmd::Disconnect),
 
-        // TODO: parse quit here too
         "visa_request" => {
             if parts.len() != 4 {
                 return Err(
@@ -108,8 +147,8 @@ fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
                 _ => return Err("protocol must be TCP, UDP, or ICMP6".to_string()),
             };
 
-            let (src_ip, src_port) = parse_ipaddr_and_port(parts[2])?;
-            let (dst_ip, dst_port) = parse_ipaddr_and_port(parts[3])?;
+            let (src_ip, src_port) = parse_ipaddr_and_port(&parts[2])?;
+            let (dst_ip, dst_port) = parse_ipaddr_and_port(&parts[3])?;
 
             Ok(Cmd::VisaRequest(VsapiFiveTuple::new(
                 L3Type::new_from_addr(&src_ip),
@@ -133,6 +172,38 @@ fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
                 SocketAddr::new(cfg.node_zpr_addr, 8183)
             };
             Ok(Cmd::RegisterVss(saddr))
+        }
+
+        "authorize_connect" => {
+            if parts.len() < 2 {
+                return Err("usage: authorize_connect <KEY_PATH> [<key:value> ...]".to_string());
+            }
+            let key_path = PathBuf::from(&parts[1]);
+            let mut claims = Vec::new();
+            for token in &parts[2..] {
+                if let Some((key, value)) = token.split_once(':') {
+                    claims.push(Claim {
+                        key: key.to_string(),
+                        value: value.to_string(),
+                    });
+                } else {
+                    return Err(format!(
+                        "invalid claim '{}': expected key:value format",
+                        token
+                    ));
+                }
+            }
+            Ok(Cmd::AuthorizeConnect(key_path, claims))
+        }
+
+        "notify_disconnect" => {
+            if parts.len() != 2 {
+                return Err("usage: notify_disconnect <ZPR_ADDR>".to_string());
+            }
+            let addr: IpAddr = parts[1]
+                .parse()
+                .map_err(|e| format!("invalid ZPR address '{}': {}", parts[1], e))?;
+            Ok(Cmd::NotifyDisconnect(addr))
         }
 
         _ => Err("does not compute: type 'h' for help".into()),
@@ -257,6 +328,66 @@ async fn main() {
                                     }
                                 }
                             },
+                            Cmd::NotifyDisconnect(zpr_addr) => {
+                                let notice = VSDisconnectNotice {
+                                    zpr_addr: Some(zpr_addr),
+                                    reason: DisconnectReason::Admin,
+                                };
+                                match handle.notify_disconnect(notice).await {
+                                    Ok(()) => println!("notify_disconnect succeeded"),
+                                    Err(e) => println!("notify_disconnect failed: {:?}", e),
+                                }
+                            },
+                            Cmd::AuthorizeConnect(key_path, claims) => {
+                                let adapter_key = match load_private_key(&key_path) {
+                                    Ok(k) => k,
+                                    Err(e) => {
+                                        println!("failed to load adapter key: {}", e);
+                                        continue;
+                                    }
+                                };
+
+                                let cn = match claims.iter().find(|c| c.key == "endpoint.zpr.adapter.cn") {
+                                    Some(c) => c.value.clone(),
+                                    None => {
+                                        println!("error: endpoint.zpr.adapter.cn claim is required");
+                                        continue;
+                                    }
+                                };
+
+                                let blob = match build_self_signed_blob(&cn, &adapter_key) {
+                                    Ok(b) => b,
+                                    Err(e) => {
+                                        println!("failed to build self-signed blob: {}", e);
+                                        continue;
+                                    }
+                                };
+
+                                let mut rand_octets = [0u8; 3];
+                                rand_bytes(&mut rand_octets).unwrap();
+                                let substrate_addr = IpAddr::V4(Ipv4Addr::new(
+                                    10, rand_octets[0], rand_octets[1], rand_octets[2],
+                                ));
+
+                                let connect_req = ConnectRequest {
+                                    blobs: vec![AuthBlob::SS(blob)],
+                                    claims,
+                                    substrate_addr,
+                                    dock_interface: 0,
+                                };
+
+                                match handle.authorize_connect(connect_req).await {
+                                    Ok(conn) => {
+                                        println!(
+                                            "authorize_connect succeeded: zpr_addr={}, auth_expires={}",
+                                            conn.zpr_addr, conn.auth_expires
+                                        );
+                                    }
+                                    Err(e) => {
+                                        println!("authorize_connect failed: {:?}", e);
+                                    }
+                                }
+                            },
                         }
                     }
                     Some(vss_msg) = vss_rx.recv() => {
@@ -360,6 +491,40 @@ async fn main() {
             }
         })
         .await;
+}
+
+fn build_self_signed_blob(
+    cn: &str,
+    private_key: &PKey<Private>,
+) -> Result<SelfSignedBlob, Box<dyn std::error::Error>> {
+    let mut challenge = vec![0u8; 32];
+    rand_bytes(&mut challenge)?;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Sign: timestamp_be(8) + cn_utf8(var) + challenge(32)
+    let mut data = Vec::new();
+    data.extend_from_slice(&timestamp.to_be_bytes());
+    data.extend_from_slice(cn.as_bytes());
+    data.extend_from_slice(&challenge);
+
+    let mut signer = Signer::new(MessageDigest::sha256(), private_key)?;
+    signer.update(&data)?;
+    let raw_signature = signer.sign_to_vec()?;
+
+    // VS decodes base64 from the signature field before verifying.
+    let b64_signature = openssl::base64::encode_block(&raw_signature);
+
+    Ok(SelfSignedBlob {
+        alg: ChallengeAlg::RsaSha256Pkcs1v15,
+        challenge,
+        cn: cn.to_string(),
+        timestamp,
+        signature: b64_signature.into_bytes(),
+    })
 }
 
 fn load_private_key(keyfile: &Path) -> Result<PKey<Private>, Box<dyn std::error::Error>> {
