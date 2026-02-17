@@ -115,6 +115,7 @@ BLOB_LEN = 2
 DL_INIT = 2
 FRAG_ID = 2
 FRAG_OFFSET = 2
+TRANS_ID = 2
 
 IPV4_LEN = 4
 STREAM_ID = 4
@@ -130,7 +131,6 @@ INIT_AUTH_HMAC = 32
 
 HMAC = 0
 KEY_NOISE_PAD = 0
-TRANS_ID = 0
 
 EXCESS_LEN_START = ZPI + TYPE
 TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
@@ -256,9 +256,6 @@ end
 
 -- Function definitions must come before table
 function handle_echo(management)
-    if TRANS_ID > 0 then
-        management:add_field(trans_id, TRANS_ID)
-    end
     local add_data_len = management:add_field_and_return(adl, ADL)
     if add_data_len > 0 then 
         management:add_field(additional_data, add_data_len)
@@ -266,9 +263,6 @@ function handle_echo(management)
 end
 
 function handle_terminate_ind_req(management)
-    if TRANS_ID > 0 then
-        management:add_field(trans_id, TRANS_ID)
-    end
     management:add_field_with_text_table(reason_code, REASON_CODE, terminate_reason_table)
     local data_len = management:add_field_and_return(data_length_u8, DL_TERMINATE)
     if data_len > 0 then 
@@ -277,9 +271,6 @@ function handle_terminate_ind_req(management)
 end
 
 function handle_terminate_res(management)
-    if TRANS_ID > 0 then
-        management:add_field(trans_id, TRANS_ID)
-    end
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     local data_len = management:add_field_and_return(data_length_u8, DL_TERMINATE)
     if data_len > 0 then 
@@ -341,9 +332,7 @@ function get_tlv_val_type(type, len)
 end
 
 function handle_bind_actor_addr_req(management)
-    -- I think there are 2 bytes at the beginning of the packet, but I am not sure what is supposed to be there
-    -- The format is supposed to be l3type (1 byte) then pkt len (2 bytes), but they are two bytes after they should be
-    management:increase_pos(2)
+    management:add_field(trans_id, TRANS_ID)
     local version = management:add_field_and_return(ip_version, IP_VERSION)
     local length = management:add_field_and_return(pkt_len, PKT_LEN)
 
@@ -353,6 +342,7 @@ function handle_bind_actor_addr_req(management)
 end
 
 function handle_bind_actor_addr_res(management)
+    management:add_field(trans_id, TRANS_ID)
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     local info = management:add_field_and_return(info_len, INFO_LEN)
     if info > 0 then 
@@ -363,11 +353,13 @@ function handle_bind_actor_addr_res(management)
 end
 
 function handle_bind_egress_stream_req(management)
+    management:add_field(trans_id, TRANS_ID)
     management:add_field(tcst, TCST)
     management:add_field(tc, TC)
 end
 
 function handle_bind_egress_stream_res(management)
+    management:add_field(trans_id, TRANS_ID)
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     management:add_field(info_len, INFO_LEN)
 end
