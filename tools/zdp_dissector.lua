@@ -133,7 +133,7 @@ KEY_NOISE_PAD = 0
 TRANS_ID = 0
 
 EXCESS_LEN_START = ZPI + TYPE
-TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
+TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
 PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
 PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
 NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
@@ -175,18 +175,17 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         -- zdp_header_subtree:add(compressed_pkt, buffer(curr_pos, 5))
 
         local agent_header_subtree = tree:add(zdp_proto, buffer(), "Compressed Agent Packet Header Data")
-        
-        local v4_v6 = get_first_four(buffer(PKT_START, 1):uint())
-        agent_header_subtree:add(ip_version, v4_v6)
         local agent_header = TreeBuilder(buffer, pinfo, agent_header_subtree)
         agent_header:set_pos(PKT_START)
+        local v4_v6 = get_first_four(buffer(PKT_START, 1):uint())
+        agent_header:add_field_no_buffer(ip_version, v4_v6)
 
-        -- NOTE No updates to this section RE size/position of values, assuming they stayed the same for now
+        -- NOTE/TODO No updates to this section RE size/position of values, assuming they stayed the same for now
         -- Just want to get this somewhat working first
         if v4_v6 == 4 then
             -- TODO since the curr_pos always has to get incremented, perhaps make a func that both adds to tree and increments curr_pos
             local ihl_val = get_back_four(buffer(PKT_START, 1):uint())
-            agent_header_subtree:add(ihl, ihl_val)
+            agent_header:add_field_no_buffer(ihl, ihl_val)
             agent_header:increase_pos(1)
             agent_header:add_field(frag_id, FRAG_ID)
             agent_header:add_field(frag_offset, FRAG_OFFSET)
@@ -209,12 +208,12 @@ function zdp_proto.dissector(buffer, pinfo, tree)
             -- still use hardcoded values here because since the values are bitpacked, if something was changed 
             -- within this section, these lines would need to be changed anyway
             local tc_value = get_middle_eight(buffer(curr_pos, 2):uint())
-            agent_header_subtree:add(tc, tc_value)
+            agent_header:add_field_no_buffer(tc, tc_value)
             curr_pos = curr_pos + 1
             local fl_value = get_back_twelve(buffer(curr_pos, 3):uint())
-            agent_header_subtree:add(fl, fl_value)
+            agent_header:add_field_no_buffer(fl, fl_value)
             curr_pos = curr_pos + 2
-            agent_header_subtree:add(hop_limit, buffer(curr_pos, HOP_LIMIT))
+            agent_header:add_field_no_buffer(hop_limit, buffer(curr_pos, HOP_LIMIT):uint())
             -- Dissector.get("tcp"):call(buffer(15, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
         end
     elseif type <= 127 then -- Per-Flow Management Message
