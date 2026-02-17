@@ -60,7 +60,7 @@ case "$ACTOR_PROTOCOL" in
 		C_ZPR_ADDR=10.253.3.1
 		ZPR_SUBNET=10.253.0.0/16
 
-		POLICY_BIN="v4-1node-${NUM_ACTORS}actor-ping.bin"
+		POLICY_BIN="v4-1node-${NUM_ACTORS}actor-ping.bin2"
         ;;
     ipv6)
         echo "Running test in IPv6 mode"
@@ -73,7 +73,7 @@ case "$ACTOR_PROTOCOL" in
 		C_ZPR_ADDR=fd00:1:3::1
 		ZPR_SUBNET=fd00:1::0/32
 
-		POLICY_BIN="v6-1node-${NUM_ACTORS}actor-ping.bin"
+		POLICY_BIN="v6-1node-${NUM_ACTORS}actor-ping.bin2"
         ;;
     *)
         echo "Protocol '$ACTOR_PROTOCOL' not supported."

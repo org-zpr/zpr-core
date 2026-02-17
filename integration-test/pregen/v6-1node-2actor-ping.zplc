@@ -8,7 +8,6 @@ order = ["hosts", "dns"]
 "n0.overlay" = "10.0.0.1"
 
 [nodes."node"]
-key = "b9oiUhEcvRAhtzqOrl0yY59j/R3mUCxcLiMjdr/d7g0="
 provider = [ [ "endpoint.zpr.adapter.cn", "node" ] ]
 zpr_address = "n0.zpr"
 interfaces = ["in1"]
@@ -21,6 +20,7 @@ cert_path = "ca-cert.pem"
 dock_node = "node"
 
 [bootstrap]
+"node" = "node-rsa-pubkey.pem"
 "vs" = "actorvs.pem"
 "adapter1" = "actor1.pem"
 "adapter2" = "actor2.pem"

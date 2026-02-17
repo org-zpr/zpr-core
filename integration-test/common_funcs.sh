@@ -150,14 +150,14 @@ function create_actor_key_and_cert() {
 }
 
 function emit_vs_config() {
+  # Args retained for backward compatibility with existing callers.
   CA_NAME=$1
   VS_ACTOR_NAME=$2
   cat <<EOF
-adapter_cert: $(realpath "$2.crt")
-root_ca: $(realpath "$1.crt")
-disable_connect_validation: true
-vs_cert: "$PREGEN/zpr-rsa-cert.pem"
-vs_key: "$PREGEN/zpr-rsa-key.pem"
+[core]
+admin_cert = "$(realpath "$PREGEN/zpr-rsa-cert.pem")"
+admin_key = "$(realpath "$PREGEN/zpr-rsa-key.pem")"
+vk_uri = "redis://127.0.0.1:6379"
 EOF
 }
 
@@ -199,7 +199,7 @@ function countdown() {
 
 # Get all descendant PIDs whose name matches a specific list
 function get_descendants() {
-    exenames="(ph|node|adapter|vservice)"
+    exenames="(ph|node|adapter|vservice|vs|valkey-server)"
     regex="$exenames\(([0-9]+)\)"
     echo $(pstree -pT "$$" | egrep -o "$regex" | sed -E "s/$regex/\2/")
 }

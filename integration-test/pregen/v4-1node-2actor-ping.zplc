@@ -8,7 +8,6 @@ order = ["hosts", "dns"]
 "n0.overlay" = "10.0.0.1"
 
 [nodes."node"]
-key = "b9oiUhEcvRAhtzqOrl0yY59j/R3mUCxcLiMjdr/d7g0="
 provider = [ [ "endpoint.zpr.adapter.cn", "node" ] ]
 zpr_address = "n0.zpr"
 interfaces = ["in1"]
@@ -24,6 +23,7 @@ dock_node = "node"
 "vs" = "actorvs.pem"
 "adapter1" = "actor1.pem"
 "adapter2" = "actor2.pem"
+"node" = "node-rsa-pubkey.pem"
 
 
 [protocols.ping]
