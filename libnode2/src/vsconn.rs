@@ -12,7 +12,7 @@ use openssl::sign::Signer;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_rustls::TlsConnector;
 use tokio_util::compat::*;
 use tracing::*;
@@ -83,7 +83,7 @@ enum VS2Command {
     ),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum VSConnLifecycleEvent {
     /// Means we have established a network connection to the Cap'n Proto service.
     RunLoopStarts,
@@ -101,7 +101,7 @@ pub struct VSConn {
     vs_addr: SocketAddr,
     node_cn: String,
     node_private_key: PKey<Private>,
-    life_tx: mpsc::Sender<VSConnLifecycleEvent>,
+    life_tx: broadcast::Sender<VSConnLifecycleEvent>,
 }
 
 #[derive(Clone)]
@@ -110,8 +110,10 @@ pub struct VSConnHandle {
 }
 
 impl VSConn {
-    /// Create a new VSConn. The returned lifecycle event receiver will get events about the connection lifecycle,
-    /// such as when we connect to the VS API and when the run loop exits.
+    /// Create a new VSConn.
+    ///
+    /// Use [VSConn::subscribe_lifecycle_events] to get a receiver for lifecycle events such as when
+    /// we connect to the VS API and when the run loop starts or exits.
     ///
     /// `buffer_size` determines how many commands can be buffered to send to the run loop before
     /// [VSConnHandle] starts blocking.
@@ -120,28 +122,30 @@ impl VSConn {
         vs_addr: SocketAddr,
         node_cn: String,
         node_private_key: PKey<Private>,
-    ) -> (Self, mpsc::Receiver<VSConnLifecycleEvent>) {
+    ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
-        let (life_tx, life_rx) = mpsc::channel(LIFECYCLE_EVENT_BUFFER_SIZE);
-        (
-            VSConn {
-                cmd_tx,
-                cmd_rx,
-                vs_addr,
-                node_cn,
-                node_private_key,
-                life_tx,
-            },
-            life_rx,
-        )
+        let (life_tx, _) = broadcast::channel(LIFECYCLE_EVENT_BUFFER_SIZE);
+        VSConn {
+            cmd_tx,
+            cmd_rx,
+            vs_addr,
+            node_cn,
+            node_private_key,
+            life_tx,
+        }
     }
 
-    /// Best-effort send a lifecycle event, just log if the send fails.
+    /// Subscribe to broadcast lifecycle events from this VSConn.
+    pub fn subscribe_lifecycle_events(&self) -> broadcast::Receiver<VSConnLifecycleEvent> {
+        self.life_tx.subscribe()
+    }
+
+    /// Best-effort send a lifecycle event, just log if the send fails (no receivers).
     fn send_lifecycle_event(&self, event: VSConnLifecycleEvent) {
-        match self.life_tx.try_send(event) {
+        match self.life_tx.send(event) {
             Ok(_) => {}
             Err(e) => {
-                error!(target: VS_RPC, "failed to send lifecycle event: {:?}", e);
+                info!(target: VS_RPC, "failed to send lifecycle event: {event:?}: {:?}", e);
             }
         }
     }

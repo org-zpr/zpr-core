@@ -547,7 +547,7 @@ fn main() -> ExitCode {
         topology_config,
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
         actor_output_requeue: ActorOutputRequeue::new(actor_requeue_inqs),
-        vsconn: vsconn.as_ref().map(|c| c.0.handle()),
+        vsconn: vsconn.as_ref().map(|c| c.handle()),
         visa_table: std::sync::RwLock::new(visa_table::VisaTable::new_with_vs_visas(
             &node_zpr_addr,
         )),
@@ -744,7 +744,8 @@ fn main() -> ExitCode {
 
         // Launch VSConn run loop (sets up its own local set). The VSConn handles reconnects.
         // Send the "stop" command to cause it to exit cleanly.
-        let (mut vsconn_instance, vsconn_lifecycle_rx) = vsconn.take().unwrap();
+        let mut vsconn_instance = vsconn.take().unwrap();
+        let vsconn_lifecycle_rx = vsconn_instance.subscribe_lifecycle_events();
         js.spawn_local(async move {
             let res = vsconn_instance
                 .run_with_reconnect(config::VSCONN_RETRY_WAIT)

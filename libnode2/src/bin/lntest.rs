@@ -11,10 +11,10 @@ use std::fs;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinSet;
 use tracing::Level;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
 use libnode2::vsconn::{
@@ -223,13 +223,13 @@ async fn main() {
 
     let cfg = Config { node_zpr_addr };
 
-    let (mut vsc, mut life_rx) = VSConn::new(
+    let mut vsc = VSConn::new(
         8,
         vs_sa,
         args.node_cn,
         load_private_key(&args.private_key).expect("failed to load private key"),
     );
-
+    let mut life_rx = vsc.subscribe_lifecycle_events();
     let handle = vsc.handle();
 
     let local_set = tokio::task::LocalSet::new();
@@ -286,19 +286,29 @@ async fn main() {
         if connected {
             loop {
                 tokio::select! {
-                    Some(event) = life_rx.recv() => {
-                        match event {
-                            VSConnLifecycleEvent::RunLoopStarts => {
-                                info!("lifecycle event: VSConn run loop starts");
+                    event_res = life_rx.recv() => {
+                        match event_res {
+                            Ok(event) => {
+                                match event {
+                                    VSConnLifecycleEvent::RunLoopStarts =>
+                                        info!("lifecycle event: VSConn run loop starts"),
+
+                                    VSConnLifecycleEvent::ConnectedToVsApi =>
+                                        info!("lifecycle event: connected to VS API"),
+
+                                    VSConnLifecycleEvent::RunLoopExits =>
+                                        info!("lifecycle event: VSConn run loop exits"),
+                                }
                             }
-                            VSConnLifecycleEvent::ConnectedToVsApi => {
-                                info!("lifecycle event: connected to VS API");
+                            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                                warn!("lifecycle event receiver lagged, skipped {} messages", skipped);
                             }
-                            VSConnLifecycleEvent::RunLoopExits => {
-                                info!("lifecycle event: VSConn run loop exits");
+                            Err(broadcast::error::RecvError::Closed) => {
+                                warn!("lifecycle event sender closed");
                             }
                         }
                     }
+
                     Some(cmd) = cmd_rx.recv() => {
                         match cmd {
                             Cmd::Nop => {}
