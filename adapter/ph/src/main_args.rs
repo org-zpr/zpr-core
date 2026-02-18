@@ -5,7 +5,6 @@
 
 #[cfg(not(feature = "complete"))]
 use crate::auth::AuthError;
-#[cfg(not(feature = "complete"))]
 use crate::batch_io;
 use crate::logging::{levels, targets};
 use clap::{Args, Parser, Subcommand};
@@ -213,7 +212,6 @@ fn parse_socket_addr_or_scoped_ip_addr(
     }
 }
 
-#[cfg(not(feature = "complete"))]
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
     let key_val: Vec<&str> = s.split("=").collect();
     match key_val.len() {

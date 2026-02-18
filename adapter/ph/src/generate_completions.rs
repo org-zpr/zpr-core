@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+mod batch_io;
+mod logging;
 mod main_args;
 
 use clap::{CommandFactory, Parser};
