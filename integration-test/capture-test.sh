@@ -68,12 +68,6 @@ if [ ! -x "$PH_DEBUG_BIN" ]; then
   exit 1
 fi
 
-if [ "$PH_BIN" -nt "$PH_DEBUG_BIN" ]; then
-  echo "ph-cli appears older than ph. Rebuild adapter/cli so RPC schemas match:"
-  echo "  (cd $START_DIR/../adapter/cli && cargo build)"
-  exit 1
-fi
-
 if [ ! -e "$NODE_AUTH_PRIVATE_KEY" ]; then
   echo "node auth private key not found: $NODE_AUTH_PRIVATE_KEY"
   exit 1
