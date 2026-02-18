@@ -515,15 +515,12 @@ fn build_self_signed_blob(
     signer.update(&data)?;
     let raw_signature = signer.sign_to_vec()?;
 
-    // VS decodes base64 from the signature field before verifying.
-    let b64_signature = openssl::base64::encode_block(&raw_signature);
-
     Ok(SelfSignedBlob {
         alg: ChallengeAlg::RsaSha256Pkcs1v15,
         challenge,
         cn: cn.to_string(),
         timestamp,
-        signature: b64_signature.into_bytes(),
+        signature: raw_signature,
     })
 }
 
