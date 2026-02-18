@@ -31,7 +31,7 @@ use tracing::*;
 use zpr::packet_info::{
     DOCK_LINK_ID, ForwardingEntry, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, VisaId,
 };
-use zpr::vsapi_types;
+use zpr::vsapi_types::{CommFlag, PacketDesc, VsapiFiveTuple, vsapi_ip_number};
 
 /// State of an in-progress inbound bind request.
 enum BindRequestState {
@@ -111,7 +111,7 @@ pub fn bind_actor_address(
     asm: &Arc<Assembly>,
     ingress_link_id: NonZero<LinkId>,
     txn_id: TxnId,
-    l3_type: L3Type,
+    _l3_type: L3Type,
     packet_body: &[u8],
 ) {
     debug!(
@@ -204,10 +204,25 @@ pub fn bind_actor_address(
         packet_body.len()
     );
 
-    let visa_req = vsconn::VisaRequest {
-        source_tether_addr: five_tuple.src_address.into(),
-        l3_type,
-        packet: packet_body.to_vec(),
+    let comm_flags = match five_tuple.l4_protocol {
+        p if p == vsapi_ip_number::ICMP || p == vsapi_ip_number::IPV6_ICMP => {
+            CommFlag::UniDirectional
+        }
+        _ => CommFlag::BiDirectional,
+    };
+    let visa_req = vsconn::VSVisaRequest {
+        pdesc: PacketDesc {
+            five_tuple: VsapiFiveTuple::new(
+                five_tuple.l3_type,
+                five_tuple.src_address.into(),
+                five_tuple.dst_address.into(),
+                five_tuple.l4_protocol,
+                five_tuple.src_port,
+                five_tuple.dst_port,
+            ),
+            comm_flags,
+        },
+        previous_id: None,
     };
 
     asm.counters.management[ManagementCounterType::VisaRequested].increment();
@@ -244,10 +259,10 @@ async fn visa_request_task(
     asm: Arc<Assembly>,
     ingress_link_id: NonZero<LinkId>,
     txn_id: TxnId,
-    visa_req: vsconn::VisaRequest,
+    visa_req: vsconn::VSVisaRequest,
 ) {
-    match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
-        Ok(vsapi_types::VisaResponse::Allow(visa)) => {
+    match asm.vsconn.as_ref().unwrap().visa_request(visa_req).await {
+        Ok(vsconn::VSVisaDecision::Allowed(visa)) => {
             let visa_id = match visa_mgmt::insert_visa(&asm, visa) {
                 Ok(vid) => vid,
 
@@ -265,20 +280,14 @@ async fn visa_request_task(
             requested_visa_granted(&asm, ingress_link_id, txn_id, visa_id);
         }
 
-        Ok(vsapi_types::VisaResponse::Deny(denied)) => {
+        Ok(vsconn::VSVisaDecision::Denied(deny_code)) => {
             asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
-            debug!(target: FLOW_MGMT, "visa request denied: {:?}", denied.reason);
-            requested_visa_denied(&asm, ingress_link_id, txn_id)
-        }
-
-        // Not implemented as part of thrift visas
-        Ok(vsapi_types::VisaResponse::VSApiError(error)) => {
-            asm.counters.management[ManagementCounterType::VisaRequestError].increment();
-            debug!(target: FLOW_MGMT, "visa request error with code: {:?} and message: {:?}", error.code, error.message);
+            debug!(target: FLOW_MGMT, "visa request denied: {deny_code:?}");
             requested_visa_denied(&asm, ingress_link_id, txn_id)
         }
 
         Err(err) => {
+            asm.counters.management[ManagementCounterType::VisaRequestError].increment();
             error!(target: FLOW_MGMT, "visa request error: {err}");
             requested_visa_denied(&asm, ingress_link_id, txn_id)
         }

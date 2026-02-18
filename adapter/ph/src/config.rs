@@ -45,6 +45,12 @@ pub const DEFAULT_ZDPR_RETRY_TIMER: std::time::Duration = std::time::Duration::f
 pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
+pub const DEFAULT_VSS_PORT: u16 = 8183;
+
+/// If we loose the Cap'n Proto connection to the VS, or are unable to establish it in the first place,
+/// wait this long before retry.
+pub const VSCONN_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Slightly longer -- asking visa service to grant an address
 /// means it may have to do a lot of work to verify auth.
 pub const VS_GRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);

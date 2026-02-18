@@ -5,21 +5,23 @@ use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
 use crate::visa_table;
 use libnode::claims;
+use libnode::vsconn::VSDisconnectNotice;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
 use tracing::*;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use zpr::dn::VISA_SERVICE_CN;
 use zpr::packet_info::{LinkId, VisaId};
-use zpr::vsapi_types::{self, AuthServicesList};
+use zpr::vsapi_types::{self, DisconnectReason};
 use zpr_utils::net_defs::IpAddress;
 
 pub fn authorize_connect(
     asm: &Arc<Assembly>,
     link_id: LinkId,
-    connect_req: vsapi_types::ConnectRequestV1,
+    connect_req: vsapi_types::ConnectRequest,
 ) {
     let task_asm = asm.clone();
     tokio::task::spawn_local(async move {
@@ -58,7 +60,7 @@ pub fn authorize_connect(
     });
 }
 
-/// Creates a ConnectionRequest, unless none is necessary because the link is
+/// Creates a ConnectRequest, unless none is necessary because the link is
 /// to the visa service itself.
 ///
 /// `addr` is either UNSPECIFIED or an address requested by the client adapter.
@@ -68,46 +70,50 @@ pub fn build_connect_request(
     id: LinkId,
     addr: IpAddress,
     blob: &AuthBlob,
-) -> Result<Option<vsapi_types::ConnectRequestV1>, LinkStateError> {
+) -> Result<Option<vsapi_types::ConnectRequest>, LinkStateError> {
     let cn = get_common_name(asm, id)?;
 
     if cn == VISA_SERVICE_CN {
         return Ok(None);
     }
 
-    // In v2 the blobs are transported to the VS in a typed structure.
-    // In v1 (prototype) the blobs are b64 encoded json.
-    let mut crbufs: Vec<Vec<u8>> = Vec::new();
-    match blob {
-        AuthBlob::SelfSigned(ss_blob) => {
-            crbufs.push(ss_blob.encode().as_bytes().to_vec());
-        }
-        AuthBlob::AuthCode(ac_blob) => {
-            crbufs.push(ac_blob.encode().as_bytes().to_vec());
-        }
-    }
+    // Convert the adapter's AuthBlob to the vsapi_types AuthBlob for the v2 protocol.
+    let vsapi_blob = match blob {
+        AuthBlob::SelfSigned(ss) => vsapi_types::AuthBlob::SS(vsapi_types::SelfSignedBlob {
+            alg: vsapi_types::ChallengeAlg::RsaSha256Pkcs1v15,
+            challenge: BASE64_STANDARD.decode(&ss.challenge).unwrap_or_default(),
+            cn: ss.cn.clone(),
+            timestamp: ss.ts,
+            signature: BASE64_STANDARD.decode(&ss.sig).unwrap_or_default(),
+        }),
+        AuthBlob::AuthCode(ac) => vsapi_types::AuthBlob::AC(vsapi_types::AuthCodeBlob {
+            asa_addr: ac
+                .asa
+                .parse()
+                .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+            code: ac.code.clone(),
+            pkce: ac.pkce.clone(),
+            client_id: ac.client_id.clone(),
+        }),
+    };
 
-    //let mut ss = vsapi_types::ZprSelfSignedBlob::default();
-    //ss.challenge = blob.as_bytes().to_vec();
-
-    let mut claims = Vec::new();
+    let mut request_claims = Vec::new();
     if addr != IpAddress::UNSPECIFIED {
-        claims.push(vsapi_types::Claim {
-            key: claims::KATTR_EPID.into(),
+        request_claims.push(vsapi_types::Claim {
+            key: claims::key::ZPR_ADDR.into(),
             value: addr.to_string(),
         });
     }
-    claims.push(vsapi_types::Claim {
-        key: claims::KATTR_CN.into(),
+    request_claims.push(vsapi_types::Claim {
+        key: claims::key::CN.into(),
         value: cn,
     });
 
-    // issue an Authorize Connect Request to the visa service for this adapter
-    let connect_req = vsapi_types::ConnectRequestV1 {
-        challenge_responses: crbufs,
-        claims: claims,
-        dock_addr: asm.get_local_dock_addr(),
-        connection_id: 1,
+    let connect_req = vsapi_types::ConnectRequest {
+        blobs: vec![vsapi_blob],
+        claims: request_claims,
+        substrate_addr: asm.get_local_dock_addr(),
+        dock_interface: 0,
     };
     Ok(Some(connect_req))
 }
@@ -143,14 +149,13 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
     Ok(cn)
 }
 
+/// This uses "RemoteDisconnect" as the reason passed to the visa service.
 pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
-    match asm
-        .vsconn
-        .as_ref()
-        .unwrap()
-        .actor_disconnect(addr.into())
-        .await
-    {
+    let notice = VSDisconnectNotice {
+        zpr_addr: Some(addr.into()),
+        reason: DisconnectReason::RemoteDisconnect,
+    };
+    match asm.vsconn.as_ref().unwrap().notify_disconnect(notice).await {
         Err(e) => {
             warn!(target: VISA_MGMT, "Failed to disconnect actor {addr} with error {e:?}")
         }
@@ -193,30 +198,4 @@ pub fn handle_revocation(
         .write()
         .unwrap()
         .revoke(&asm.peer_table, visa_id)
-}
-
-pub fn handle_services_update(
-    asm: &Arc<Assembly>,
-    services: AuthServicesList,
-) -> Result<(), visa_table::VisaTableError> {
-    let expiration = match services.expiration {
-        Some(exp) => Some(exp),
-        None => {
-            error!(target: VISA_MGMT, "visa service sends services list with no expiration set");
-            Some(UNIX_EPOCH)
-        }
-    };
-
-    let mut vs_auth_services = Vec::new();
-
-    let services = services.services;
-    debug!(target: VISA_MGMT, "received services update with {} entries", services.len());
-    for service in services {
-        vs_auth_services.push(service);
-    }
-    debug!(target: VISA_MGMT, "updating auth services with {} entries, expires at {expiration:?}", vs_auth_services.len());
-    // The update is always a complete replacement of the list of services, and may be empty.
-    let mut svcs = asm.vs_auth_services.write().unwrap();
-    svcs.update(expiration, vs_auth_services);
-    Ok(())
 }
