@@ -65,6 +65,7 @@ mod tun_ctl;
 mod two_way_queue;
 mod visa_mgmt;
 mod visa_table;
+mod vs_worker;
 mod vss_worker;
 mod zdp;
 mod zdp_ll;
@@ -82,13 +83,11 @@ use fastpath::FastpathWorkerConfig;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
-use libnode::vsconn::{VSConnLifecycleEvent, VSDisconnectNotice};
 use logging::targets::STARTUP;
 use pki::{generate_self_signed_noise_cert, load_cert, load_noise_public_key};
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
-use zpr::vsapi_types::DisconnectReason;
 use zpr_ext::socket2::SockAddrExt;
 use zpr_utils::net_defs::SocketAddrExt;
 
@@ -745,7 +744,7 @@ fn main() -> ExitCode {
 
         // Launch VSConn run loop (sets up its own local set). The VSConn handles reconnects.
         // Send the "stop" command to cause it to exit cleanly.
-        let (mut vsconn_instance, mut vsconn_lifecycle_rx) = vsconn.take().unwrap();
+        let (mut vsconn_instance, vsconn_lifecycle_rx) = vsconn.take().unwrap();
         js.spawn_local(async move {
             let res = vsconn_instance
                 .run_with_reconnect(config::VSCONN_RETRY_WAIT)
@@ -753,66 +752,17 @@ fn main() -> ExitCode {
             error!(target: STARTUP, "visa service connection manager terminated: {res:?}");
         });
 
-        // Connect to VS and register VSS endpoint
         let vs_handle = asm.vsconn.as_ref().unwrap().clone();
         let aaa_prefix = aaa_prefix.unwrap();
-        let vs_asm = asm.clone();
-        js.spawn_local(async move {
 
-            // TODO: The new visa service supports a "reconnect" signal. That is not yet exposed by libnode2 (TODO)
-            loop {
-                // This acts as a gate -- waiting for runloop to start or fail.
-                while let Some(event) = vsconn_lifecycle_rx.recv().await {
-                    match event {
-                        VSConnLifecycleEvent::RunLoopStarts => break, // continue on the outer loop - start a connect request.
-                        VSConnLifecycleEvent::RunLoopExits=> {},
-                        VSConnLifecycleEvent::ConnectedToVsApi => {},
-                    }
-                }
-                loop {
-                    // Kick off a connect request to the VS, if it succeeds, notify the VS about our VSS endpoint.
-                    let req = libnode::vsconn::VSConnectRequest {
-                        zpr_addr: node_zpr_addr,
-                        aaa_prefix,
-                    };
-                    // Note: this next call blocks if the VSConn run-loop isn't running.
-                    if let Err(e) = vs_handle.connect(req).await {
-                        error!(target: STARTUP, "failed to get access to visa service: {e:?}");
-                    } else {
-                        info!(target: STARTUP, "node access granted to visa service");
-                        match vs_handle.register_vss(vss_addr).await {
-                            Ok(ops) => {
-                                info!(target: STARTUP, "registered VSS, received {} pending visa ops", ops.len());
-                                for op in ops {
-                                    if let Err(e) = vss_worker::process_visaop(&vs_asm, op) {
-                                        error!(target: STARTUP, "failed to process initial visa op from VS: {e:?}");
-                                        // TODO: Currently no way to indicate to VS if we fail to process what is handed to us here.
-                                    }
-                                }
-                                break; // Exit inner loop, go to outer loop waiting for state change in VSConn.
-                            }
-                            Err(e) => {
-                                error!(target: STARTUP, "failed to register VSS: {e:?}");
-
-                                // Assume things are messed up and try again.
-                                let dreq = VSDisconnectNotice {
-                                    zpr_addr: None,
-                                    reason: DisconnectReason::LinkError,
-                                };
-                                if let Err(e) = vs_handle.notify_disconnect(dreq).await {
-                                    error!(target: STARTUP, "error disconnecting from VS after failed registration: {e:?}");
-                                    // ok, time to die:
-                                    panic!("failed to establish connection to VS");
-                                }
-                            }
-                        }
-                    }
-
-                    // wait a second and retry.
-                    tokio::time::sleep(config::VSCONN_RETRY_WAIT).await;
-                }
-            }
-        });
+        js.spawn_local(vs_worker::launch(
+            asm.clone(),
+            node_zpr_addr,
+            aaa_prefix,
+            vss_addr,
+            vs_handle,
+            vsconn_lifecycle_rx,
+        ));
 
         js.spawn_local(vss_worker::launch(asm.clone(), vss_outq));
     }
