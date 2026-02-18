@@ -25,7 +25,7 @@ completions:
 	cargo run --features complete --bin generate_completions -- --generate $(TARGET_DIR)
 
 	@echo "\nInstallation of the completion script depends on your shell"
-	@echo "\nBash: Source the file in your .bashrc or .bash_profile, or copy the file into one of the bash completions folders"
+	@echo "\nBash: Source the file in your .bashrc or .bash_profile, or copy the file into one of the bash completions folders. Ensure you only have the completion in one completion folder"
 	@echo "\nZsh: There are several ways, including using oh-my-zsh, the zsh_completions package, or creating a symlink to your completions file in the ~/.local/share/zsh/site-functions/ then adding that to your fpath"
 	@echo "\nElvish: 'Use' the file in ~/.config/elvish/rc.elv"
 	@echo "\nFish: Copy the file into ~/.config/fish/completions/"
