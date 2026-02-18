@@ -10,7 +10,7 @@ VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-$(realpath "$(dirname "$0")/valkey-serve
 PREGEN=$(realpath "$(dirname $0)/pregen")
 NODE_AUTH_PRIVATE_KEY="${NODE_AUTH_PRIVATE_KEY:-$PREGEN/node-rsa-key.pem}"
 
-source "$(dirname $0)/common_funcs.sh"
+source "$(dirname $0)/lib/common_funcs.sh"
 
 ZPR_USER=$USER
 
@@ -27,7 +27,7 @@ C_SUBSTRATE_ADDR=10.0.3.2
 ACTOR_PROTOCOL="ipv6"
 NUM_ACTORS=2
 # Note: POLICY_BIN, NODE_ZPR_ADDR, VS_ZPR_ADDR, A_ZPR_ADDR, and B_ZPR_ADDR are defined by parsing the input arguments.
-source "$(dirname $0)/parse_arguments.sh"
+source "$(dirname $0)/lib/parse_arguments.sh"
 
 if [ ! -e "$VS_BIN" ]; then
   echo "vs binary not found, expected it at $VS_BIN"
