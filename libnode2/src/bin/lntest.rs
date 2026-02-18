@@ -17,7 +17,9 @@ use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
-use libnode2::vsconn::{VSConn, VSConnectRequest, VSDisconnectNotice, VSVisaRequest};
+use libnode2::vsconn::{
+    VSConn, VSConnLifecycleEvent, VSConnectRequest, VSDisconnectNotice, VSVisaRequest,
+};
 use zpr::packet_info::L3Type;
 use zpr::vsapi_types::{
     AuthBlob, ChallengeAlg, Claim, CommFlag, ConnectRequest, DisconnectReason, PacketDesc,
@@ -221,7 +223,7 @@ async fn main() {
 
     let cfg = Config { node_zpr_addr };
 
-    let mut vsc = VSConn::new(
+    let (mut vsc, mut life_rx) = VSConn::new(
         8,
         vs_sa,
         args.node_cn,
@@ -284,6 +286,19 @@ async fn main() {
         if connected {
             loop {
                 tokio::select! {
+                    Some(event) = life_rx.recv() => {
+                        match event {
+                            VSConnLifecycleEvent::RunLoopStarts => {
+                                info!("lifecycle event: VSConn run loop starts");
+                            }
+                            VSConnLifecycleEvent::ConnectedToVsApi => {
+                                info!("lifecycle event: connected to VS API");
+                            }
+                            VSConnLifecycleEvent::RunLoopExits => {
+                                info!("lifecycle event: VSConn run loop exits");
+                            }
+                        }
+                    }
                     Some(cmd) = cmd_rx.recv() => {
                         match cmd {
                             Cmd::Nop => {}
