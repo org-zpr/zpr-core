@@ -34,9 +34,11 @@ if [ ! -e "$VS_BIN" ]; then
   exit 1
 fi
 
-if [ ! -e "$VALKEY_SERVER_BIN" ]; then
-  echo "valkey-server binary not found, expected it at $VALKEY_SERVER_BIN"
-  exit 1
+if ! systemctl is-active --quiet valkey-server 2>/dev/null; then
+  if [ ! -e "$VALKEY_SERVER_BIN" ]; then
+    echo "valkey-server binary not found, expected it at $VALKEY_SERVER_BIN"
+    exit 1
+  fi
 fi
 
 if [ ! -e "$PREGEN/$POLICY_BIN" ]; then
@@ -136,9 +138,11 @@ emit_vs_config ca vs.zpr > vs-config.toml
 # Launch ValKey + Visa Service
 #
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VALKEY_SERVER_BIN" \
-    --save "" \
-    --appendonly no 2>&1 | tee valkey.log | prefix_log valkey &
+if ! systemctl is-active --quiet valkey-server 2>/dev/null; then
+  sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VALKEY_SERVER_BIN" \
+      --save "" \
+      --appendonly no 2>&1 | tee valkey.log | prefix_log valkey &
+fi
 
 wait_for 15 check_vs_valkey_port
 
