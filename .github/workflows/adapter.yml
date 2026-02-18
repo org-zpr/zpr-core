@@ -138,11 +138,14 @@ jobs:
         extract: true
         out-file-path: 'integration-test'
         token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-    
+
     - name: Set env
       run: |
         echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
-    
+    - name: install valkey
+      run: |
+        sudo apt intall -y valkey
+
     - name: One Node v6 Test
       timeout-minutes: 10
       run: |
@@ -202,6 +205,10 @@ jobs:
         extract: true
         out-file-path: 'integration-test'
         token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+
+    - name: install valkey
+      run: |
+        sudo apt install -y valkey
 
     - name: Set env
       run: |
