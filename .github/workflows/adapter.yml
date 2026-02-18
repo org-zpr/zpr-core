@@ -144,7 +144,7 @@ jobs:
         echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
     - name: install valkey
       run: |
-        sudo apt intall -y valkey
+        sudo apt install -y valkey
 
     - name: One Node v6 Test
       timeout-minutes: 10
