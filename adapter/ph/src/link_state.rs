@@ -15,8 +15,7 @@ use crate::zdp::{self, ResponseCode, TerminateReason};
 use openssl::x509::X509;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
@@ -126,6 +125,8 @@ pub enum LinkState {
     Inactive,
     Keying,
     Helloing,
+    /// disconnecting from visa service; only entered for the node->VS adapter link
+    Disconnecting(TerminateReason),
     Closing,
     Resetting,
     Active,
@@ -158,6 +159,7 @@ pub enum LinkEvent {
     ReceivedKeepAliveResponse,
     ReceivedTerminateLink(TerminateReason),
     ReceivedTerminateAck,
+    ReceivedDisconnectAck, // from visa service
     Close(TerminateReason),
     CloseDone,
     Error,
@@ -468,9 +470,10 @@ impl LinkStateWrapper {
                 self.process_authorize_response(asm, zpr_addr)
             }
 
+            LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
             LinkEvent::ReceivedTerminateLink(code) => self.process_terminate_link(asm, code),
             LinkEvent::ReceivedTerminateAck => self.process_terminate_ack(asm),
-            LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
+            LinkEvent::ReceivedDisconnectAck => self.process_disconnect_ack(asm),
             LinkEvent::Close(code) => self.initiate_close(asm, code),
             LinkEvent::CloseDone => Ok(self.complete_close(asm)),
             LinkEvent::Error => self.process_error_response(asm),
@@ -1251,7 +1254,6 @@ impl LinkStateWrapper {
             }
             // ignore error here, it just means we've moved on to another state and got the ACK (very) late
             let _ = task_asm.process_link_state_event(link_id, LinkEvent::ReceivedInitAuthAck);
-            return;
         });
     }
 
@@ -1427,29 +1429,48 @@ impl LinkStateWrapper {
     /// If the link is still working then this can also try to send a polite
     /// "de-register" message to the visa service before we shut off our
     /// VSConn processor.
-    fn disconnect_visa_service_client(&self, asm: &Arc<Assembly>, deregister: bool) {
-        if self.link_type != LinkType::NodeToAdapter {
-            panic!("disconnect_visa_service_client called on non node->adapter link");
+    fn maybe_disconnect_visa_service_client(
+        &self,
+        asm: &Arc<Assembly>,
+        deregister: bool,
+        reason: TerminateReason,
+    ) -> Result<(), LinkStateError> {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+
+        if matches!(reason, TerminateReason::Shutdown) {
+            locked_fsm.shutting_down = true;
         }
-        let vs_id = asm
-            .peer_table
-            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
-        if vs_id.is_some() && vs_id.unwrap().get() == self.id {
-            if let Some(vsconn) = asm.vsconn.as_ref() {
-                let spawn_hndl = vsconn.clone();
-                tokio::task::spawn_local(async move {
-                    debug!(target: LINK_STATE, "deregister of VS peer detected, stopping VSConn (deregister:{deregister})");
-                    if let Err(e) = spawn_hndl.stop(deregister).await {
-                        error!(target: LINK_STATE, "stop command to VSConn failed: {e}");
-                    }
-                });
-            }
-            // Ideally, we would wait for the VSConn to send the deregister message.
-            // In practice what happens here is that the link shuts down before the
-            // VSConn message can be sent.
-            // TODO: Maybe add a new state? Or figure out better way to handle this cleanup.
-            thread::sleep(Duration::from_millis(500));
-        }
+
+        if matches!(self.link_type, LinkType::NodeToAdapter) {
+            let link_id = self.id;
+            let vs_id = asm
+                .peer_table
+                .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+            if vs_id.is_some() && vs_id.unwrap().get() == link_id {
+                if let Some(vsconn) = asm.vsconn.as_ref() {
+                    locked_fsm.set_state(LinkState::Disconnecting(reason));
+
+                    let task_asm = asm.clone();
+                    let spawn_hndl = vsconn.clone();
+                    tokio::task::spawn_local(async move {
+                        debug!(target: LINK_STATE, "deregister of VS peer detected, stopping VSConn (deregister:{deregister})");
+                        if let Err(e) = spawn_hndl.stop(deregister).await {
+                            error!(target: LINK_STATE, "stop command to VSConn failed: {e}");
+                        }
+                        debug!(target: LINK_STATE, "VSConn shut down");
+
+                        // ignore error here, it just means we've moved on to another state and got the ACK (very) late
+                        let _ = task_asm
+                            .process_link_state_event(link_id, LinkEvent::ReceivedDisconnectAck);
+                    });
+
+                    return Ok(());
+                } // else fallthrough
+            } // else fallthrough
+        } // else fallthrough
+
+        // else all the above...
+        self.continue_close(asm, locked_fsm, reason)
     }
 
     /// Initiate the shutdown of the link
@@ -1461,18 +1482,40 @@ impl LinkStateWrapper {
         asm: &Arc<Assembly>,
         reason: TerminateReason,
     ) -> Result<(), LinkStateError> {
+        if matches!(self.link_type, LinkType::Internal) {
+            return Err(LinkStateError::InvalidOperation(
+                "cannot shutdown internal link".to_owned(),
+            ));
+        }
+
         let link_id = self.id;
         info!(target: LINK_STATE,"Initiating shutdown on link {link_id}");
 
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.set_state(LinkState::Closing);
-        if reason == TerminateReason::Shutdown {
-            locked_fsm.shutting_down = true
-        }
+        self.maybe_disconnect_visa_service_client(asm, true, reason)
+    }
 
-        if self.link_type == LinkType::NodeToAdapter {
-            self.disconnect_visa_service_client(asm, true);
+    fn process_disconnect_ack(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+        let locked_fsm = self.locked_fsm.lock().unwrap();
+        match (self.link_type, locked_fsm.state) {
+            (LinkType::NodeToAdapter, LinkState::Disconnecting(reason)) => {
+                debug!(target: LINK_STATE, "Link {} received disconnect ack", self.id);
+                self.continue_close(asm, locked_fsm, reason)
+            }
+            (_, _) => Err(LinkStateError::InvalidOperation(
+                "Discarded unsolicited init auth ack".to_string(),
+            )),
         }
+    }
+
+    /// Continue shutdown of the link.  Occurs after having disconnected
+    /// from the visa service (if applicable).
+    fn continue_close(
+        &self,
+        asm: &Arc<Assembly>,
+        mut locked_fsm: MutexGuard<LinkStateMachine>,
+        reason: TerminateReason,
+    ) -> Result<(), LinkStateError> {
+        locked_fsm.set_state(LinkState::Closing);
 
         // If this timeout fires, we end up going to `clean_up_link_state`.
         // If we get a response to our terminate we also go to `clean_up_link_state`.
@@ -1487,6 +1530,7 @@ impl LinkStateWrapper {
             )
             .acked();
             match acked.await {
+                // FIXME why do we never get an ACK?
                 Ok(()) => {
                     let _ = task_asm
                         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedTerminateAck);
@@ -1661,11 +1705,6 @@ impl LinkStateWrapper {
             .lock()
             .unwrap()
             .set_state(LinkState::Closing);
-        if self.link_type == LinkType::NodeToAdapter {
-            // If this was from our special friend, the visa service adapter, then de-register.
-            // TODO: The de-register message never makes it across before link closes.
-            self.disconnect_visa_service_client(asm, true);
-        }
         self.clean_up_link_state(asm).detach_all();
         Ok(())
     }
