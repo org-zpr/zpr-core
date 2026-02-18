@@ -14,22 +14,6 @@ VS_ADMIN_BIN="${VS_ADMIN_BIN:-./vs-admin}"
 VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-./valkey-server}"
 NODE_AUTH_PRIVATE_KEY="${NODE_AUTH_PRIVATE_KEY:-$PREGEN/node-rsa-key.pem}"
 
-if [[ "$VS_BIN" != /* ]]; then
-  VS_BIN="$START_DIR/$VS_BIN"
-fi
-if [[ "$VS_ADMIN_BIN" != /* ]]; then
-  VS_ADMIN_BIN="$START_DIR/$VS_ADMIN_BIN"
-fi
-if [[ "$VALKEY_SERVER_BIN" != /* ]]; then
-  VALKEY_SERVER_BIN="$START_DIR/$VALKEY_SERVER_BIN"
-fi
-if [[ "$PH_BIN" != /* ]]; then
-  PH_BIN="$START_DIR/$PH_BIN"
-fi
-if [[ "$PH_DEBUG_BIN" != /* ]]; then
-  PH_DEBUG_BIN="$START_DIR/$PH_DEBUG_BIN"
-fi
-
 # netem parameters to configure on all links; e.g. "loss random 10%"
 # blank for no netem
 NETEM_PARAMS=${NETEM_PARAMS:-}
