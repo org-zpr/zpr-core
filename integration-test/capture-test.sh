@@ -30,6 +30,15 @@ NUM_ACTORS=2
 # Note: POLICY_BIN, NODE_ZPR_ADDR, VS_ZPR_ADDR, A_ZPR_ADDR, and B_ZPR_ADDR are defined by parsing the input arguments.
 source "$(dirname $0)/parse_arguments.sh"
 
+
+echo -e "\nXXX======= DEBUG START"
+echo "PWD = " `pwd`
+echo "files:"
+ls -l
+echo -e "XXX======= DEBUG END\n"
+
+
+
 if [ ! -e "$VS_BIN" ]; then
   echo "vs binary not found, expected it at $VS_BIN"
   exit 1
