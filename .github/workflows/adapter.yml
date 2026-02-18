@@ -145,6 +145,8 @@ jobs:
     - name: install valkey
       run: |
         sudo apt install -y valkey
+        sudo systemctl stop valkey-server
+        sudo systemctl disable valkey-server
 
     - name: One Node v6 Test
       timeout-minutes: 10
@@ -209,6 +211,8 @@ jobs:
     - name: install valkey
       run: |
         sudo apt install -y valkey
+        sudo systemctl stop valkey-server
+        sudo systemctl disable valkey-server
 
     - name: Set env
       run: |
