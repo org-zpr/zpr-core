@@ -161,6 +161,10 @@ vk_uri = "redis://127.0.0.1:6379"
 EOF
 }
 
+function check_vs_valkey_port() {
+  sudo ip netns exec zpr-vs bash -lc 'exec 3<>/dev/tcp/127.0.0.1/6379'
+}
+
 function ping_a_b() {
   sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!
   sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!

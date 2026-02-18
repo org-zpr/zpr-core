@@ -97,9 +97,6 @@ function counters() {
   "$PH_DEBUG_BIN" -p "$SOCKET" counters
 }
 
-function check_vs_valkey_port() {
-  sudo ip netns exec zpr-vs bash -lc 'exec 3<>/dev/tcp/127.0.0.1/6379'
-}
 
 #
 # Set up automatic cleanup
