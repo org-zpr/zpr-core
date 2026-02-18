@@ -146,7 +146,7 @@ jobs:
     - name: One Node v6 Test
       timeout-minutes: 10
       run: |
-        ZPR_TEST_VERBOSE=1 integration-test/one-node-v6-test.sh
+        ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey integration-test/one-node-v6-test.sh
 
   capture-integration-test:
     name: Run Capture Test
@@ -210,4 +210,4 @@ jobs:
     - name: Capture Test
       timeout-minutes: 10
       run: |
-        ZPR_TEST_VERBOSE=1 integration-test/capture-test.sh
+        ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey integration-test/capture-test.sh

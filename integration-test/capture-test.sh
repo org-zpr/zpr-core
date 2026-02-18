@@ -2,13 +2,12 @@
 set -euo pipefail
 
 DEBUG_TARGETS=${DEBUG_TARGETS:-all=INFO}
-START_DIR=$PWD
 
-PH_BIN="${PH_BIN:-$START_DIR/../adapter/ph/target/debug/ph}"
-PH_DEBUG_BIN="${PH_DEBUG_BIN:-$START_DIR/../adapter/cli/target/debug/ph-cli}"
+PH_BIN="${PH_BIN:-$(realpath "$(dirname "$0")/../adapter/ph/target/debug/ph")}"
+PH_DEBUG_BIN="${PH_DEBUG_BIN:-$(realpath "$(dirname "$0")/../adapter/cli/target/debug/ph-cli")}"
+VS_BIN="${VS_BIN:-$(realpath "$(dirname "$0")/vs")}"
+VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-$(realpath "$(dirname "$0")/valkey-server")}"
 PREGEN=$(realpath "$(dirname $0)/pregen")
-VS_BIN="${VS_BIN:-./vs}"
-VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-./valkey-server}"
 NODE_AUTH_PRIVATE_KEY="${NODE_AUTH_PRIVATE_KEY:-$PREGEN/node-rsa-key.pem}"
 
 source "$(dirname $0)/common_funcs.sh"
@@ -29,15 +28,6 @@ ACTOR_PROTOCOL="ipv6"
 NUM_ACTORS=2
 # Note: POLICY_BIN, NODE_ZPR_ADDR, VS_ZPR_ADDR, A_ZPR_ADDR, and B_ZPR_ADDR are defined by parsing the input arguments.
 source "$(dirname $0)/parse_arguments.sh"
-
-
-echo -e "\nXXX======= DEBUG START"
-echo "PWD = " `pwd`
-echo "files:"
-ls -l
-echo -e "XXX======= DEBUG END\n"
-
-
 
 if [ ! -e "$VS_BIN" ]; then
   echo "vs binary not found, expected it at $VS_BIN"
