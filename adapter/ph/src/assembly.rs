@@ -176,6 +176,7 @@ impl Assembly {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_link_ready(&self, id: LinkId) -> bool {
         match self.peer_table.get(id) {
             Some(peer) => peer.link_state_machine.is_ready(),

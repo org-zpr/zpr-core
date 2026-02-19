@@ -18,7 +18,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tokio::time::MissedTickBehavior;
 use tracing::*;
 use zpr::addrs::ZPRNET_PREFIX_LEN;
 use zpr::packet_info::{LINK_ID_UNKNOWN, LinkId, ZPI_ENCRYPTED_HEADER_FLAG};
@@ -225,7 +224,7 @@ pub struct LinkStateMachine {
     /// On a node, actual assigned actor addresses to remote PEER.
     actor_addresses: Vec<IpAddress>,
 
-    last_state_change: std::time::Instant,
+    last_state_change: Instant,
     /// used to prevent A/B/A errors with timeouts
     logical_clock: u64,
     timeout_handle: Option<tokio::task::AbortHandle>,
@@ -234,6 +233,9 @@ pub struct LinkStateMachine {
     timeout_count: usize,
     /// present only while in RegisterAA state; used for retransmits
     auth_blob: Option<String>,
+    /// Handle to an outstanding echo/keepalive task; used only during Active.
+    /// Instant is time at which the echo was sent.
+    echo_handle: Option<(Instant, tokio::task::AbortHandle)>,
     shutting_down: bool, // only ever goes from False -> True once
 }
 
@@ -250,6 +252,7 @@ impl LinkStateMachine {
             timeout_handle: None,
             timeout_count: 0,
             auth_blob: None,
+            echo_handle: None,
             shutting_down: false,
         }
     }
@@ -361,7 +364,7 @@ impl LinkStateWrapper {
     fn set_timeout(
         &self,
         asm: &Arc<Assembly>,
-        locked_fsm: &mut std::sync::MutexGuard<'_, LinkStateMachine>,
+        locked_fsm: &mut MutexGuard<'_, LinkStateMachine>,
         duration: std::time::Duration,
     ) {
         let link_id = self.id;
@@ -470,7 +473,7 @@ impl LinkStateWrapper {
                 self.process_authorize_response(asm, zpr_addr)
             }
 
-            LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
+            LinkEvent::ReceivedKeepAliveResponse => self.process_keep_alive_response(asm),
             LinkEvent::ReceivedTerminateLink(code) => self.process_terminate_link(asm, code),
             LinkEvent::ReceivedTerminateAck => self.process_terminate_ack(asm),
             LinkEvent::ReceivedDisconnectAck => self.process_disconnect_ack(asm),
@@ -978,14 +981,12 @@ impl LinkStateWrapper {
                         // Update the global view of our ZPR addresses.
                         asm.set_local_zpr_addrs(addrs);
 
-                        locked_fsm.set_state(LinkState::Active);
                         asm.tun_ctl.set_carrier(true).unwrap();
                         debug!(
                             target: LINK_STATE,
                             "Link {link_id} finished registering actor address: becoming active"
                         );
-                        drop(locked_fsm);
-                        self.run_active(asm)
+                        self.run_active(asm, locked_fsm)
                     }
                     None => {
                         // Grant failed.
@@ -1042,9 +1043,8 @@ impl LinkStateWrapper {
 
         // Will call back via ReceivedGrantResponse event if successful.
         self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
-        locked_fsm.set_state(LinkState::Active);
         debug!(target: LINK_STATE, "Link {} has ACKd the grant.  Becoming active", self.id);
-        self.run_active(&asm)
+        self.run_active(asm, locked_fsm)
     }
 
     /// Handle an init-auth message from sender.
@@ -1390,7 +1390,7 @@ impl LinkStateWrapper {
         asm: &Arc<Assembly>,
         logical_clock: u64,
     ) -> Result<(), LinkStateError> {
-        let locked_fsm = self.locked_fsm.lock().unwrap();
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if logical_clock != locked_fsm.logical_clock {
             // timeout was for some earlier state & we won the task abort race; ignore
             return Ok(());
@@ -1403,8 +1403,52 @@ impl LinkStateWrapper {
             | (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
                 // Timeout here means we give up on the link.
                 error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
+                locked_fsm.set_state(LinkState::Error);
                 drop(locked_fsm);
-                return self.process_error_response(&asm);
+                return self.initiate_close(asm, TerminateReason::RequestTimedOut);
+            }
+
+            (_, LinkState::Active) => {
+                match locked_fsm.echo_handle.take() {
+                    Some((_start_time, echo_handle)) => {
+                        // there was an outstanding echo, and we've timed out
+                        echo_handle.abort();
+                        self.locked_data.lock().unwrap().echo_timeout += 1;
+                        error!(target: LINK_STATE, "Link {} failed to respond to keep-alive messages", self.id);
+                        locked_fsm.set_state(LinkState::Error);
+                        drop(locked_fsm);
+                        return self.initiate_close(asm, TerminateReason::RequestTimedOut);
+                    }
+
+                    None => {
+                        // no outstanding echo, time for a new one!
+                        let link_id = self.id;
+                        let task_asm = asm.clone();
+                        let jh = tokio::task::spawn_local(async move {
+                            match mgmt::requests::send_echo_request(&task_asm, link_id)
+                                .acked()
+                                .await
+                            {
+                                Ok(()) => {
+                                    // success! poke the state machine
+                                    // ignore any errors, that just means we've left Active and are already shutting down the link
+                                    let _ = task_asm.process_link_state_event(
+                                        link_id,
+                                        LinkEvent::ReceivedKeepAliveResponse,
+                                    );
+                                }
+
+                                // ignore link closed, we are already shutting down
+                                Err(mgmt::core::MgmtSendError::LinkClosed) => (),
+                            }
+                        });
+
+                        // store new echo handle and kick off timeout
+                        locked_fsm.echo_handle = Some((Instant::now(), jh.abort_handle()));
+                        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_KEEP_ALIVE_TIMEOUT);
+                        Ok(())
+                    }
+                }
             }
 
             (_, LinkState::Closing) => {
@@ -1709,60 +1753,52 @@ impl LinkStateWrapper {
         Ok(())
     }
 
-    pub fn run_active(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
-        let link_id = self.id;
-        let task_asm = asm.clone();
+    pub fn process_keep_alive_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        if !matches!(locked_fsm.state, LinkState::Active) {
+            // we only expect keep alives responses in Active
+            return Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "ReceivedKeepAliveResponse",
+            ));
+        }
+
+        let Some((start_time, _echo_handle)) = locked_fsm.echo_handle.take() else {
+            // we do not have an outstanding echo request
+            return Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "ReceivedKeepAliveResponse",
+            ));
+        };
+
+        // we got a successful echo response, track it
+        let mut link_data = self.locked_data.lock().unwrap();
+        link_data.echo_success += 1;
+        link_data
+            .latency_data
+            .add(Instant::now().duration_since(start_time));
+        drop(link_data);
+
+        // delay before kicking off next echo request
+        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_KEEP_ALIVE_PERIOD);
+
+        Ok(())
+    }
+
+    /// Common code to enter the `Active` state and kick off our keepalive mechanism
+    fn run_active(
+        &self,
+        asm: &Arc<Assembly>,
+        mut locked_fsm: MutexGuard<'_, LinkStateMachine>,
+    ) -> Result<(), LinkStateError> {
+        locked_fsm.set_state(LinkState::Active);
         asm.counters.management[ManagementCounterType::PeerHandshakeSuccess].increment();
-        debug!(target: LINK_STATE, "Link {link_id} entering active state");
-        tokio::task::spawn_local(async move {
-            let mut interval = tokio::time::interval(config::DEFAULT_KEEP_ALIVE_PERIOD);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            while task_asm.is_link_ready(link_id) {
-                interval.tick().await;
-                let start_time = Instant::now();
-                let Some(peer) = task_asm.peer_table.get(link_id) else {
-                    return;
-                };
-                if peer.link_state_machine.locked_fsm.lock().unwrap().state != LinkState::Active {
-                    return;
-                }
+        debug!(target: LINK_STATE, "Link {} entering active state", self.id);
 
-                let echo_ack = tokio::time::timeout(
-                    config::DEFAULT_KEEP_ALIVE_TIMEOUT,
-                    mgmt::requests::send_echo_request(&task_asm, link_id).acked(),
-                )
-                .await;
+        // kick off our keepalive mechanism
+        locked_fsm.echo_handle.take().inspect(|(_, h)| h.abort()); // should already be None (indicating no echo outstanding) but let's be sure
+        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_KEEP_ALIVE_TIMEOUT);
 
-                let got_response = matches!(echo_ack, Ok(Ok(())));
-
-                let mut link_data = peer.link_state_machine.locked_data.lock().unwrap();
-
-                if got_response {
-                    link_data.echo_success += 1;
-                    link_data
-                        .latency_data
-                        .add(Instant::now().duration_since(start_time));
-                } else {
-                    link_data.echo_timeout += 1;
-                }
-
-                drop(link_data);
-
-                if !got_response {
-                    error!(target: LINK_STATE, "Link {link_id} failed to respond to keep-alive messages");
-                    if task_asm
-                        .process_link_state_event(
-                            link_id,
-                            LinkEvent::Close(TerminateReason::RequestTimedOut),
-                        )
-                        .is_err()
-                    {
-                        error!(target: LINK_STATE, "Failed to shut down link after missed keepalives");
-                    }
-                    return;
-                }
-            }
-        });
         Ok(())
     }
 }
