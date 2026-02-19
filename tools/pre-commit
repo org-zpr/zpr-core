@@ -5,7 +5,7 @@
 
 GIT_BASE_DIR=`git rev-parse --show-toplevel`
 GIT_PH_DIR="$GIT_BASE_DIR/adapter/ph"
-GIT_LIBNODE_DIR="$GIT_BASE_DIR/libnode"
+GIT_LIBNODE_DIR="$GIT_BASE_DIR/libnode2"
 
 # Check if there are any files in PH that are changed by this commit
 if  ! git diff HEAD --cached --quiet --relative="$GIT_PH_DIR"

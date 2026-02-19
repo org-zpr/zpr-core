@@ -1644,7 +1644,7 @@ impl LinkStateWrapper {
     }
 
     /// Peer has sent a terminate-link message.
-    /// May generate a thrift message (over TUN) to the visa service.
+    /// May generate an RPC message (over TUN) to the visa service.
     /// Peer has shut down or shutting down so don't expect it to be there anymore.
     ///
     /// Returns Ok unless this is in a state that cannot handle this message.

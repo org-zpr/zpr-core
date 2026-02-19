@@ -20,14 +20,14 @@ info:
 	@echo
 
 
-it-so: deps adapter ph ph-cli
+it-so: deps ph ph-cli
 
 it-gone:
 	cd adapter/ph && cargo clean
 	cd adapter/cli && cargo clean
 	cd cbpf-rs && cargo clean
 	cd cslab && cargo clean
-	$(MAKE) -C libnode dist-clean
+	$(MAKE) -C libnode2 clean
 	rm -rf diagrams/output
 
 
@@ -36,14 +36,14 @@ test:
 	cd adapter/cli && cargo test
 	cd cbpf-rs && cargo test
 	cd cslab && cargo test
-	$(MAKE) -C libnode test
+	$(MAKE) -C libnode2 test
 
 
 
 deps: cbpf cslab zpr-ext
 
 libnode:
-	$(MAKE) -C libnode
+	$(MAKE) -C libnode2
 
 ph: libnode
 	$(MAKE) -C adapter/ph
@@ -64,7 +64,6 @@ zpr-ext:
 	cd zpr-ext && cargo build
 
 zpr-crate-related:
-	$(MAKE) -C libnode
 	$(MAKE) -C libnode2
 	$(MAKE) -C adapter/ph
 
