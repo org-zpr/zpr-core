@@ -1,21 +1,33 @@
 use clap::Parser;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyModifiers},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ipnet::IpNet;
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
 use openssl::rand::rand_bytes;
 use openssl::rsa::Rsa;
 use openssl::sign::Signer;
-use rustyline::DefaultEditor;
-use rustyline::error::ReadlineError;
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Layout},
+    style::{Color, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, Wrap},
+};
 use std::fs;
+use std::io::stdout;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinSet;
-use tracing::Level;
-use tracing::{error, info, warn};
-use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
+use tracing::{Level, error, info, warn};
+use tracing_subscriber::{filter::LevelFilter, prelude::*};
 
 use libnode2::vsconn::{
     VSConn, VSConnLifecycleEvent, VSConnectRequest, VSDisconnectNotice, VSVisaRequest,
@@ -70,25 +82,80 @@ enum Cmd {
     NotifyDisconnect(IpAddr),
 }
 
-fn help() {
-    println!("commands:");
-    println!("  h                          : print this help");
-    println!("  exit | quit | q            : disconnect and exit");
-    println!("  visa_request               : send a visa request");
-    println!(
-        "  register_vss [<ADDR:PORT>] : call registerVss (default sock addr is <self_addr>:8183)"
-    );
-    println!("                               Note lntest starts a VSS server on <self_addr>:8183");
-    println!("                               automatically at startup so adding a socket addr is");
-    println!("                               only serves to send bad data to the visa service.");
-    println!("  authorize_connect <KEY_PATH> [<CLAIM> ...] :");
-    println!("                               authorize an adapter connection");
-    println!("                               Claims are key:value pairs (split on first ':').");
-    println!("                               The endpoint.zpr.adapter.cn claim is required.");
-    println!(
-        "                               Example: authorize_connect /path/to/adapter.key endpoint.zpr.adapter.cn:adapter1 zpr.addr:fd5a::100"
-    );
-    println!("  notify_disconnect <ZPR_ADDR>  : notify VS to disconnect an adapter");
+/// Shared log buffer for the TUI log pane.
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<Mutex<Vec<String>>>);
+
+impl LogBuffer {
+    fn push(&self, line: String) {
+        self.0.lock().unwrap().push(line);
+    }
+
+    fn drain_into(&self, dest: &mut Vec<String>) {
+        let mut buf = self.0.lock().unwrap();
+        dest.append(&mut *buf);
+    }
+}
+
+/// Custom tracing layer that captures log records into a LogBuffer.
+struct TuiLogLayer {
+    buf: LogBuffer,
+}
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for TuiLogLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let meta = event.metadata();
+        let level = meta.level();
+        let target = meta.target();
+
+        struct Visitor(String);
+        impl tracing::field::Visit for Visitor {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" {
+                    self.0 = format!("{:?}", value);
+                    // Remove surrounding quotes added by debug formatting of &str
+                    if self.0.starts_with('"') && self.0.ends_with('"') && self.0.len() >= 2 {
+                        self.0 = self.0[1..self.0.len() - 1].to_string();
+                    }
+                }
+            }
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                if field.name() == "message" {
+                    self.0 = value.to_string();
+                }
+            }
+        }
+
+        let mut visitor = Visitor(String::new());
+        event.record(&mut visitor);
+
+        let line = format!("[{level}] {target}: {}", visitor.0);
+        self.buf.push(line);
+    }
+}
+
+fn help(output_tx: &mpsc::UnboundedSender<String>) {
+    let lines = [
+        "commands:".to_string(),
+        "  h                          : print this help".to_string(),
+        "  exit | quit | q            : disconnect and exit".to_string(),
+        "  visa_request               : send a visa request".to_string(),
+        "  register_vss [<ADDR:PORT>] : call registerVss (default sock addr is <self_addr>:8183)".to_string(),
+        "                               Note lntest starts a VSS server on <self_addr>:8183".to_string(),
+        "                               automatically at startup.".to_string(),
+        "  authorize_connect <KEY_PATH> [<CLAIM> ...] :".to_string(),
+        "                               authorize an adapter connection".to_string(),
+        "                               Claims are key:value pairs (split on first ':').".to_string(),
+        "                               The endpoint.zpr.adapter.cn claim is required.".to_string(),
+        "  notify_disconnect <ZPR_ADDR>  : notify VS to disconnect an adapter".to_string(),
+    ];
+    for line in &lines {
+        let _ = output_tx.send(line.clone());
+    }
 }
 
 /// Tokenize input splitting on whitespace, but keeping double-quoted substrings as single tokens.
@@ -122,14 +189,18 @@ fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
 }
 
 /// Parse user input and return a "command".
-fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
+fn parse_command(
+    cfg: &Config,
+    input: &str,
+    output_tx: &mpsc::UnboundedSender<String>,
+) -> Result<Cmd, String> {
     let parts = tokenize(input);
     if parts.is_empty() {
         return Err("does not compte".into());
     }
     match parts[0].as_str() {
         "h" => {
-            help();
+            help(output_tx);
             Ok(Cmd::Nop)
         }
 
@@ -170,7 +241,6 @@ fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
             } else if parts.len() > 2 {
                 return Err("usage: register_vss [<ADDR:PORT>]".into());
             } else {
-                // Default to self address with port 8183
                 SocketAddr::new(cfg.node_zpr_addr, 8183)
             };
             Ok(Cmd::RegisterVss(saddr))
@@ -212,16 +282,88 @@ fn parse_command(cfg: &Config, input: &str) -> Result<Cmd, String> {
     }
 }
 
+struct App {
+    log_lines: Vec<String>,
+    output_lines: Vec<String>,
+    input: String,
+    should_quit: bool,
+}
+
+impl App {
+    fn new() -> Self {
+        App {
+            log_lines: Vec::new(),
+            output_lines: Vec::new(),
+            input: String::new(),
+            should_quit: false,
+        }
+    }
+}
+
+fn render(f: &mut ratatui::Frame, app: &App) {
+    let chunks = Layout::vertical([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .split(f.area());
+
+    // --- Log pane (upper) ---
+    let log_area = chunks[0];
+    let inner_height = log_area.height.saturating_sub(2) as usize; // subtract borders
+    let log_start = app.log_lines.len().saturating_sub(inner_height);
+    let visible_logs: Vec<Line> = app.log_lines[log_start..]
+        .iter()
+        .map(|s| {
+            // Color-code by log level prefix
+            let color = if s.contains("[ERROR]") {
+                Color::Red
+            } else if s.contains("[WARN]") {
+                Color::Yellow
+            } else if s.contains("[INFO]") {
+                Color::Green
+            } else {
+                Color::Gray
+            };
+            Line::from(Span::styled(s.as_str(), Style::default().fg(color)))
+        })
+        .collect();
+
+    let log_widget = Paragraph::new(visible_logs)
+        .block(Block::default().title(" Logs ").borders(Borders::ALL))
+        .wrap(Wrap { trim: false });
+    f.render_widget(log_widget, log_area);
+
+    // --- REPL pane (lower) ---
+    let repl_area = chunks[1];
+    let inner_height = repl_area.height.saturating_sub(2) as usize; // subtract borders
+    // Reserve 1 line for the input prompt
+    let output_lines_to_show = inner_height.saturating_sub(1);
+    let output_start = app.output_lines.len().saturating_sub(output_lines_to_show);
+    let mut repl_lines: Vec<Line> = app.output_lines[output_start..]
+        .iter()
+        .map(|s| Line::from(s.as_str()))
+        .collect();
+    // Add prompt line
+    repl_lines.push(Line::from(vec![
+        Span::styled("lntest> ", Style::default().fg(Color::Cyan)),
+        Span::raw(app.input.as_str()),
+    ]));
+
+    let repl_widget = Paragraph::new(repl_lines)
+        .block(Block::default().title(" REPL ").borders(Borders::ALL));
+    f.render_widget(repl_widget, repl_area);
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    enable_logging();
 
     let vs_sa: SocketAddr = args.vs_addr.parse().expect("failed to parse vs-addr");
     let node_zpr_addr: IpAddr = args.self_addr.parse().expect("failed to parse self_addr");
     let node_aaa_prefix: IpNet = args.aaa_prefix.parse().expect("failed to parse aaa_prefix");
 
     let cfg = Config { node_zpr_addr };
+
+    // Set up logging to our TUI buffer instead of stdout
+    let log_buf = LogBuffer::default();
+    enable_logging(log_buf.clone());
 
     let mut vsc = VSConn::new(
         8,
@@ -245,7 +387,6 @@ async fn main() {
     });
 
     let (vss_tx, mut vss_rx) = mpsc::channel(32);
-    // Launch VSS server
     let vss_aborter = {
         let vss_saddr = SocketAddr::new(node_zpr_addr, 8183);
         info!("launching VSS server on {}", vss_saddr);
@@ -258,11 +399,13 @@ async fn main() {
     };
 
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Cmd>();
+    let (output_tx, mut output_rx) = mpsc::unbounded_channel::<String>();
 
+    // Command handler task
+    let cmd_output_tx = output_tx.clone();
     js.spawn(async move {
-        // Pause briefly to allow VSConn to start up.
         info!("allowing VSConn to start up...");
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
         let request = VSConnectRequest {
             zpr_addr: node_zpr_addr,
@@ -274,12 +417,12 @@ async fn main() {
         match handle.connect(request).await {
             Ok(resp) => {
                 info!("Connection response: {:?}", resp);
-                println!("connected");
+                let _ = cmd_output_tx.send("connected".to_string());
                 connected = true;
             }
             Err(e) => {
                 error!("connection failed: {:?}", e);
-                println!("connection failed: {:?}", e);
+                let _ = cmd_output_tx.send(format!("connection failed: {:?}", e));
             }
         }
 
@@ -292,10 +435,8 @@ async fn main() {
                                 match event {
                                     VSConnLifecycleEvent::RunLoopStarts =>
                                         info!("lifecycle event: VSConn run loop starts"),
-
                                     VSConnLifecycleEvent::ConnectedToVsApi =>
                                         info!("lifecycle event: connected to VS API"),
-
                                     VSConnLifecycleEvent::RunLoopExits =>
                                         info!("lifecycle event: VSConn run loop exits"),
                                 }
@@ -316,58 +457,62 @@ async fn main() {
                             Cmd::VisaRequest(five_tuple) => {
                                 let pdesc = PacketDesc {
                                     five_tuple,
-                                    comm_flags: CommFlag::BiDirectional, // TODO
+                                    comm_flags: CommFlag::BiDirectional,
                                 };
                                 let req = VSVisaRequest {
                                     pdesc,
-                                    previous_id: None, // TODO
+                                    previous_id: None,
                                 };
-                                let reply = handle.visa_request(req).await;
-                                match reply {
+                                match handle.visa_request(req).await {
                                     Ok(decision) => {
-                                        println!("visa_request decision: {:?}", decision);
+                                        let _ = cmd_output_tx.send(format!("visa_request decision: {:?}", decision));
                                     }
                                     Err(e) => {
-                                        println!("visa_request failed: {:?}", e);
+                                        let _ = cmd_output_tx.send(format!("visa_request failed: {:?}", e));
                                     }
                                 }
-                            },
+                            }
                             Cmd::RegisterVss(saddr) => {
-                                let res = handle.register_vss(saddr).await;
-                                match res {
+                                match handle.register_vss(saddr).await {
                                     Ok(ops) => {
-                                        println!("register_vss succeeded: got {} VisaOps", ops.len());
+                                        let _ = cmd_output_tx.send(format!(
+                                            "register_vss succeeded: got {} VisaOps", ops.len()
+                                        ));
                                         for vo in &ops {
                                             match vo {
                                                 VisaOp::Grant(v) => {
-                                                    println!("  visa id: {}", v.issuer_id);
+                                                    let _ = cmd_output_tx.send(format!("  visa id: {}", v.issuer_id));
                                                 }
                                                 VisaOp::RevokeVisaId(vid) => {
-                                                    println!("  revoke visa id: {}", vid);
+                                                    let _ = cmd_output_tx.send(format!("  revoke visa id: {}", vid));
                                                 }
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        println!("register_vss failed: {:?}", e);
+                                        let _ = cmd_output_tx.send(format!("register_vss failed: {:?}", e));
                                     }
                                 }
-                            },
+                            }
                             Cmd::NotifyDisconnect(zpr_addr) => {
                                 let notice = VSDisconnectNotice {
                                     zpr_addr: Some(zpr_addr),
                                     reason: DisconnectReason::Admin,
                                 };
                                 match handle.notify_disconnect(notice).await {
-                                    Ok(()) => println!("notify_disconnect succeeded"),
-                                    Err(e) => println!("notify_disconnect failed: {:?}", e),
+                                    Ok(()) => {
+                                        let _ = cmd_output_tx.send("notify_disconnect succeeded".to_string());
+                                    }
+                                    Err(e) => {
+                                        let _ = cmd_output_tx.send(format!("notify_disconnect failed: {:?}", e));
+                                    }
                                 }
-                            },
+                            }
                             Cmd::AuthorizeConnect(key_path, claims) => {
                                 let adapter_key = match load_private_key(&key_path) {
                                     Ok(k) => k,
                                     Err(e) => {
-                                        println!("failed to load adapter key: {}", e);
+                                        let _ = cmd_output_tx.send(format!("failed to load adapter key: {}", e));
                                         continue;
                                     }
                                 };
@@ -375,7 +520,7 @@ async fn main() {
                                 let cn = match claims.iter().find(|c| c.key == "endpoint.zpr.adapter.cn") {
                                     Some(c) => c.value.clone(),
                                     None => {
-                                        println!("error: endpoint.zpr.adapter.cn claim is required");
+                                        let _ = cmd_output_tx.send("error: endpoint.zpr.adapter.cn claim is required".to_string());
                                         continue;
                                     }
                                 };
@@ -383,7 +528,7 @@ async fn main() {
                                 let blob = match build_self_signed_blob(&cn, &adapter_key) {
                                     Ok(b) => b,
                                     Err(e) => {
-                                        println!("failed to build self-signed blob: {}", e);
+                                        let _ = cmd_output_tx.send(format!("failed to build self-signed blob: {}", e));
                                         continue;
                                     }
                                 };
@@ -403,30 +548,37 @@ async fn main() {
 
                                 match handle.authorize_connect(connect_req).await {
                                     Ok(conn) => {
-                                        println!(
+                                        let _ = cmd_output_tx.send(format!(
                                             "authorize_connect succeeded: zpr_addr={}, auth_expires={}",
                                             conn.zpr_addr, conn.auth_expires
-                                        );
+                                        ));
                                     }
                                     Err(e) => {
-                                        println!("authorize_connect failed: {:?}", e);
+                                        let _ = cmd_output_tx.send(format!("authorize_connect failed: {:?}", e));
                                     }
                                 }
-                            },
+                            }
                         }
                     }
+
                     Some(vss_msg) = vss_rx.recv() => {
                         match vss_msg {
                             VSSMessage::PushVisaOp(visa_ops, resp_tx) => {
-                                println!("[VSS incomming] PushVisaOp with {} ops", visa_ops.len());
-                                let _ = resp_tx.send(ListProcessingResponse::Ack { processed: visa_ops.len() as u32});
+                                let _ = cmd_output_tx.send(format!(
+                                    "[VSS incoming] PushVisaOp with {} ops", visa_ops.len()
+                                ));
+                                let _ = resp_tx.send(ListProcessingResponse::Ack { processed: visa_ops.len() as u32 });
                             }
                             VSSMessage::RevokeAuth(ip_addrs, resp_tx) => {
-                                println!("[VSS incomming] RevokeAuth for {} addresses", ip_addrs.len());
-                                let _ = resp_tx.send(ListProcessingResponse::Ack { processed: ip_addrs.len() as u32});
+                                let _ = cmd_output_tx.send(format!(
+                                    "[VSS incoming] RevokeAuth for {} addresses", ip_addrs.len()
+                                ));
+                                let _ = resp_tx.send(ListProcessingResponse::Ack { processed: ip_addrs.len() as u32 });
                             }
                             VSSMessage::SetServices(version, services, resp_tx) => {
-                                println!("[VSS incomming] SetServices v{} with {} services", version, services.len());
+                                let _ = cmd_output_tx.send(format!(
+                                    "[VSS incoming] SetServices v{} with {} services", version, services.len()
+                                ));
                                 let _ = resp_tx.send(Ok(()));
                             }
                         }
@@ -439,11 +591,11 @@ async fn main() {
         match handle.stop(true).await {
             Ok(_) => {
                 info!("stopped VSConn");
-                println!("stopped vsconn");
+                let _ = cmd_output_tx.send("stopped vsconn".to_string());
             }
             Err(e) => {
                 error!("failed to stop VSConn: {:?}", e);
-                println!("failed to stop VSConn: {:?}", e);
+                let _ = cmd_output_tx.send(format!("failed to stop VSConn: {:?}", e));
             }
         }
         vss_aborter.abort();
@@ -451,55 +603,27 @@ async fn main() {
         Ok(())
     });
 
-    // The readline loop is blocking.
+    // TUI event loop — runs as a blocking task alongside the async tasks
     js.spawn_blocking(move || {
-        let mut rl = DefaultEditor::new().unwrap();
-        let mut do_disconnect = false;
-        loop {
-            let readline = rl.readline("lntest> ");
-            match readline {
-                Ok(line) => {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    rl.add_history_entry(trimmed).unwrap();
-                    match parse_command(&cfg, trimmed) {
-                        Ok(cmd) => match cmd {
-                            Cmd::Disconnect => {
-                                do_disconnect = true;
-                            }
-                            _ => {
-                                if let Err(e) = cmd_tx.send(cmd) {
-                                    println!("failed to send command: {:?}", e);
-                                    do_disconnect = true;
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            println!("{e}");
-                        }
-                    }
-                }
-                Err(ReadlineError::Interrupted) => {
-                    // ^C
-                    do_disconnect = true;
-                }
-                Err(ReadlineError::Eof) => {
-                    // ^D
-                    do_disconnect = true;
-                }
-                Err(err) => {
-                    println!("error: {:?}", err);
-                    do_disconnect = true;
-                }
-            }
-            if do_disconnect {
-                if let Err(e) = cmd_tx.send(Cmd::Disconnect) {
-                    println!("failed to send disconnect command: {:?}", e);
-                }
-                break;
-            }
+        let result = (|| -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            crossterm::terminal::enable_raw_mode()?;
+            let mut stdout = stdout();
+            execute!(stdout, EnterAlternateScreen)?;
+            let backend = CrosstermBackend::new(stdout);
+            let mut terminal = Terminal::new(backend)?;
+
+            let mut app = App::new();
+
+            let r = run_tui(&mut terminal, &mut app, &log_buf, &mut output_rx, &cmd_tx, &output_tx, &cfg);
+
+            // Restore terminal regardless of result
+            crossterm::terminal::disable_raw_mode()?;
+            execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+            r
+        })();
+        if let Err(e) = result {
+            eprintln!("TUI error: {:?}", e);
         }
         Ok(())
     });
@@ -510,12 +634,84 @@ async fn main() {
                 match res {
                     Ok(_) => (),
                     Err(e) => {
-                        error!("task failed: {:?}", e);
+                        eprintln!("task failed: {:?}", e);
                     }
                 }
             }
         })
         .await;
+}
+
+fn run_tui(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    app: &mut App,
+    log_buf: &LogBuffer,
+    output_rx: &mut mpsc::UnboundedReceiver<String>,
+    cmd_tx: &mpsc::UnboundedSender<Cmd>,
+    output_tx: &mpsc::UnboundedSender<String>,
+    cfg: &Config,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    loop {
+        // Drain log buffer
+        log_buf.drain_into(&mut app.log_lines);
+
+        // Drain output channel
+        while let Ok(line) = output_rx.try_recv() {
+            app.output_lines.push(line);
+        }
+
+        terminal.draw(|f| render(f, app))?;
+
+        if event::poll(Duration::from_millis(50))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.should_quit = true;
+                    }
+                    KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.should_quit = true;
+                    }
+                    KeyCode::Char(c) => {
+                        app.input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        app.input.pop();
+                    }
+                    KeyCode::Enter => {
+                        let input = app.input.trim().to_string();
+                        app.input.clear();
+                        if input.is_empty() {
+                            continue;
+                        }
+                        // Echo the command in the REPL pane
+                        app.output_lines.push(format!("lntest> {}", input));
+
+                        match parse_command(cfg, &input, output_tx) {
+                            Ok(Cmd::Disconnect) => {
+                                app.should_quit = true;
+                            }
+                            Ok(cmd) => {
+                                if let Err(e) = cmd_tx.send(cmd) {
+                                    app.output_lines.push(format!("failed to send command: {:?}", e));
+                                    app.should_quit = true;
+                                }
+                            }
+                            Err(e) => {
+                                app.output_lines.push(e);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if app.should_quit {
+            let _ = cmd_tx.send(Cmd::Disconnect);
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn build_self_signed_blob(
@@ -530,7 +726,6 @@ fn build_self_signed_blob(
         .unwrap()
         .as_secs();
 
-    // Sign: timestamp_be(8) + cn_utf8(var) + challenge(32)
     let mut data = Vec::new();
     data.extend_from_slice(&timestamp.to_be_bytes());
     data.extend_from_slice(cn.as_bytes());
@@ -556,10 +751,10 @@ fn load_private_key(keyfile: &Path) -> Result<PKey<Private>, Box<dyn std::error:
     Ok(pkey)
 }
 
-pub fn enable_logging() {
+fn enable_logging(buf: LogBuffer) {
     tracing::subscriber::set_global_default(
         tracing_subscriber::registry()
-            .with(fmt::layer())
+            .with(TuiLogLayer { buf })
             .with(LevelFilter::from_level(Level::DEBUG)),
     )
     .expect("setting default subscriber failed");

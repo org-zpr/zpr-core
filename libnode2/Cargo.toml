@@ -8,9 +8,10 @@ license = "Apache-2.0"
 capnp = "0.25.0"
 capnp-rpc = "0.25.0"
 clap = { version = "4.5.23", features = ["derive"], optional = true } # lnt
+crossterm = { version = "0.28", optional = true } # lnt
 ipnet = "2.11.0"
 openssl = "0.10.74"
-rustyline = { version = "17.0.2", optional = true } #lnt
+ratatui = { version = "0.29", optional = true } # lnt
 thiserror = "2.0.17"
 tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
 tokio = { version = "1.48.0", features = ["full"] }
@@ -22,7 +23,7 @@ rcgen = "0.14.7"
 zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.8.0", features = ["vsapi"] }
 
 [features]
-build-lnt = ["clap", "tracing-subscriber", "rustyline"]
+build-lnt = ["clap", "tracing-subscriber", "ratatui", "crossterm"]
 
 [[bin]]
 name = "lntest"
