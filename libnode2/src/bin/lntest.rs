@@ -1,9 +1,10 @@
 use clap::Parser;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
+use tui_input::{Input, InputRequest, backend::crossterm::EventHandler};
 use ipnet::IpNet;
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
@@ -285,7 +286,9 @@ fn parse_command(
 struct App {
     log_lines: Vec<String>,
     output_lines: Vec<String>,
-    input: String,
+    input: Input,
+    history: Vec<String>,
+    history_idx: Option<usize>,
     should_quit: bool,
 }
 
@@ -294,7 +297,9 @@ impl App {
         App {
             log_lines: Vec::new(),
             output_lines: Vec::new(),
-            input: String::new(),
+            input: Input::default(),
+            history: Vec::new(),
+            history_idx: None,
             should_quit: false,
         }
     }
@@ -340,15 +345,25 @@ fn render(f: &mut ratatui::Frame, app: &App) {
         .iter()
         .map(|s| Line::from(s.as_str()))
         .collect();
+    // Pad with empty lines so the prompt is always at the bottom of the pane
+    while repl_lines.len() < output_lines_to_show {
+        repl_lines.push(Line::from(""));
+    }
     // Add prompt line
     repl_lines.push(Line::from(vec![
         Span::styled("lntest> ", Style::default().fg(Color::Cyan)),
-        Span::raw(app.input.as_str()),
+        Span::raw(app.input.value()),
     ]));
 
     let repl_widget = Paragraph::new(repl_lines)
         .block(Block::default().title(" REPL ").borders(Borders::ALL));
     f.render_widget(repl_widget, repl_area);
+
+    // Position the real terminal cursor inside the prompt line
+    let prompt_len = "lntest> ".len() as u16;
+    let cursor_x = repl_area.x + 1 + prompt_len + app.input.visual_cursor() as u16;
+    let cursor_y = repl_area.y + repl_area.height - 2;
+    f.set_cursor_position((cursor_x, cursor_y));
 }
 
 #[tokio::main]
@@ -664,6 +679,10 @@ fn run_tui(
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                // Ignore key release events (only act on press / repeat)
+                if key.kind == KeyEventKind::Release {
+                    continue;
+                }
                 match key.code {
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.should_quit = true;
@@ -671,17 +690,42 @@ fn run_tui(
                     KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.should_quit = true;
                     }
-                    KeyCode::Char(c) => {
-                        app.input.push(c);
+                    KeyCode::Up => {
+                        if !app.history.is_empty() {
+                            let new_idx = match app.history_idx {
+                                None => app.history.len() - 1,
+                                Some(i) => i.saturating_sub(1),
+                            };
+                            app.history_idx = Some(new_idx);
+                            let mut inp: Input = app.history[new_idx].clone().into();
+                            inp.handle(InputRequest::GoToEnd);
+                            app.input = inp;
+                        }
                     }
-                    KeyCode::Backspace => {
-                        app.input.pop();
-                    }
+                    KeyCode::Down => match app.history_idx {
+                        None => {}
+                        Some(i) if i + 1 < app.history.len() => {
+                            let new_idx = i + 1;
+                            app.history_idx = Some(new_idx);
+                            let mut inp: Input = app.history[new_idx].clone().into();
+                            inp.handle(InputRequest::GoToEnd);
+                            app.input = inp;
+                        }
+                        Some(_) => {
+                            app.history_idx = None;
+                            app.input = Input::default();
+                        }
+                    },
                     KeyCode::Enter => {
-                        let input = app.input.trim().to_string();
-                        app.input.clear();
+                        let input = app.input.value().trim().to_string();
+                        app.input = Input::default();
+                        app.history_idx = None;
                         if input.is_empty() {
                             continue;
+                        }
+                        // Append to history (skip exact duplicates at the end)
+                        if app.history.last().map(|s| s.as_str()) != Some(input.as_str()) {
+                            app.history.push(input.clone());
                         }
                         // Echo the command in the REPL pane
                         app.output_lines.push(format!("lntest> {}", input));
@@ -701,7 +745,11 @@ fn run_tui(
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        // Forward everything else to tui-input for line editing:
+                        // ← → Home End Ctrl+A/E Ctrl+W Ctrl+K Alt+← Alt+→ etc.
+                        app.input.handle_event(&Event::Key(key));
+                    }
                 }
             }
         }
