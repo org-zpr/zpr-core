@@ -23,7 +23,7 @@ pub enum ZdpPacketType {
     BindEgressStreamRequest = 8,  // TODO: add to RFC 17
     BindEgressStreamResponse = 9, // TODO: add to RFC 17
     UnbindActorAddressRequest = 13,
-    UnbindActorAddressResponse = 14,
+    UnbindEgressStreamRequest = 14,
 
     // Not flow-based
     ZprArp = 128,
@@ -232,6 +232,11 @@ pub struct ZdpBindEgressStreamResponseHeader {
     pub status_code: ResponseCode,
     pub info_len: u8,
 }
+
+// #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+// #[repr(packed)]
+// pub struct ZdpUnbindEgressStreamRequestHeader {
+// }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]

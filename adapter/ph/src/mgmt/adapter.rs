@@ -115,6 +115,19 @@ pub fn bind_egress_stream(
     }
 }
 
+pub fn unbind_egress_stream(
+    asm: &Arc<Assembly>,
+    dock_link_id: NonZero<LinkId>,
+    txn_id: txn_mgr::TxnId,
+    stream_id: StreamId
+) {
+    debug!(
+        target: FLOW_MGMT,
+        "unbind_egress_stream(dock_link_id={dock_link_id}, txn_id={txn_id})");
+
+    asm.dlt.remove(stream_id)
+}
+
 #[derive(Debug)]
 pub enum InstallTetherError {
     NoSuchTransaction,

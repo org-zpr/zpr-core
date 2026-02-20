@@ -767,3 +767,38 @@ pub async fn handle_bind_egress_stream_response(
         _ => Err(HandleMgmtError::BadStructure),
     }
 }
+
+pub async fn handle_unbind_actor_address_request(
+    asm: &Arc<Assembly>,
+    txn_id: TxnId,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
+    Ok(())
+}
+
+pub async fn handle_unbind_egress_stream_request(
+    asm: &Arc<Assembly>,
+    txn_id: TxnId,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
+    if !matches!(asm.ph_mode, PhMode::Adapter) {
+        error!(target: ZDP, "Link {}: received BindEgressStream message on node", pkt.metadata().ingress_link_id);
+        return Err(HandleMgmtError::MessageNotPermitted);
+    }
+
+    let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
+        // who sent this??
+        error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
+        return Ok(());
+    };
+
+    debug!(
+        target: ZDP,
+        "Link {}: handlers.handle_unbind_egress_stream_request",
+        ingress_link_id.get()
+    );
+
+    adapter::unbind_egress_stream(asm, ingress_link_id, txn_id, pkt.metadata().ingress_stream_id);
+
+    Ok(())
+}
