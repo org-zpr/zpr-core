@@ -5,7 +5,7 @@ use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Layout},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
@@ -17,12 +17,20 @@ use super::args::Config;
 use super::cmd::{Cmd, parse_command};
 use super::logging::LogBuffer;
 
+/// A single line in the REPL output pane.
+pub enum OutputLine {
+    /// An echoed command: rendered with a styled prompt prefix and the user input.
+    Command(String),
+    /// Plain response/error text.
+    Text(String),
+}
+
 /// All state for the lntest TUI.
 pub struct App {
     /// Lines accumulated from the tracing log buffer.
     pub log_lines: Vec<String>,
     /// Lines of REPL output (command echoes + response messages).
-    pub output_lines: Vec<String>,
+    pub output_lines: Vec<OutputLine>,
     /// Current contents of the input line.
     pub input: Input,
     /// Previously entered commands for up/down history navigation.
@@ -86,7 +94,19 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
     let output_start = app.output_lines.len().saturating_sub(output_lines_to_show);
     let mut repl_lines: Vec<Line> = app.output_lines[output_start..]
         .iter()
-        .map(|s| Line::from(s.as_str()))
+        .map(|line| match line {
+            OutputLine::Command(cmd) => Line::from(vec![
+                Span::styled(
+                    "lntest> ",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    cmd.as_str(),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            OutputLine::Text(s) => Line::from(s.as_str()),
+        })
         .collect();
     // Pad with empty lines so the prompt is always at the bottom of the pane
     while repl_lines.len() < output_lines_to_show {
@@ -129,7 +149,7 @@ pub fn run_tui(
 
         // Drain output channel
         while let Ok(line) = output_rx.try_recv() {
-            app.output_lines.push(line);
+            app.output_lines.push(OutputLine::Text(line));
         }
 
         terminal.draw(|f| render(f, app))?;
@@ -185,7 +205,7 @@ pub fn run_tui(
                             app.history.push(input.clone());
                         }
                         // Echo the command in the REPL pane
-                        app.output_lines.push(format!("lntest> {}", input));
+                        app.output_lines.push(OutputLine::Command(input.clone()));
 
                         match parse_command(cfg, &input, output_tx) {
                             Ok(Cmd::Disconnect) => {
@@ -194,12 +214,12 @@ pub fn run_tui(
                             Ok(cmd) => {
                                 if let Err(e) = cmd_tx.send(cmd) {
                                     app.output_lines
-                                        .push(format!("failed to send command: {:?}", e));
+                                        .push(OutputLine::Text(format!("failed to send command: {:?}", e)));
                                     app.should_quit = true;
                                 }
                             }
                             Err(e) => {
-                                app.output_lines.push(e);
+                                app.output_lines.push(OutputLine::Text(e));
                             }
                         }
                     }
