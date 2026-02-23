@@ -98,11 +98,15 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
             OutputLine::Command(cmd) => Line::from(vec![
                 Span::styled(
                     "lntest> ",
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     cmd.as_str(),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]),
             OutputLine::Text(s) => Line::from(s.as_str()),
@@ -213,8 +217,10 @@ pub fn run_tui(
                             }
                             Ok(cmd) => {
                                 if let Err(e) = cmd_tx.send(cmd) {
-                                    app.output_lines
-                                        .push(OutputLine::Text(format!("failed to send command: {:?}", e)));
+                                    app.output_lines.push(OutputLine::Text(format!(
+                                        "failed to send command: {:?}",
+                                        e
+                                    )));
                                     app.should_quit = true;
                                 }
                             }
