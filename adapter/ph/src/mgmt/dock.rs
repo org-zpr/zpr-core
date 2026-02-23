@@ -14,6 +14,7 @@
 
 use super::txn_mgr::{TxnHandle, TxnId};
 use super::{adapter, requests};
+use crate::adapter_tables;
 use crate::assembly::Assembly;
 use crate::classifier;
 use crate::counters::ManagementCounterType;
@@ -714,4 +715,77 @@ fn resolve_next_hop_bind_originator(
     }
 
     Ok((ingress_link_id, ingress_txn_id))
+}
+
+pub fn unbind_actor_address(
+    asm: &Arc<Assembly>,
+    ingress_link_id: NonZero<LinkId>,
+    txn_id: TxnId,
+    _l3_type: L3Type,
+    packet_body: &[u8],
+    stream_id: StreamId,
+) {
+    // Determine five-tuple
+
+    let mut five_tuple = FiveTuple::default();
+
+    let classifier_options =
+        classifier::ClassifierOptions::default().ignore_truncated_packets(true);
+
+    match classifier::classify_with_options(&mut five_tuple, packet_body, &classifier_options) {
+        Ok(classifier::ClassifierResult::OK) => (),
+        Ok(classifier::ClassifierResult::UnclassifiedL4) => {
+            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: unsupported IP protocol {}", five_tuple.l4_protocol);
+            return;
+        }
+        _ => {
+            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: invalid initial packet");
+            return;
+        }
+    }
+
+    // Remove requested entry from the ELT
+    match asm.elt.remove(&five_tuple) {
+        Ok(_) => (),
+        Err(e) => match e {
+            adapter_tables::RemoveError::NotFound => {
+                warn!(target: FLOW_MGMT, "Link {ingress_link_id}: requested entry not found");
+                return;
+            }
+        },
+    }
+    // Get visa ID
+
+    let visa_table = asm.visa_table.read().unwrap();
+
+    let visa_id = match visa_table.match_traffic(&five_tuple) {
+        Some(id) => id,
+        None => {
+            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: matching visa not found");
+            return;
+        }
+    };
+
+    drop(visa_table);
+
+    let Ok(egress_link_id) = visa_mgmt::get_egress_link_for_visa(asm, visa_id) else {
+        // visa or egress link was deleted; consider visa denied
+        return;
+    };
+
+    // Issue unbind request to next hop
+    if egress_link_id.get() == LOCAL_ACTOR_LINK_ID {
+        adapter::unbind_egress_stream(asm, NonZero::new(DOCK_LINK_ID).unwrap(), stream_id);
+    } else {
+        requests::send_unbind_egress_stream_request(
+            asm,
+            egress_link_id.get(),
+            // Not sure if the txn id should be different. The other place in the bind request where
+            // a new id is retrieved from the peer state manager, but I am not sure if we want to
+            // use that here since we are not changing the state.
+            // I also don't think it's necessary since we are already bound to the next hop, but not positive
+            txn_id,
+        )
+        .enqueue();
+    }
 }

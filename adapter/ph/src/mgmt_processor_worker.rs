@@ -144,16 +144,11 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 .await
             }
             ZdpPacketType::UnbindEgressStreamRequest => {
-                // I assume these will have a transaction header
-                let Ok(txn_hdr) = ZdpTransactionHeader::read_from_buf(&mut pkt) else {
+                // I don't think we need this, at least in the
+                let Ok(_txn_hdr) = ZdpTransactionHeader::read_from_buf(&mut pkt) else {
                     return Err(HandleMgmtError::BadStructure);
                 };
-                handlers::handle_unbind_egress_stream_request(
-                    asm,
-                    txn_hdr.transaction_id.into(),
-                    pkt,
-                )
-                .await
+                handlers::handle_unbind_egress_stream_request(asm, pkt).await
             }
 
             packet_type => Err(HandleMgmtError::UnknownType(packet_type.0)),

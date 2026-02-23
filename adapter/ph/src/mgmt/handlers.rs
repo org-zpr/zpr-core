@@ -773,13 +773,48 @@ pub async fn handle_unbind_actor_address_request(
     txn_id: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
+    if !matches!(asm.ph_mode, PhMode::Node) {
+        error!(target: ZDP, "Link {}: received UnbindActorAddress message on adapter", pkt.metadata().ingress_link_id);
+        return Err(HandleMgmtError::MessageNotPermitted);
+    }
+
+    let Ok(hdr) = zdp::ZdpUnbindActorAddressRequestHeader::read_from_buf(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    let l3_type = hdr.l3_type;
+
+    let endpoint_packet_length = hdr.endpoint_packet_length.get() as usize;
+    if endpoint_packet_length > pkt.len() {
+        return Err(HandleMgmtError::BadStructure);
+    }
+
+    // drop any garbage after the packet body
+    pkt.shrink_by(pkt.len() - endpoint_packet_length);
+
+    let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
+        // who sent this??
+        error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
+        return Ok(());
+    };
+
+    debug!(target: ZDP, "Link {ingress_link_id}: handlers.handle_unbind_actor_address_request");
+
+    dock::unbind_actor_address(
+        asm,
+        ingress_link_id,
+        txn_id,
+        l3_type,
+        pkt.body(),
+        pkt.metadata().ingress_stream_id,
+    );
+
     Ok(())
 }
 
 pub async fn handle_unbind_egress_stream_request(
     asm: &Arc<Assembly>,
-    txn_id: TxnId,
-    mut pkt: Packet,
+    pkt: Packet,
 ) -> HandleMgmtResult {
     if !matches!(asm.ph_mode, PhMode::Adapter) {
         error!(target: ZDP, "Link {}: received BindEgressStream message on node", pkt.metadata().ingress_link_id);
@@ -798,7 +833,7 @@ pub async fn handle_unbind_egress_stream_request(
         ingress_link_id.get()
     );
 
-    adapter::unbind_egress_stream(asm, ingress_link_id, txn_id, pkt.metadata().ingress_stream_id);
+    adapter::unbind_egress_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
 
     Ok(())
 }
