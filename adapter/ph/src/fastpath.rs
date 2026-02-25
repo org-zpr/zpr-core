@@ -475,6 +475,9 @@ impl FastpathWorker {
                 }
             };
 
+        assert!(!dest_sa.ip().is_unspecified());
+        assert!(!src_intf.ip().is_unspecified());
+
         // queue packet for send via substrate
         self.substrate_egress_q.push(QueuedEgressPacket {
             pkt,

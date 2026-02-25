@@ -291,21 +291,23 @@ impl FastpathIo {
     fn process_substrate_egress_queue(&mut self, worker: &mut FastpathWorker) {
         // (Try to) send packets.
         self.io_results.clear();
-        let n = self
-            .batch_io
-            .try_send_to_from_batch(
-                &self.substrate_socket,
-                worker.substrate_egress_q.iter().map(|pkt| {
-                    (
-                        pkt.pkt.body(),
-                        pkt.dst,
-                        Some(pkt.src),
-                        Self::get_confirm_flag(&pkt.pkt),
-                    )
-                }),
-                &mut self.io_results,
-            )
-            .expect("unrecoverable I/O error");
+
+        let n = match self.batch_io.try_send_to_from_batch(
+            &self.substrate_socket,
+            worker.substrate_egress_q.iter().map(|pkt| {
+                (
+                    pkt.pkt.body(),
+                    pkt.dst,
+                    Some(pkt.src),
+                    Self::get_confirm_flag(&pkt.pkt),
+                )
+            }),
+            &mut self.io_results,
+        ) {
+            Ok(n) => n,
+            Err(err) if err.kind() == ErrorKind::WouldBlock => 0,
+            Err(err) => panic!("unrecoverable I/O error: {err}"),
+        };
 
         // Tally results.
         let mut dropped = 0;

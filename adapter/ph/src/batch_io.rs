@@ -905,6 +905,8 @@ mod posix_unbatched {
             while let Some(item) = items.next() {
                 let res = op(fd, item);
                 if let Err(err) = res {
+                    // emulate behavior of sendmmsg(2)
+
                     if completed == 0 {
                         return Err(err);
                     }
