@@ -10,7 +10,7 @@ PH_BIN="${PH_BIN:-$(realpath "$(dirname "$0")/../target/debug/ph")}"
 PH_DEBUG_BIN="${PH_DEBUG_BIN:-$(realpath "$(dirname "$0")/../target/debug/ph-cli")}"
 VS_BIN="${VS_BIN:-$(realpath "$(dirname "$0")/vs")}"
 VS_ADMIN_BIN="${VS_ADMIN_BIN:-$(realpath "$(dirname "$0")/vs-admin")}"
-VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-$(realpath "$(dirname "$0")/valkey-server")}"
+VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-$(realpath -s "$(dirname "$0")/valkey-server")}"
 
 PREGEN=$(realpath "$(dirname $0)/pregen")
 NODE_AUTH_PRIVATE_KEY="${NODE_AUTH_PRIVATE_KEY:-$PREGEN/node-rsa-key.pem}"
