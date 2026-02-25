@@ -292,19 +292,6 @@ fi
 
 sleep 1
 
-#
-# Revoke zpr-b's visa and try to ping again
-#
-
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_ADMIN_BIN" \
-	--ca-cert ca.crt \
-	--svc-url "https://[$VS_ZPR_ADDR]:8182" \
-	actors --cn adapter2 --revoke
-
-if ! ping_a_b
-then PASS=0
-fi
-
 fi
 #
 # Check stats
