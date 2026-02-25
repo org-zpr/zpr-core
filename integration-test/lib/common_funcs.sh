@@ -166,17 +166,21 @@ function check_vs_valkey_port() {
 }
 
 function ping_test() {
-  sudo ip netns exec zpr-node ping -q -c 5 -w 5 "$VS_ZPR_ADDR" & wait -f $!
-  sudo ip netns exec zpr-vs ping -q -c 5 -w 5 "$NODE_ZPR_ADDR" & wait -f $!
-  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!
-  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!
+  RESULT=0
+
+  sudo ip netns exec zpr-node ping -q -c 5 -w 5 "$VS_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+  sudo ip netns exec zpr-vs ping -q -c 5 -w 5 "$NODE_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
 
   if [[ "$NUM_ACTORS" -ge 3 ]]; then
-    sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!
-    sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!
-    sudo ip netns exec zpr-c ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!
-    sudo ip netns exec zpr-c ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!
+    sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+    sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+    sudo ip netns exec zpr-c ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+    sudo ip netns exec zpr-c ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
   fi
+
+  return "$RESULT"
 }
 
 function check_carrier() {
