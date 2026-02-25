@@ -131,26 +131,9 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 )
                 .await
             }
-            ZdpPacketType::UnbindActorAddressRequest => {
-                // I assume these will have a transaction header
-                let Ok(txn_hdr) = ZdpTransactionHeader::read_from_buf(&mut pkt) else {
-                    return Err(HandleMgmtError::BadStructure);
-                };
-                handlers::handle_unbind_actor_address_request(
-                    asm,
-                    txn_hdr.transaction_id.into(),
-                    pkt,
-                )
-                .await
+            ZdpPacketType::UnbindEgressStreamIndication => {
+                handlers::handle_unbind_indication(asm, pkt).await
             }
-            ZdpPacketType::UnbindEgressStreamRequest => {
-                // I don't think we need this, at least in the
-                let Ok(_txn_hdr) = ZdpTransactionHeader::read_from_buf(&mut pkt) else {
-                    return Err(HandleMgmtError::BadStructure);
-                };
-                handlers::handle_unbind_egress_stream_request(asm, pkt).await
-            }
-
             packet_type => Err(HandleMgmtError::UnknownType(packet_type.0)),
         }
     } else {

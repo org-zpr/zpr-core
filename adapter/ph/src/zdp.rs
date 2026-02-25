@@ -22,8 +22,7 @@ pub enum ZdpPacketType {
     BindActorAddressResponse = 7,
     BindEgressStreamRequest = 8,  // TODO: add to RFC 17
     BindEgressStreamResponse = 9, // TODO: add to RFC 17
-    UnbindActorAddressRequest = 13,
-    UnbindEgressStreamRequest = 14,
+    UnbindEgressStreamIndication = 13,
 
     // Not flow-based
     ZprArp = 128,
@@ -217,18 +216,6 @@ pub struct ZdpBindActorAddressResponseHeader {
     // followed by `info_len` octets of Optional Additional Status Information
     // followed by 8-bit TCST
     // followed by traffic classifier
-}
-
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-// Alternativelt to the current setup, we could pass the FT instead, not sure
-// which is better for how the system is going to be set up
-pub struct ZdpUnbindActorAddressRequestHeader {
-    pub l3_type: L3Type,
-    pub endpoint_packet_length: U16,
-    // Followed in memory by:
-    // - <PACKET BODY starting with IP header>
-    // (source/dest addresses and layer4 protocol must be extracted from the IP header in the packet)
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

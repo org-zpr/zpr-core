@@ -115,15 +115,12 @@ pub fn bind_egress_stream(
     }
 }
 
-pub fn unbind_egress_stream(
-    asm: &Arc<Assembly>,
-    dock_link_id: NonZero<LinkId>,
-    stream_id: StreamId,
-) {
+pub fn unbind_stream(asm: &Arc<Assembly>, dock_link_id: NonZero<LinkId>, stream_id: StreamId) {
     debug!(
         target: FLOW_MGMT,
         "unbind_egress_stream(dock_link_id={dock_link_id}, stream_id={stream_id})");
 
+    // Remove the stream from the dock lookup table
     asm.dlt.remove(stream_id)
 }
 

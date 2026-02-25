@@ -1456,7 +1456,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tracing",
- "zpr",
+ "zpr 0.8.1",
 ]
 
 [[package]]
@@ -1824,7 +1824,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "zerocopy",
- "zpr",
+ "zpr 0.8.1",
  "zpr-ext",
  "zpr-utils",
 ]
@@ -3603,6 +3603,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zpr"
+version = "0.8.1"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.8.1#71ead993c6d21bdcd2f482513b53ebffec5f91fb"
+dependencies = [
+ "capnp",
+ "capnpc",
+ "open-enum",
+ "thiserror 1.0.69",
+ "url",
+ "zerocopy",
+]
+
+[[package]]
 name = "zpr-ext"
 version = "0.5.3"
 dependencies = [
@@ -3619,5 +3632,5 @@ name = "zpr-utils"
 version = "0.1.0"
 dependencies = [
  "zerocopy",
- "zpr",
+ "zpr 0.7.2",
 ]

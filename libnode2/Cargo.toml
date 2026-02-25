@@ -19,7 +19,7 @@ tracing-subscriber = { version = "0.3.20", optional = true } # lnt
 tokio-rustls = "0.26.4"
 rustls = "0.23.36"
 rcgen = "0.14.7"
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.7.2", features = ["vsapi"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.8.1", features = ["vsapi"] }
 
 [features]
 build-lnt = ["clap", "tracing-subscriber", "rustyline"]

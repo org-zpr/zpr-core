@@ -372,25 +372,6 @@ pub fn send_bind_egress_stream_request<'a>(
     )
 }
 
-pub fn send_unbind_egress_stream_request<'a>(
-    asm: &'a Assembly,
-    link_id: LinkId,
-    txn_id: TxnId,
-) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending UnbindEgressStreamRequest");
-
-    let req = core::new_heap_packet();
-
-    core::send_per_flow_txn_mgmt(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::UnbindEgressStreamRequest,
-        0,
-        txn_id,
-        req,
-    )
-}
-
 pub fn send_bind_egress_stream_success_response<'a>(
     asm: &'a Assembly,
     link_id: LinkId,
@@ -460,4 +441,22 @@ pub fn send_report<'a>(asm: &'a Assembly, link_id: LinkId, report: &'_ str) -> S
     hdr.report_data_length = (report.len() as u16).into();
     pkt.put(report.as_bytes());
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Report, pkt)
+}
+
+pub fn send_unbind_egress_stream_request<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    stream_id: StreamId,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending UnbindEgressStreamIndication");
+
+    let req = core::new_heap_packet();
+
+    core::send_per_flow_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::UnbindEgressStreamIndication,
+        stream_id,
+        req,
+    )
 }
