@@ -16,6 +16,10 @@ info:
 	@echo "  make deps        - build the ancillary packages"
 	@echo "  make diagrams    - build PlantUML diagrams"
 	@echo 
+	@echo Since there is a top-level Cargo file you can also
+	@echo build by just doing \`cargo build\` here. The 
+	@echo resulting binaries will be put in \`./target/debug\`.
+	@echo
 	@echo \>_
 	@echo
 
