@@ -10,19 +10,23 @@ capnp-rpc = { workspace = true }
 clap = { workspace = true, optional = true }
 ipnet = { workspace = true }
 openssl = { workspace = true }
-rcgen = "0.14.7"
-rustyline = { version = "17.0.2", optional = true }
-rustls = "0.23.36"
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-rustls = "0.26.4"
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 zpr = { workspace = true }
 
+crossterm = { version = "0.28", optional = true } # lnt
+ratatui = { version = "0.29", optional = true } # lnt
+tui-input = { version = "0.10", features = ["crossterm"], optional = true } # lnt
+tokio-rustls = "0.26.4"
+rustls = "0.23.36"
+rcgen = "0.14.7"
+
+
 [features]
-build-lnt = ["clap", "tracing-subscriber", "rustyline"]
+build-lnt = ["clap", "tracing-subscriber", "ratatui", "crossterm", "tui-input"]
 
 [[bin]]
 name = "lntest"
