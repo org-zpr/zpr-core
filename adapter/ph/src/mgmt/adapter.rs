@@ -155,10 +155,7 @@ pub fn install_tether(
         .map_err(|_| InstallTetherError::NoSuchTransaction)?;
 
     // Confirm this TC matches our initial packet.
-    // TODO: use the TC itself to do this, once we have that code in place.
-    if tc.five_tuple()
-        != tc::Ip5TupleTc::new_with_compression_mode(tc.compression_mode(), five_tuple).five_tuple()
-    {
+    if !tc.classify_5t(&five_tuple) {
         error!(target: FLOW_MGMT, "Bind of {five_tuple} falied: node supplied TC incompatible with initial packet: {tc}");
         asm.elt.remove(&five_tuple).unwrap();
         return Ok(());

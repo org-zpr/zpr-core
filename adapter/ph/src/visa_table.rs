@@ -107,27 +107,7 @@ impl Visa {
     // Visa may have wildcards.  Eg, a visa with zero for a source port will match
     // any traffic five_tuple source port value.
     pub fn match_traffic(&self, five_tuple: &FiveTuple) -> bool {
-        let visa_tuple = self.ftuple;
-        if visa_tuple.source_addr != IpAddr::from(five_tuple.src_address) {
-            return false;
-        }
-        if visa_tuple.dest_addr != IpAddr::from(five_tuple.dst_address) {
-            return false;
-        }
-        // TODO: Explicitly set this (l3_type) in visa and also allow it to be set to 0?
-        if visa_tuple.l3_type != five_tuple.l3_type {
-            return false;
-        }
-        if visa_tuple.l4_protocol != 0 && visa_tuple.l4_protocol != five_tuple.l4_protocol {
-            return false;
-        }
-        if visa_tuple.source_port != 0 && visa_tuple.source_port != five_tuple.src_port {
-            return false;
-        }
-        if visa_tuple.dest_port != 0 && visa_tuple.dest_port != five_tuple.dst_port {
-            return false;
-        }
-        return true;
+        self.get_tc().classify_5t(five_tuple)
     }
 
     pub fn get_tc(&self) -> tc::Ip5TupleTc {
