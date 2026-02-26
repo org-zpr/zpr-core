@@ -523,8 +523,7 @@ type_name_table =
     [7] = "Bind Actor Address Response",
     [8] = "Bind Egress Stream Request",
     [9] = "Bind Egress Stream Response",
-    [10] = "Visa Deaccept Acknowledgement",
-    [11] = "Bind Actor Address Request",
+    [13] = "Unbind Egress Stream Indication"
     [127] = "Reserved: Must not be used",
     [128] = "ZPR ARP",
     [129] = "Key Management",
@@ -540,8 +539,6 @@ type_name_table =
     [139] = "Grant ZPR Address",
     [140] = "Revoke ZPR Address",
     [141] = "Init Authentication Request",
-    [142] = "Terminate Link Response", -- not in rfc
-    [143] = "Terminate Link Indication", -- not in rfc
     [254] = "Acknowledgement",
     [255] = "Reserved: Must not be used",
 }
@@ -549,7 +546,7 @@ type_name_table =
 terminate_reason_table =
 {
     [0] = "Other",
-    [1] = "Unused1",
+    [1] = "Unused",
     [2] = "Request Timed Out",
     [3] = "Reset",
     [4] = "Shutdown",
