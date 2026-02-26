@@ -10,6 +10,7 @@ use crate::defs::FiveTuple;
 use crate::mgmt::txn_mgr::TxnHandle;
 use crate::packet::Packet;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
+use crate::tc;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DashMapEntry;
@@ -177,8 +178,7 @@ impl EndpointLookupTable {
 }
 
 pub struct DltPep {
-    pub compression_mode: CompressionMode,
-    pub five_tuple: FiveTuple,
+    pub tc: tc::Ip5TupleTc,
 }
 
 /// The Dock Lookup Table (DLT) holds all state of inbound tethers.

@@ -437,7 +437,7 @@ impl FastpathWorker {
             return;
         };
 
-        compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt);
+        compress::expand(pep.tc.compression_mode(), &pep.tc.five_tuple(), &mut pkt);
 
         // check A2A MAC
         // TODO: use actual A2A SAID & keyed hash

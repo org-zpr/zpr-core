@@ -48,10 +48,7 @@ pub fn bind_egress_stream(
         "bind_egress_stream(dock_link_id={dock_link_id}, txn_id={txn_id}, tc={tc})");
 
     // form PEP
-    let pep = DltPep {
-        compression_mode: tc.compression_mode(),
-        five_tuple: *tc.five_tuple(),
-    };
+    let pep = DltPep { tc };
 
     // TODO: reverse path
 
