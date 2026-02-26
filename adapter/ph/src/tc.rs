@@ -17,27 +17,9 @@ use zpr_utils::net_defs;
 pub struct Ip5TupleTc(defs::FiveTuple);
 
 impl Ip5TupleTc {
-    #[allow(dead_code)]
     /// Interpret a five-tuple as a traffic classifier.  Ports specified as 0
     /// are interpreted as wildcards.
     pub fn new(five_tuple: defs::FiveTuple) -> Self {
-        Self(five_tuple)
-    }
-
-    /// TEMPORARY: use compression mode flags to indicate which ports of the five-tuple
-    /// should be masked out and treated as wildcards.
-    pub fn new_with_compression_mode(
-        compression_mode: CompressionMode,
-        mut five_tuple: defs::FiveTuple,
-    ) -> Self {
-        if compression_mode & compression_mode::SOURCE_PORT_PRESENT == 0 {
-            five_tuple.src_port = 0;
-        }
-
-        if compression_mode & compression_mode::DESTINATION_PORT_PRESENT == 0 {
-            five_tuple.dst_port = 0;
-        }
-
         Self(five_tuple)
     }
 
