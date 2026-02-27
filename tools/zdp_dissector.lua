@@ -69,6 +69,13 @@ trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
 -- req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
 -- source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
 
+-- Request/response matching
+req_frame = ProtoField.framenum("zdp.request_frame", "Request Frame", base.NONE, frametype.REQUEST)
+res_frame = ProtoField.framenum("zdp.response_frame", "Response Frame", base.NONE, frametype.RESPONSE)
+
+
+acked_frame = ProtoField.framenum("zdp.ack_frame", "Acknowledged Frame", base.NONE, frametype.ACK)
+acked_by_frame = ProtoField.framenum("zdp.acked_by", "Acknowledged By", base.NONE, frametype.ACK)
 
 
 zdp_proto.fields = { 
@@ -84,6 +91,7 @@ zdp_proto.fields = {
     reason_code,  response_code, source_addr_v4, source_addr_v6, source_info, 
     status_code, status_info, tcst, tlv_len, tlv_type, tlv_val_bytes, 
     tlv_val_i64, tlv_val_ipv4, tlv_val_ipv6, tlv_val_str, tlv_val_u16, trans_id,
+    req_frame, res_frame, acked_frame, acked_by_frame
 }
 
 -- Lengths of fields when using Noise Encryption
@@ -137,6 +145,11 @@ TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + STREAM_ID + KEY_NOISE_PAD + H
 PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
 PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
 NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
+
+req_frames = {} -- stream id -> 
+res_frames = {}
+seq_to_frame = {}   -- seq_num -> frame that sent it
+ack_links = {}      -- frame -> paired frame (bidirectional)
 
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
@@ -227,9 +240,11 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         end
         -- NOTE I believe that both the Pad and the MAC are removed before the packets are captured
     else -- Non-per-flow management message
-        -- ARP and Key Mgmt messages do not have a Sequence number
+        -- ARP and Key Mgmt messages do not have a Sequence number -- NOTE is this still true?
         if type ~= 128 and type ~= 129 then
-            zdp_header:add_field(seq_num, SEQ_NUM)
+            local sequence_num = tostring(zdp_header:add_field_and_return_u64(seq_num, SEQ_NUM))
+
+            ack_linking(type, zdp_header, sequence_num)
         end
 
         if real_len > NON_FLOW_NON_AGENT_DATA then
@@ -332,17 +347,29 @@ function get_tlv_val_type(type, len)
 end
 
 function handle_bind_actor_addr_req(management)
-    management:add_field(trans_id, TRANS_ID)
+    local transaction_id = management:add_field_and_return(trans_id, TRANS_ID)
+
+    add_request_frame(management, transaction_id)
+
     local version = management:add_field_and_return(ip_version, IP_VERSION)
     local length = management:add_field_and_return(pkt_len, PKT_LEN)
+
+    -- Save ZDP column info before handing off to IP dissector
+    local saved_pinfo = save_pinfo(management:get_pinfo())
 
     -- Full IP packet inside, can just hand off to IP dissector
     local ip_dissector = Dissector.get("ip")
     ip_dissector:call(management:get_curr_buffer_section(length):tvb(), management:get_pinfo(), management:get_tree())
+
+    -- Restore ZDP column info
+    restore_pinfo(saved_pinfo, management)
 end
 
 function handle_bind_actor_addr_res(management)
-    management:add_field(trans_id, TRANS_ID)
+    local transaction_id = management:add_field_and_return(trans_id, TRANS_ID)
+    
+    add_response_link(management, transaction_id)
+
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     local info = management:add_field_and_return(info_len, INFO_LEN)
     if info > 0 then 
@@ -353,13 +380,15 @@ function handle_bind_actor_addr_res(management)
 end
 
 function handle_bind_egress_stream_req(management)
-    management:add_field(trans_id, TRANS_ID)
+    local transaction_id = management:add_field_and_return(trans_id, TRANS_ID)
+    add_request_frame(management, transaction_id)
     management:add_field(tcst, TCST)
     management:add_field(tc, TC)
 end
 
 function handle_bind_egress_stream_res(management)
-    management:add_field(trans_id, TRANS_ID)
+    local transaction_id = management:add_field_and_return(trans_id, TRANS_ID)
+    add_response_link(management, transaction_id)    
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     management:add_field(info_len, INFO_LEN)
 end
@@ -426,6 +455,12 @@ function TreeBuilder(init_buffer, init_pinfo, init_tree)
             self.pos = self.pos + len
             return val:uint()
         end,
+        add_field_and_return_u64 = function(self, field, len)
+            local val = self.buffer(self.pos, len)
+            self.tree:add(field, val)
+            self.pos = self.pos + len
+            return val:uint64()
+        end,
         add_field_with_text_table = function(self, field, len, table)
             local key = self.buffer(self.pos, len):uint()
             self.tree:add(field, self.buffer(self.pos, len)):append_text(" (" .. table[key] .. ")")
@@ -468,11 +503,6 @@ function TreeBuilder(init_buffer, init_pinfo, init_tree)
     return dissector
 end
 
-
-
--- TODO
--- cleanup existing code
-
 management_table = 
 {
     [6] = handle_bind_actor_addr_req,
@@ -497,6 +527,80 @@ presence_value =
     [1] = "Present",
 }
 
+function add_request_frame(management, transaction_id)
+    local frame_num = management:get_pinfo().number
+    if not management:get_pinfo().visited then
+        req_frames[transaction_id] = frame_num
+    end
+
+    local res = res_frames[frame_num]
+    if res then 
+        management:add_field_no_buffer(res_frame, res)
+    end
+end
+
+function add_response_link(management, transaction_id)
+    local frame_num = management:get_pinfo().number
+    if not management:get_pinfo().visited then
+        local req = req_frames[transaction_id]
+        if req then 
+            res_frames[req] = frame_num -- req -> res
+            res_frames[frame_num] = req -- res -> req
+        end
+    end
+    local req = res_frames[frame_num]
+    if req then
+        management:add_field_no_buffer(req_frame, req)
+    end
+end
+
+function ack_linking(type, zdp_header, sequence_num)
+    local frame_num = zdp_header:get_pinfo().number
+    if not zdp_header:get_pinfo().visited then
+        if needs_ack[type] then
+            seq_to_frame[sequence_num] = frame_num
+        end
+    end
+
+    if type == 254 then
+        if not zdp_header:get_pinfo().visited then
+            local acked_pkt = seq_to_frame[sequence_num]
+            if acked_pkt then
+                ack_links[acked_pkt] = frame_num    -- original -> ack
+                ack_links[frame_num] = acked_pkt    -- ack -> original
+            end
+        end
+    end
+
+    local linked = ack_links[frame_num]
+    if linked then
+        if type == 254 then
+            zdp_header:add_field_no_buffer(acked_frame, linked)
+        elseif needs_ack[type] then
+            zdp_header:add_field_no_buffer(acked_by_frame, linked)
+        end
+    end
+end
+
+function save_pinfo(pinfo) 
+    local p = {}
+    -- The src and dst are set in link_header_dissector, so it can't be saved here.
+    -- Would have to change the way we approach the handoff, would not be a major 
+    -- change, I don't think
+    -- p.dst = tostring(pinfo.cols.dst)
+    -- p.src = tostring(pinfo.cols.src)
+    p.protocol = tostring(pinfo.cols.protocol)
+    p.info = tostring(pinfo.cols.info)
+
+    return p
+end
+
+function restore_pinfo(pinfo, management)
+    -- management:get_pinfo().cols.src = pinfo.src
+    -- management:get_pinfo().cols.dst = pinfo.dst
+    management:get_pinfo().cols.protocol = pinfo.protocol
+    management:get_pinfo().cols.info = pinfo.info
+end
 -- Gets type name for a packet using the table below. Will return nil if type is 
 -- not between 0 and 254
 function get_type_name(type)
@@ -523,7 +627,7 @@ type_name_table =
     [7] = "Bind Actor Address Response",
     [8] = "Bind Egress Stream Request",
     [9] = "Bind Egress Stream Response",
-    [13] = "Unbind Egress Stream Indication"
+    [13] = "Unbind Egress Stream Indication",
     [127] = "Reserved: Must not be used",
     [128] = "ZPR ARP",
     [129] = "Key Management",
@@ -567,6 +671,11 @@ tlv_type_table =
     [4] = "ASA",
     [5] = "Static Addr",
     [6] = "Window Size"
+}
+
+needs_ack = 
+{
+    [131] = true
 }
 
 -- Bit un-packing funcs
