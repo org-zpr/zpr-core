@@ -70,11 +70,11 @@ trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
 -- source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
 
 -- Request/response matching
-req_frame = ProtoField.framenum("zdp.request_frame", "Request Frame", base.NONE, frametype.REQUEST)
-res_frame = ProtoField.framenum("zdp.response_frame", "Response Frame", base.NONE, frametype.RESPONSE)
+req_frame = ProtoField.framenum("zdp.request_frame", "Request", base.NONE, frametype.REQUEST)
+res_frame = ProtoField.framenum("zdp.response_frame", "Response", base.NONE, frametype.RESPONSE)
 
 
-acked_frame = ProtoField.framenum("zdp.ack_frame", "Acknowledged Frame", base.NONE, frametype.ACK)
+acked_frame = ProtoField.framenum("zdp.ack_frame", "Acknowledged", base.NONE, frametype.ACK)
 acked_by_frame = ProtoField.framenum("zdp.acked_by", "Acknowledged By", base.NONE, frametype.ACK)
 
 
@@ -230,7 +230,8 @@ function zdp_proto.dissector(buffer, pinfo, tree)
             -- Dissector.get("tcp"):call(buffer(15, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
         end
     elseif type <= 127 then -- Per-Flow Management Message
-        zdp_header:add_field(seq_num, SEQ_NUM)
+        local sequence_num = tostring(zdp_header:add_field_and_return_u64(seq_num, SEQ_NUM))
+        ack_linking(type, zdp_header, sequence_num)
 
         zdp_header:add_field(stream_id, STREAM_ID)
         if real_len > PER_FLOW_NON_AGENT_DATA then
@@ -240,7 +241,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         end
         -- NOTE I believe that both the Pad and the MAC are removed before the packets are captured
     else -- Non-per-flow management message
-        -- ARP and Key Mgmt messages do not have a Sequence number -- NOTE is this still true?
+        -- ARP and Key Mgmt messages do not have a Sequence number
         if type ~= 128 and type ~= 129 then
             local sequence_num = tostring(zdp_header:add_field_and_return_u64(seq_num, SEQ_NUM))
 
@@ -557,7 +558,7 @@ end
 function ack_linking(type, zdp_header, sequence_num)
     local frame_num = zdp_header:get_pinfo().number
     if not zdp_header:get_pinfo().visited then
-        if needs_ack[type] then
+        if not no_ack[type] then
             seq_to_frame[sequence_num] = frame_num
         end
     end
@@ -576,7 +577,7 @@ function ack_linking(type, zdp_header, sequence_num)
     if linked then
         if type == 254 then
             zdp_header:add_field_no_buffer(acked_frame, linked)
-        elseif needs_ack[type] then
+        elseif not no_ack[type] then
             zdp_header:add_field_no_buffer(acked_by_frame, linked)
         end
     end
@@ -673,9 +674,13 @@ tlv_type_table =
     [6] = "Window Size"
 }
 
-needs_ack = 
+-- The only packets that don't get ack'd are Transit Packets, Arp, Key Management, and Acknowledgements
+no_ack = 
 {
-    [131] = true
+    [0] = true,
+    [128] = true,
+    [129] = true,
+    [254] = true
 }
 
 -- Bit un-packing funcs
