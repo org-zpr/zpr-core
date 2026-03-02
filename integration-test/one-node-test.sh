@@ -6,8 +6,8 @@ DEBUG_TARGETS=${DEBUG_TARGETS:-all=INFO}
 KM_IMPL=${KM_IMPL:-noise}
 
 
-PH_BIN="${PH_BIN:-$(realpath "$(dirname "$0")/../adapter/ph/target/debug/ph")}"
-PH_DEBUG_BIN="${PH_DEBUG_BIN:-$(realpath "$(dirname "$0")/../adapter/cli/target/debug/ph-cli")}"
+PH_BIN="${PH_BIN:-$(realpath "$(dirname "$0")/../target/debug/ph")}"
+PH_DEBUG_BIN="${PH_DEBUG_BIN:-$(realpath "$(dirname "$0")/../target/debug/ph-cli")}"
 VS_BIN="${VS_BIN:-$(realpath "$(dirname "$0")/vs")}"
 VS_ADMIN_BIN="${VS_ADMIN_BIN:-$(realpath "$(dirname "$0")/vs-admin")}"
 VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-$(realpath "$(dirname "$0")/valkey-server")}"

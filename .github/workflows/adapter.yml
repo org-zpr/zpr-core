@@ -38,22 +38,24 @@ jobs:
   # Build and upload ph
   build-ph:
     name: PH
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.2.1
     with:
       name: 'ph'
       path: './adapter/ph'
       package: true
+      package-path: './target/debug/ph'
       needs-capnp: true
     secrets: inherit
 
   # Build and upload ph-cli
   build-ph-cli:
     name: PH CLI
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.2.1
     with:
       name: 'ph-cli'
       path: './adapter/cli'
       package: true
+      package-path: './target/debug/ph-cli'
       runs-on: "['ubuntu-latest']"
       needs-libpcap: true
       needs-capnp: true

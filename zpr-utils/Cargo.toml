@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-zerocopy = { version = "0.8.3", features = ["derive", "std"] }
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.8.0", features = ["vsapi"] }
+zerocopy = { workspace = true }
+zpr = { workspace = true }
