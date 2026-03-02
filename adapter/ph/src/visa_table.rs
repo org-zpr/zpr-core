@@ -134,19 +134,16 @@ impl Visa {
         tc::Ip5TupleTc::new_with_compression_mode(0, self.visa.get_five_tuple().into())
     }
 
-    pub fn unlink_forwarding_entry(&mut self, forwarding_entry: &ForwardingEntry) {
-        let mut idx: Option<usize> = None;
+    pub fn unlink_forwarding_entry(&mut self, forwarding_entry: &ForwardingEntry) -> bool {
+        let idx = self.streams.iter().position(|fe| forwarding_entry == fe);
 
-        for (i, fe) in self.streams.iter().enumerate() {
-            if forwarding_entry == fe {
-                idx = Some(i);
+        match idx {
+            Some(idx) => {
+                self.streams.swap_remove(idx);
+                true
             }
+            None => false,
         }
-
-        if idx.is_some() {
-            self.streams.remove(idx.unwrap());
-        }
-        // Do we want to error in the else case here? Or leave as is
     }
 }
 
@@ -330,14 +327,12 @@ impl VisaTable {
         &mut self,
         visa_id: VisaId,
         forwarding_entry: &ForwardingEntry,
-    ) -> Result<(), VisaTableError> {
+    ) -> Result<bool, VisaTableError> {
         let Some(visa) = self.table.get_mut(&visa_id) else {
             return Err(VisaTableError::NotFound(visa_id));
         };
 
-        visa.unlink_forwarding_entry(forwarding_entry);
-
-        Ok(())
+        Ok(visa.unlink_forwarding_entry(forwarding_entry))
     }
 }
 

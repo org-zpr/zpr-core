@@ -21,7 +21,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
-use zpr::packet_info::{L3Type, LinkId, Tcst};
+use zpr::packet_info::{DOCK_LINK_ID, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, Tcst};
 use zpr_ext::zerocopy::FromBytesExt;
 use zpr_utils::net_defs::IpAddress;
 
@@ -783,14 +783,14 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
         }
     };
 
-    match link_type {
-        LinkType::NodeToAdapter => {
+    match (link_type, ingress_link_id.get()) {
+        (LinkType::NodeToAdapter, _) | (LinkType::Internal, LOCAL_ACTOR_LINK_ID) => {
             // We are the node
             debug!(target: ZDP, "Link {ingress_link_id}: unbind actor address, node -> adapter");
             // Remove from PFT
             dock::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
         }
-        LinkType::AdapterToNode => {
+        (LinkType::AdapterToNode, _) | (LinkType::Internal, DOCK_LINK_ID) => {
             // We are the adapter
             debug!(
                 target: ZDP,
@@ -800,7 +800,7 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
             // Remove from DLT
             adapter::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
         }
-        LinkType::NodeToNode => {
+        (LinkType::NodeToNode, _) => {
             debug!(
                 target: ZDP,
                 "Link {}: node -> node UNIMPLEMENTED",
@@ -808,7 +808,7 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
             );
             return Err(HandleMgmtError::MessageNotPermitted);
         }
-        LinkType::Internal => {
+        (LinkType::Internal, _) => {
             error!(
                 target: ZDP,
                 "Link {}: internal",

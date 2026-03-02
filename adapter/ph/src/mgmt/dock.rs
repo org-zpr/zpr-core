@@ -744,22 +744,20 @@ pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stre
         .unwrap()
         .unlink_forwarding_entry(pft_pep.visa_id, &pft_pep.next_hop)
     {
-        Ok(()) => (),
+        Ok(b) => {
+            if !b {
+                warn!(target: FLOW_MGMT, "Link {ingress_link_id}: stream {} not found in visa {}", pft_pep.next_hop.1, pft_pep.visa_id)
+            }
+        }
         Err(e) => {
-            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: error removing stream from visa: {}", e);
-            return;
+            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: error removing stream from visa: {}", e)
         }
     }
 
-    let Ok(egress_link_id) = visa_mgmt::get_egress_link_for_visa(asm, pft_pep.visa_id) else {
-        // visa or egress link was deleted, no need to forward the unbind
-        return;
-    };
-
     // Issue unbind request to next hop
-    if egress_link_id.get() == LOCAL_ACTOR_LINK_ID {
+    if pft_pep.next_hop.0 == LOCAL_ACTOR_LINK_ID {
         adapter::unbind_stream(asm, NonZero::new(DOCK_LINK_ID).unwrap(), stream_id);
     } else {
-        requests::send_unbind_egress_stream_request(asm, egress_link_id.get(), stream_id).enqueue();
+        requests::send_unbind_egress_stream_request(asm, pft_pep.next_hop.0, stream_id).enqueue();
     }
 }
