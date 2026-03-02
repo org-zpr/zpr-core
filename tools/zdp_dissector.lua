@@ -3,79 +3,79 @@
 zdp_proto = Proto("zdp", "ZDP Header Dissector")
 
 -- ZDP Headers 
-a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.HEX)
-a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.HEX)
-agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
-excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
-hmac = ProtoField.bytes("zdp.mac", "HMAC")
-management_packet = ProtoField.bytes("zdp.management", "Management Packet")
-pad = ProtoField.bytes("zdp.pad", "Pad")
-seq_num = ProtoField.uint64("zdp.seq_num", "Sequence Number", base.DEC)
-stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
-zdp_type = ProtoField.uint8("zdp.type", "Type", base.DEC)
-zpi_val = ProtoField.uint8("zdp.zpi", "ZPI", base.DEC)
+local a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.HEX)
+local a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.HEX)
+local agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
+local excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
+local hmac = ProtoField.bytes("zdp.mac", "HMAC")
+local management_packet = ProtoField.bytes("zdp.management", "Management Packet")
+local pad = ProtoField.bytes("zdp.pad", "Pad")
+local seq_num = ProtoField.uint64("zdp.seq_num", "Sequence Number", base.DEC)
+local stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
+local zdp_type = ProtoField.uint8("zdp.type", "Type", base.DEC)
+local zpi_val = ProtoField.uint8("zdp.zpi", "ZPI", base.DEC)
 
 -- Agent Packet Headers
-fl = ProtoField.uint32("zdp.fl", "Flow Label", base.DEC)
-frag_id = ProtoField.uint16("zdp.frag_id", "Fragment ID", base.DEC)
-frag_offset = ProtoField.uint16("zdp.frag_offset", "Fragment Offset", base.DEC)
-hop_limit = ProtoField.uint8("zdp.hop_limit", "Hop Limit", base.DEC)
-ihl = ProtoField.uint8("zdp.ihl", "Internet Header Length", base.DEC)
-ip_version = ProtoField.uint8("zdp.ip_version", "IP Version", base.DEC)
-tc = ProtoField.uint8("zdp.tc", "Traffic Class", base.DEC)
-ttl = ProtoField.uint8("zdp.ttl", "Time to Live", base.DEC)
+local fl = ProtoField.uint32("zdp.fl", "Flow Label", base.DEC)
+local frag_id = ProtoField.uint16("zdp.frag_id", "Fragment ID", base.DEC)
+local frag_offset = ProtoField.uint16("zdp.frag_offset", "Fragment Offset", base.DEC)
+local hop_limit = ProtoField.uint8("zdp.hop_limit", "Hop Limit", base.DEC)
+local ihl = ProtoField.uint8("zdp.ihl", "Internet Header Length", base.DEC)
+local ip_version = ProtoField.uint8("zdp.ip_version", "IP Version", base.DEC)
+local tc = ProtoField.uint8("zdp.tc", "Traffic Class", base.DEC)
+local ttl = ProtoField.uint8("zdp.ttl", "Time to Live", base.DEC)
 -- dscp = ProtoField.uint8("zdp.dscp", "Differentiated Services Code Point", base.DEC)
 -- ip_options = ProtoField.bytes("zdp.ip_options", "IP Options")
 
 -- Management Data
-additional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
-addr_count = ProtoField.uint8("zdp.addr_count", "Address Count", base.DEC)
-adl = ProtoField.uint16("zdp.adl", "Additional Data Length", base.DEC)
-blob = ProtoField.bytes("zdp.blob", "Blob")
-blob_len = ProtoField.uint16("zdp.blob_len", "Blob Length", base.DEC)
-bootstrap_support = ProtoField.uint8("zdp.bootstrap", "Bootstrap Support Flag")
-comp_mode = ProtoField.uint8("zdp.comp_mode", "Compression Mode", base.HEX)
-ctime = ProtoField.uint64("zdp.ctime", "CTime", base.DEC)
-data_length_u8 = ProtoField.uint8("zdp.data_len_t", "Data Length", base.DEC)
-data_length_u16 = ProtoField.uint16("zdp.data_len_i", "Data Length", base.DEC)
-dest_addr_v4 = ProtoField.ipv4("zdp.dest_addr_v4", "Destination IP Address")
-dest_addr_v6 = ProtoField.ipv6("zdp.dest_addr_v6", "Destination IP Address")
-dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
-info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
-ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
-ipv4_addr = ProtoField.ipv4("zdp.ipv4", "IP Address")
-ipv6_addr = ProtoField.ipv6("zdp.ipv6", "IP Address")
-nonce = ProtoField.uint64("zdp.nonce", "Nonce", base.HEX)
-pkt_len = ProtoField.uint16("zdp.pkt_len", "Endpoint Packet Length", base.DEC)
-reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
-response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
-source_addr_v4 = ProtoField.ipv4("zdp.source_addr_v4", "Source IP Address")
-source_addr_v6 = ProtoField.ipv6("zdp.source_addr_v6", "Source IP Address")
-source_info = ProtoField.uint16("zdp.source_info", "Source Port Information", base.DEC)
-status_code = ProtoField.uint8("zdp.status_code", "Status Code", base.DEC)
-status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
-tcst = ProtoField.uint8("zdp.tcst", "TCST", base.DEC)
-tlv_len = ProtoField.uint8("zdp.tlv_length", "TLV Length", base.DEC)
-tlv_type = ProtoField.uint8("zdp.tlv_type", "TLV Type", base.DEC)
-tlv_val_bytes = ProtoField.bytes("zdp.tlv_bytes", "TLV Value")
-tlv_val_i64 = ProtoField.int64("zdp.tlv_u64", "TLV Value", base.DEC)
-tlv_val_ipv4 = ProtoField.ipv4("zdp.tlv_ipv4", "TLV Value", base.DEC)
-tlv_val_ipv6 = ProtoField.ipv6("zdp.tlv_ipv6", "TLV Value", base.DEC)
-tlv_val_str = ProtoField.string("zdp.tlv_string", "TLV Value", base.ASCII)
-tlv_val_u16 = ProtoField.uint16("zdp.tlv_u16", "TLV Value", base.DEC)
-trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
+local additional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
+local addr_count = ProtoField.uint8("zdp.addr_count", "Address Count", base.DEC)
+local adl = ProtoField.uint16("zdp.adl", "Additional Data Length", base.DEC)
+local blob = ProtoField.bytes("zdp.blob", "Blob")
+local blob_len = ProtoField.uint16("zdp.blob_len", "Blob Length", base.DEC)
+local bootstrap_support = ProtoField.uint8("zdp.bootstrap", "Bootstrap Support Flag")
+local comp_mode = ProtoField.uint8("zdp.comp_mode", "Compression Mode", base.HEX)
+local ctime = ProtoField.uint64("zdp.ctime", "CTime", base.DEC)
+local data_length_u8 = ProtoField.uint8("zdp.data_len_t", "Data Length", base.DEC)
+local data_length_u16 = ProtoField.uint16("zdp.data_len_i", "Data Length", base.DEC)
+local dest_addr_v4 = ProtoField.ipv4("zdp.dest_addr_v4", "Destination IP Address")
+local dest_addr_v6 = ProtoField.ipv6("zdp.dest_addr_v6", "Destination IP Address")
+local dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
+local info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
+local ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
+local ipv4_addr = ProtoField.ipv4("zdp.ipv4", "IP Address")
+local ipv6_addr = ProtoField.ipv6("zdp.ipv6", "IP Address")
+local nonce = ProtoField.uint64("zdp.nonce", "Nonce", base.HEX)
+local pkt_len = ProtoField.uint16("zdp.pkt_len", "Endpoint Packet Length", base.DEC)
+local reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
+local response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
+local source_addr_v4 = ProtoField.ipv4("zdp.source_addr_v4", "Source IP Address")
+local source_addr_v6 = ProtoField.ipv6("zdp.source_addr_v6", "Source IP Address")
+local source_info = ProtoField.uint16("zdp.source_info", "Source Port Information", base.DEC)
+local status_code = ProtoField.uint8("zdp.status_code", "Status Code", base.DEC)
+local status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
+local tcst = ProtoField.uint8("zdp.tcst", "TCST", base.DEC)
+local tlv_len = ProtoField.uint8("zdp.tlv_length", "TLV Length", base.DEC)
+local tlv_type = ProtoField.uint8("zdp.tlv_type", "TLV Type", base.DEC)
+local tlv_val_bytes = ProtoField.bytes("zdp.tlv_bytes", "TLV Value")
+local tlv_val_i64 = ProtoField.int64("zdp.tlv_i64", "TLV Value", base.DEC)
+local tlv_val_ipv4 = ProtoField.ipv4("zdp.tlv_ipv4", "TLV Value", base.DEC)
+local tlv_val_ipv6 = ProtoField.ipv6("zdp.tlv_ipv6", "TLV Value", base.DEC)
+local tlv_val_str = ProtoField.string("zdp.tlv_string", "TLV Value", base.ASCII)
+local tlv_val_u16 = ProtoField.uint16("zdp.tlv_u16", "TLV Value", base.DEC)
+local trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
 -- dest_port_present = ProtoField.uint8("zdp.dest_port_present", "Destination Port Information Present", base.DEC)
 -- ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
 -- req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
 -- source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
 
 -- Request/response matching
-req_frame = ProtoField.framenum("zdp.request_frame", "Request", base.NONE, frametype.REQUEST)
-res_frame = ProtoField.framenum("zdp.response_frame", "Response", base.NONE, frametype.RESPONSE)
+local req_frame = ProtoField.framenum("zdp.request_frame", "Request", base.NONE, frametype.REQUEST)
+local res_frame = ProtoField.framenum("zdp.response_frame", "Response", base.NONE, frametype.RESPONSE)
 
 
-acked_frame = ProtoField.framenum("zdp.ack_frame", "Acknowledged", base.NONE, frametype.ACK)
-acked_by_frame = ProtoField.framenum("zdp.acked_by", "Acknowledged By", base.NONE, frametype.ACK)
+local acked_frame = ProtoField.framenum("zdp.ack_frame", "Acknowledged", base.NONE, frametype.ACK)
+local acked_by_frame = ProtoField.framenum("zdp.acked_by", "Acknowledged By", base.NONE, frametype.ACK)
 
 
 zdp_proto.fields = { 
@@ -95,64 +95,64 @@ zdp_proto.fields = {
 }
 
 -- Lengths of fields when using Noise Encryption
-A2A_SAID = 1
-ADDR_COUNT = 1
-BOOTSTRAP = 1
-COMP_MODE = 1
-DL_REPORT = 1
-DL_TERMINATE = 1
-EXCESS_LEN = 1
-FLAGS = 1
-HOP_LIMIT = 1
-IP_VERSION = 1
-IP_PROTOCOL = 1
-INFO_LEN = 1
-REASON_CODE = 1
-RESPONSE_CODE = 1
-TC = 1
-TCST = 1
-TLV_LEN = 1
-TLV_TYPE = 1
-TTL = 1
-TYPE = 1
-ZPI = 1
+local A2A_SAID = 1
+local ADDR_COUNT = 1
+local BOOTSTRAP = 1
+local COMP_MODE = 1
+local DL_REPORT = 1
+local DL_TERMINATE = 1
+local EXCESS_LEN = 1
+local FLAGS = 1
+local HOP_LIMIT = 1
+local IP_VERSION = 1
+local IP_PROTOCOL = 1
+local INFO_LEN = 1
+local REASON_CODE = 1
+local RESPONSE_CODE = 1
+local TC = 1
+local TCST = 1
+local TLV_LEN = 1
+local TLV_TYPE = 1
+local TTL = 1
+local TYPE = 1
+local ZPI = 1
 
-ADL = 2
-PKT_LEN = 2
-BLOB_LEN = 2
-DL_INIT = 2
-FRAG_ID = 2
-FRAG_OFFSET = 2
-TRANS_ID = 2
+local ADL = 2
+local PKT_LEN = 2
+local BLOB_LEN = 2
+local DL_INIT = 2
+local FRAG_ID = 2
+local FRAG_OFFSET = 2
+local TRANS_ID = 2
 
-IPV4_LEN = 4
-STREAM_ID = 4
+local IPV4_LEN = 4
+local STREAM_ID = 4
 
-A2A_MAC = 8 -- Not sure what the MAC-algorithm-specified-size is (RFC17.2 § 4.2.6.1), but believe zdp.rs 262 specified
-CTIME = 8
-NONCE = 8
-SEQ_NUM = 8
+local A2A_MAC = 8 -- Not sure what the MAC-algorithm-specified-size is (RFC17.2 § 4.2.6.1), but believe zdp.rs 262 specified
+local CTIME = 8
+local NONCE = 8
+local SEQ_NUM = 8
 
-IPV6_LEN = 16
+local IPV6_LEN = 16
 
-INIT_AUTH_HMAC = 32
+local INIT_AUTH_HMAC = 32
 
-HMAC = 0
-KEY_NOISE_PAD = 0
+local HMAC = 0
+local KEY_NOISE_PAD = 0
 
-EXCESS_LEN_START = ZPI + TYPE
-TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
-PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
-PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
-NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
+local EXCESS_LEN_START = ZPI + TYPE
+local TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
+local PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
+local PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
+local NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
 
-req_frames = {} -- stream id -> 
-res_frames = {}
-seq_to_frame = {}   -- seq_num -> frame that sent it
-ack_links = {}      -- frame -> paired frame (bidirectional)
+local req_frames = {}     -- stream id -> request frame
+local res_frames = {}     -- request frame -> response frame
+local seq_to_frame = {}   -- seq_num -> frame that sent it
+local ack_links = {}      -- frame -> paired frame (bidirectional)
 
 function zdp_proto.dissector(buffer, pinfo, tree)
-    length = buffer:len()
+    local length = buffer:len()
     if length == 0 then return end
 
     pinfo.cols.protocol = zdp_proto.name
@@ -497,6 +497,12 @@ function TreeBuilder(init_buffer, init_pinfo, init_tree)
         end,
         get_tree = function(self)
             return self.tree
+        end,
+        get_frame_num = function(self)
+            return self.pinfo.number
+        end,
+        is_visited = function(self)
+            return self.pinfo.visited
         end
     }
 
@@ -529,8 +535,8 @@ presence_value =
 }
 
 function add_request_frame(management, transaction_id)
-    local frame_num = management:get_pinfo().number
-    if not management:get_pinfo().visited then
+    local frame_num = management:get_frame_num()
+    if not management:is_visited() then
         req_frames[transaction_id] = frame_num
     end
 
@@ -541,8 +547,8 @@ function add_request_frame(management, transaction_id)
 end
 
 function add_response_link(management, transaction_id)
-    local frame_num = management:get_pinfo().number
-    if not management:get_pinfo().visited then
+    local frame_num = management:get_frame_num()
+    if not management:is_visited() then
         local req = req_frames[transaction_id]
         if req then 
             res_frames[req] = frame_num -- req -> res
@@ -556,15 +562,15 @@ function add_response_link(management, transaction_id)
 end
 
 function ack_linking(type, zdp_header, sequence_num)
-    local frame_num = zdp_header:get_pinfo().number
-    if not zdp_header:get_pinfo().visited then
+    local frame_num = zdp_header:get_frame_num()
+    if not zdp_header:is_visited() then
         if not no_ack[type] then
             seq_to_frame[sequence_num] = frame_num
         end
     end
 
     if type == 254 then
-        if not zdp_header:get_pinfo().visited then
+        if not zdp_header:is_visited() then
             local acked_pkt = seq_to_frame[sequence_num]
             if acked_pkt then
                 ack_links[acked_pkt] = frame_num    -- original -> ack
