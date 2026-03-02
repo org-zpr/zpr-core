@@ -580,6 +580,7 @@ async fn get_node_addr_task(
             Ok(())
         }
         cli::success_or_error::Which::Error(e) => {
+            println!("error");
             let result = e.unwrap().get_txt()?.to_string()?;
             println!("{result}");
             Err(CliError::RpcError(result))

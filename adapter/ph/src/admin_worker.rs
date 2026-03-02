@@ -18,12 +18,12 @@ use admin_api::v1 as cli;
 use cbpf_rs;
 use cli::cmd_line_inter as svc;
 use core::future::Future;
-use std::net::IpAddr;
 use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
 use std::io::IoSliceMut;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -38,10 +38,10 @@ use tokio::time::interval;
 use tokio_util::compat::*;
 use tracing::error;
 use tracing::*;
+use zpr::packet_info::DOCK_LINK_ID;
 use zpr::packet_info::LinkId;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
-use zpr::packet_info::DOCK_LINK_ID;
 
 pub async fn launch_capnp(
     asm: Arc<Assembly>,
@@ -436,8 +436,9 @@ impl svc::Server for AdminServiceImpl {
 
         if let PhMode::Node = task_asm.ph_mode {
             let resp = format!("Not in adapter mode");
-                let mut error_builder = results_builder.reborrow().init_error();
-                error_builder.set_txt(resp);
+            let mut error_builder = results_builder.reborrow().init_error();
+            error_builder.set_txt(resp);
+            return Ok(());
         }
 
         match task_asm.peer_table.get(DOCK_LINK_ID) {
@@ -445,10 +446,10 @@ impl svc::Server for AdminServiceImpl {
                 let substrate_addr = pt.substrate_addr;
                 let success_builder = results_builder.init_success();
                 let mut sock_addr_builder = success_builder.init_sock_addr();
-                
-                sock_addr_builder.set_port( substrate_addr.port());
+
+                sock_addr_builder.set_port(substrate_addr.port());
                 let mut addr_builder = sock_addr_builder.init_addr();
-                
+
                 match substrate_addr.ip() {
                     IpAddr::V4(addr) => {
                         addr_builder.set_v4(&addr.octets());
@@ -466,7 +467,6 @@ impl svc::Server for AdminServiceImpl {
         }
 
         Ok(())
-
     }
 }
 
