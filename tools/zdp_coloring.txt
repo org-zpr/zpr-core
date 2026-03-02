@@ -1,3 +1,4 @@
+# Example coloring file
 @ZDP Transit Packets@zdp.type == 0@[52428, 58082, 65535][0, 0, 0]
 @ZDP Acknowledgement@zdp.type == 254@[54227, 54227, 54227][0, 0, 0]
 @ZDP Requests@zdp.type in {3, 6, 8, 134, 136, 141}@[56026, 65535, 43947][0, 0, 0]
