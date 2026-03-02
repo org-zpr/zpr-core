@@ -22,7 +22,7 @@ tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.20"
 zerocopy = { version = "0.8.3", features = ["derive", "std"] }
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.8.0", features = ["vsapi", "policy"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.8.1", features = ["vsapi", "policy"] }
 
 [profile.release]
 panic = "abort"
