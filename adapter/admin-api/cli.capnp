@@ -17,6 +17,7 @@ interface CmdLineInter {
     stopLink             @13 (id: UInt32) -> (result: SuccessOrError);
     resetLink            @14 (id: UInt32) -> ();
     changeLogging        @15 (logs: List(Log)) -> (result: LogsApplied);
+    getNodeInfo          @16 () -> (result: SuccessOrError);
 }
 
 struct SuccessOrError {
@@ -28,6 +29,7 @@ struct SuccessOrError {
 
 struct SuccessValue {
     none @0 :Void;
+    sockAddr @1 :SockAddr;
 }
 
 struct ErrorValue {
@@ -70,4 +72,16 @@ struct Log {
 
 struct Program {
     bpfProg @0 :List(BpfInsn);
+}
+
+struct IpAddr {
+  union {
+    v4 @0 :Data;
+    v6 @1 :Data;
+  }
+}
+
+struct SockAddr {
+  addr @0 :IpAddr;
+  port @1 :UInt16;
 }

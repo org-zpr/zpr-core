@@ -71,6 +71,8 @@ pub enum Commands {
     },
     /// Exit the CLI
     Quit,
+    /// Gets the address of an adapter's node
+    Addr,
 }
 
 #[derive(Debug, Args)]
