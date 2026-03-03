@@ -17,7 +17,6 @@ function zdp_link_p2p_proto.dissector(buffer, pinfo, tree)
     subtree:add(in_out, buffer(0,1)):append_text(" (" .. direction_name[direction] .. ")")
     pinfo.cols.src = location_name[direction]
     pinfo.cols.dst = location_name[math.fmod(direction + 1, 2)]
-
 end
 
 direction_name = 

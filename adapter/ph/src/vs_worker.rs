@@ -32,35 +32,20 @@ pub async fn launch(
                 aaa_prefix,
             };
 
-            tokio::select! {
+            // Race the connect call against lifecycle events. We use a bool here because
+            // ConnectedToVsApi can fire while connect() is still in-flight (the run loop
+            // sends it before replying on the oneshot). Treating it as success avoids
+            // issuing a second connect() call against an already-connected run loop.
+            let connected = tokio::select! {
                 res = vs_handle.connect(req) => {
-                    if let Err(e) = res {
-                        error!(target: STARTUP, "failed to get access to visa service: {e:?}");
-                    } else {
-                        info!(target: STARTUP, "node access granted to visa service");
-
-                        match vs_handle.register_vss(vss_addr).await {
-                            Ok(ops) => {
-                                info!(target: STARTUP, "registered VSS, received {} pending visa ops", ops.len());
-                                for op in ops {
-                                    if let Err(e) = vss_worker::process_visaop(&asm, op) {
-                                        error!(target: STARTUP, "failed to process initial visa op from VS: {e:?}");
-                                    }
-                                }
-                                break; // Exit inner loop; go back to waiting for a state change.
-                            }
-                            Err(e) => {
-                                error!(target: STARTUP, "failed to register VSS: {e:?}");
-
-                                let dreq = VSDisconnectNotice {
-                                    zpr_addr: None,
-                                    reason: DisconnectReason::LinkError,
-                                };
-                                if let Err(e) = vs_handle.notify_disconnect(dreq).await {
-                                    error!(target: STARTUP, "error disconnecting from VS after failed registration: {e:?}");
-                                    panic!("failed to establish connection to VS");
-                                }
-                            }
+                    match res {
+                        Ok(()) => {
+                            info!(target: STARTUP, "node access granted to visa service");
+                            true
+                        }
+                        Err(e) => {
+                            error!(target: STARTUP, "failed to get access to visa service: {e:?}");
+                            false
                         }
                     }
                 }
@@ -73,16 +58,47 @@ pub async fn launch(
                         }
                         Ok(VSConnLifecycleEvent::RunLoopStarts) => {
                             // harmless duplicate start
+                            false
                         }
                         Ok(VSConnLifecycleEvent::ConnectedToVsApi) => {
-                            // ignored but should not happen
+                            // The connect() future was in-flight when this fired: the run loop
+                            // already has a handle. Treat as success; do not retry connect().
+                            info!(target: STARTUP, "node access granted to visa service");
+                            true
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
                             error!(target: STARTUP, "lagged on VSConn lifecycle channel, skipped {skipped} events");
+                            false
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             error!(target: STARTUP, "VSConn lifecycle channel closed unexpectedly");
                             panic!("VSConn lifecycle channel closed unexpectedly");
+                        }
+                    }
+                }
+            };
+
+            if connected {
+                match vs_handle.register_vss(vss_addr).await {
+                    Ok(ops) => {
+                        info!(target: STARTUP, "registered VSS, received {} pending visa ops", ops.len());
+                        for op in ops {
+                            if let Err(e) = vss_worker::process_visaop(&asm, op) {
+                                error!(target: STARTUP, "failed to process initial visa op from VS: {e:?}");
+                            }
+                        }
+                        break; // Exit inner loop; go back to waiting for a state change.
+                    }
+                    Err(e) => {
+                        error!(target: STARTUP, "failed to register VSS: {e:?}");
+
+                        let dreq = VSDisconnectNotice {
+                            zpr_addr: None,
+                            reason: DisconnectReason::LinkError,
+                        };
+                        if let Err(e) = vs_handle.notify_disconnect(dreq).await {
+                            error!(target: STARTUP, "error disconnecting from VS after failed registration: {e:?}");
+                            panic!("failed to establish connection to VS");
                         }
                     }
                 }

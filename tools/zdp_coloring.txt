@@ -1,0 +1,10 @@
+# Example coloring file
+@ZDP Transit Packets@zdp.type == 0@[52428, 58082, 65535][0, 0, 0]
+@ZDP Acknowledgement@zdp.type == 254@[54227, 54227, 54227][0, 0, 0]
+@ZDP Requests@zdp.type in {3, 6, 8, 134, 136, 141}@[56026, 65535, 43947][0, 0, 0]
+@ZDP Responses@zdp.type in {4, 7, 9, 135, 137}@[40092, 53199, 23387][0, 0, 0]
+@ZDP Echo@zdp.type == 131@[37779, 38807, 39321][0, 0, 0]
+# This is a fall back, if there are packets that are not colored they will be colored
+# based on whether they are flow or non-flow
+@ZDP Flow-based message@zdp.type < 128@[52428, 39321, 65535][0, 0, 0]
+@ZDP Non flow-based message@zdp.type >= 128@[45746, 26214, 65535][0, 0, 0]

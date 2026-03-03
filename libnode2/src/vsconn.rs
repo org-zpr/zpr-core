@@ -143,9 +143,9 @@ impl VSConn {
     /// Best-effort send a lifecycle event, just log if the send fails (no receivers).
     fn send_lifecycle_event(&self, event: VSConnLifecycleEvent) {
         match self.life_tx.send(event) {
-            Ok(_) => {}
+            Ok(_) => debug!(target: VS_RPC, "sent lifecycle event: {:?}", event),
             Err(e) => {
-                info!(target: VS_RPC, "failed to send lifecycle event: {event:?}: {:?}", e);
+                info!(target: VS_RPC, "failed to send lifecycle event: {:?}: {:?}", event, e);
             }
         }
     }

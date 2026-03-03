@@ -32,7 +32,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: true
-  VISA_SERVICE_RELEASE: v0.8.0-rc.1
+  VISA_SERVICE_RELEASE: v0.9.0
 
 jobs:
   # Build and upload ph
@@ -118,7 +118,7 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v7
+    - uses: actions/download-artifact@v8
       with:
         pattern: ph-*${{ matrix.os }}
         merge-multiple: true
@@ -187,7 +187,7 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v7
+    - uses: actions/download-artifact@v8
       with:
         pattern: ph-*${{ matrix.os }}
         merge-multiple: true

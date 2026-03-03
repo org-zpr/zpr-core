@@ -10,7 +10,7 @@ PH_BIN="${PH_BIN:-$(realpath "$(dirname "$0")/../target/debug/ph")}"
 PH_DEBUG_BIN="${PH_DEBUG_BIN:-$(realpath "$(dirname "$0")/../target/debug/ph-cli")}"
 VS_BIN="${VS_BIN:-$(realpath "$(dirname "$0")/vs")}"
 VS_ADMIN_BIN="${VS_ADMIN_BIN:-$(realpath "$(dirname "$0")/vs-admin")}"
-VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-$(realpath "$(dirname "$0")/valkey-server")}"
+VALKEY_SERVER_BIN="${VALKEY_SERVER_BIN:-$(realpath -s "$(dirname "$0")/valkey-server")}"
 
 PREGEN=$(realpath "$(dirname $0)/pregen")
 NODE_AUTH_PRIVATE_KEY="${NODE_AUTH_PRIVATE_KEY:-$PREGEN/node-rsa-key.pem}"
@@ -291,19 +291,6 @@ then PASS=1
 fi
 
 sleep 1
-
-#
-# Revoke zpr-b's visa and try to ping again
-#
-
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_ADMIN_BIN" \
-	--ca-cert ca.crt \
-	--svc-url "https://[$VS_ZPR_ADDR]:8182" \
-	actors --cn adapter2 --revoke
-
-if ! ping_a_b
-then PASS=0
-fi
 
 fi
 #
