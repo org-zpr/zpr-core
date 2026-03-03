@@ -429,7 +429,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::GetNodeInfoParams,
         mut results: svc::GetNodeInfoResults,
     ) -> Result<(), capnp::Error> {
-        info!(target: RPC, "Change logging procedure initiated");
+        info!(target: RPC, "Get node info from adapter");
         let task_asm = self.asm.clone();
 
         let mut results_builder = results.get().init_result();

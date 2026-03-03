@@ -16,13 +16,13 @@ use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use thiserror::Error;
 use tokio::time::{Duration, sleep};
 use tokio_util::compat::*;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
-use std::net::{Ipv6Addr, Ipv4Addr, IpAddr};
 
 #[allow(unused_imports)]
 use ctrlc;
@@ -560,9 +560,7 @@ async fn change_logging_task(
     Ok(())
 }
 
-async fn get_node_addr_task(
-    service: svc::Client,
-) -> Result<(), CliError> {
+async fn get_node_addr_task(service: svc::Client) -> Result<(), CliError> {
     let request = service.get_node_info_request();
     let response = request.send().promise.await?;
 
@@ -571,8 +569,12 @@ async fn get_node_addr_task(
         cli::success_or_error::Which::Success(s) => {
             let sock_addr = s.unwrap().get_sock_addr()?;
             let ip_addr = match sock_addr.get_addr()?.which()? {
-                cli::ip_addr::Which::V4(addr) => IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(addr?)?)),
-                cli::ip_addr::Which::V6(addr) => IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(addr?)?)),
+                cli::ip_addr::Which::V4(addr) => {
+                    IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(addr?)?))
+                }
+                cli::ip_addr::Which::V6(addr) => {
+                    IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(addr?)?))
+                }
             };
             let port = sock_addr.get_port();
 
