@@ -67,7 +67,6 @@ impl From<std::str::Utf8Error> for CliError {
 async fn main() -> Result<(), CliError> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
-    println!("{:?}", socket);
     let cap_socket = args.cap_socket.clone();
 
     if let Some(command) = args.command {
