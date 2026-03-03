@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 
 // Return the path to the data home directory. A place we can stash things like
 // unix domain sockets. Default is '/var/run/zpr'.
