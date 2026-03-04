@@ -329,7 +329,8 @@ pub fn send_bind_actor_address_error_response<'a>(
 
     let mut rsp_pkt = core::new_heap_packet();
 
-    let reason = &reason[..=std::cmp::min(u8::MAX as usize + 1, reason.len())];
+    let max_sz = u8::MAX as usize;
+    let reason = &reason[..reason.len().min(max_sz)];
     zdp::ZdpBindActorAddressResponseHeader {
         status_code: zdp::ResponseCode::Other,
         info_len: reason.len() as u8,
@@ -408,8 +409,8 @@ pub fn send_bind_egress_stream_error_response<'a>(
     debug!(target: ZDP, "Link {link_id}: sending BindEgressStreamResponse [error] for {txn_id}");
 
     let mut rsp_pkt = core::new_heap_packet();
-
-    let reason = &reason[..=std::cmp::min(u8::MAX as usize + 1, reason.len())];
+    let max_sz = u8::MAX as usize;
+    let reason = &reason[..reason.len().min(max_sz)];
     zdp::ZdpBindEgressStreamResponseHeader {
         status_code: zdp::ResponseCode::Other,
         info_len: reason.len() as u8,

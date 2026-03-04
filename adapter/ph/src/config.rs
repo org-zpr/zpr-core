@@ -1,11 +1,11 @@
 //! Static system configuration.
 
-use std::env;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{self, Path, PathBuf};
 use zpr::packet_info::{KM_ID_NOISE, KM_ID_NULL, KmId};
 
+use admin_api::get_data_home;
 use base64::prelude::*;
 use openssl::pkey::PKey;
 use serde::Deserialize;
@@ -700,29 +700,6 @@ impl Default for TopologyConfig {
             vss_queue_size: DEFAULT_SERVICE_QUEUE_SIZE,
         }
     }
-}
-
-// Return the path to the data home directory. A place we can stash things like
-// unix domain sockets. Default is '/var/run/zpr'.
-fn get_data_home() -> PathBuf {
-    let mut dh = match env::var("XDG_DATA_HOME") {
-        Ok(val) => PathBuf::from(val),
-        Err(_) => match env::var("HOME") {
-            Ok(val) => {
-                let mut pb = PathBuf::from(val);
-                pb.push(".local/share");
-                // Now we will only take this if user already has a .local/share dir.
-                if pb.exists() {
-                    pb
-                } else {
-                    PathBuf::from("/var/run")
-                }
-            }
-            Err(_) => PathBuf::from("/var/run"),
-        },
-    };
-    dh.push("zpr");
-    dh
 }
 
 fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {

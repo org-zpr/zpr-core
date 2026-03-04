@@ -1,4 +1,7 @@
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
+
+use admin_api::get_data_home;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler\nRun without a command to enter CLI mode", long_about = None)]
@@ -7,12 +10,12 @@ pub struct CmdlineArgs {
     pub command: Option<Commands>,
 
     /// Path to the Packet Handler's management socket
-    #[arg(long, short = 'p', default_value = "/var/run/zpr/ph.sock")]
-    pub socket: String,
+    #[arg(long, short = 'p', default_value_os_t = get_data_home().join("control.sock"))]
+    pub socket: PathBuf,
 
-    /// Path to the Packet Handler's management socket
+    /// Path to the Packet Handler's capture socket, only necessary when performing Capture commands
     #[arg(long, short = 'c')]
-    pub cap_socket: Option<String>,
+    pub cap_socket: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -68,6 +71,8 @@ pub enum Commands {
     },
     /// Exit the CLI
     Quit,
+    /// Gets the address of an adapter's node
+    Addr,
 }
 
 #[derive(Debug, Args)]

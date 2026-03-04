@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "zerocopy"] }
+zpr = { workspace = true }
 
 [features]
 complete = ["clap_complete"]

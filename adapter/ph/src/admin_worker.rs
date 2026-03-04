@@ -5,7 +5,7 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
-use crate::assembly::Assembly;
+use crate::assembly::{Assembly, PhMode};
 use crate::config;
 use crate::link_state::{LinkEvent, LinkState};
 use crate::logging;
@@ -23,6 +23,7 @@ use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
 use std::io::IoSliceMut;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -37,6 +38,7 @@ use tokio::time::interval;
 use tokio_util::compat::*;
 use tracing::error;
 use tracing::*;
+use zpr::packet_info::DOCK_LINK_ID;
 use zpr::packet_info::LinkId;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
@@ -417,6 +419,51 @@ impl svc::Server for AdminServiceImpl {
         }
         if ignored.len() > 0 {
             let _ = results_builder.set_ignored(ignored.as_slice());
+        }
+
+        Ok(())
+    }
+
+    async fn get_node_info(
+        self: Rc<Self>,
+        _: svc::GetNodeInfoParams,
+        mut results: svc::GetNodeInfoResults,
+    ) -> Result<(), capnp::Error> {
+        info!(target: RPC, "Get node info from adapter");
+        let task_asm = self.asm.clone();
+
+        let mut results_builder = results.get().init_result();
+
+        if let PhMode::Node = task_asm.ph_mode {
+            let resp = format!("Not in adapter mode");
+            let mut error_builder = results_builder.reborrow().init_error();
+            error_builder.set_txt(resp);
+            return Ok(());
+        }
+
+        match task_asm.peer_table.get(DOCK_LINK_ID) {
+            Some(pt) => {
+                let substrate_addr = pt.substrate_addr;
+                let success_builder = results_builder.init_success();
+                let mut sock_addr_builder = success_builder.init_sock_addr();
+
+                sock_addr_builder.set_port(substrate_addr.port());
+                let mut addr_builder = sock_addr_builder.init_addr();
+
+                match substrate_addr.ip() {
+                    IpAddr::V4(addr) => {
+                        addr_builder.set_v4(&addr.octets());
+                    }
+                    IpAddr::V6(addr) => {
+                        addr_builder.set_v6(&addr.octets());
+                    }
+                }
+            }
+            None => {
+                let resp = format!("No node found");
+                let mut error_builder = results_builder.init_error();
+                error_builder.set_txt(resp);
+            }
         }
 
         Ok(())

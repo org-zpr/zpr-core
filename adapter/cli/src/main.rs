@@ -16,8 +16,10 @@ use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use thiserror::Error;
 use tokio::time::{Duration, sleep};
 use tokio_util::compat::*;
@@ -43,6 +45,8 @@ enum CliError {
     RpcError(String),
     #[error("Pcap error: {0}")]
     CaptureError(#[from] pcap::Error),
+    #[error("Deserialization Error")]
+    DeserializationError(#[from] std::array::TryFromSliceError),
 }
 
 // thiserror does not propagate From implementations up
@@ -66,15 +70,15 @@ async fn main() -> Result<(), CliError> {
     let cap_socket = args.cap_socket.clone();
 
     if let Some(command) = args.command {
-        process_command(command, &socket, cap_socket.as_deref())
+        process_command(command, &socket, cap_socket)
             .await
             .map(|_| {})
     } else {
-        run_cli(&socket, cap_socket.as_deref()).await
+        run_cli(socket, cap_socket).await
     }
 }
 
-async fn run_cli(socket: &str, cap_socket: Option<&str>) -> Result<(), CliError> {
+async fn run_cli(socket: PathBuf, cap_socket: Option<PathBuf>) -> Result<(), CliError> {
     loop {
         print!("> ");
         io::stdout().flush()?;
@@ -94,7 +98,7 @@ async fn run_cli(socket: &str, cap_socket: Option<&str>) -> Result<(), CliError>
                     continue;
                 }
 
-                match parse_and_exec(line, socket, cap_socket.clone()).await {
+                match parse_and_exec(line, &socket, cap_socket.clone()).await {
                     Ok(quit) => {
                         if quit {
                             return Ok(());
@@ -116,19 +120,19 @@ async fn run_cli(socket: &str, cap_socket: Option<&str>) -> Result<(), CliError>
 
 async fn parse_and_exec(
     line: &str,
-    socket: &str,
-    cap_socket: Option<&str>,
+    socket: &PathBuf,
+    cap_socket: Option<PathBuf>,
 ) -> Result<bool, CliError> {
     let args = shlex::split(line).ok_or(Error::other("Invalid quoting"))?;
     let cli = CliCommand::try_parse_from(args).map_err(|e| Error::other(e.to_string()))?;
 
-    process_command(cli.command, socket, cap_socket).await
+    process_command(cli.command, &socket, cap_socket).await
 }
 
 async fn process_command(
     command: Commands,
-    socket: &str,
-    cap_socket: Option<&str>,
+    socket: &PathBuf,
+    cap_socket: Option<PathBuf>,
 ) -> Result<bool, CliError> {
     // Must quit immediately otherwise you get an error if the port is no longer open
     if matches!(command, Commands::Quit) {
@@ -196,6 +200,7 @@ async fn process_command(
                     LinkCommands::Reset { id } => reset_link_task(service, id).await?,
                 },
                 Commands::Logging { logs } => change_logging_task(service, logs).await?,
+                Commands::Addr => get_node_addr_task(service).await?,
                 Commands::Quit => return Ok(true), // Will never reach here
             }
 
@@ -357,7 +362,7 @@ async fn capture_sequence_task(
     file_path: String,
     time: u64,
     program: Option<String>,
-    cap_socket: Option<&str>,
+    cap_socket: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let sleep_time = Duration::new(time, 0);
     handle_set_capture_file(file_path, cap_socket)?;
@@ -556,16 +561,46 @@ async fn change_logging_task(
     Ok(())
 }
 
+async fn get_node_addr_task(service: svc::Client) -> Result<(), CliError> {
+    let request = service.get_node_info_request();
+    let response = request.send().promise.await?;
+
+    let results = response.get()?;
+    match results.get_result()?.which()? {
+        cli::success_or_error::Which::Success(s) => {
+            let sock_addr = s.unwrap().get_sock_addr()?;
+            let ip_addr = match sock_addr.get_addr()?.which()? {
+                cli::ip_addr::Which::V4(addr) => {
+                    IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(addr?)?))
+                }
+                cli::ip_addr::Which::V6(addr) => {
+                    IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(addr?)?))
+                }
+            };
+            let port = sock_addr.get_port();
+
+            println!("IP address: {ip_addr}, Port: {port}");
+            Ok(())
+        }
+        cli::success_or_error::Which::Error(e) => {
+            println!("error");
+            let result = e.unwrap().get_txt()?.to_string()?;
+            println!("{result}");
+            Err(CliError::RpcError(result))
+        }
+    }
+}
+
 /// Opens a capture file, sends a message to the RPC worker to prepare to receive
 /// the file descriptor, upon receiving correct response, sends the fd as
 /// ancillary data, and awaits response again.
 #[allow(dead_code)]
-fn handle_set_capture_file(file_path: String, cap_socket: Option<&str>) -> Result<(), CliError> {
+fn handle_set_capture_file(file_path: String, cap_socket: Option<PathBuf>) -> Result<(), CliError> {
     if cap_socket.is_none() {
         return Err(CliError::ParseError("No capture file socket".to_string()));
     }
 
-    let socket: &str = &cap_socket.unwrap();
+    let socket: PathBuf = cap_socket.unwrap();
 
     let file = OpenOptions::new()
         .write(true)
