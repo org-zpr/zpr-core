@@ -1,10 +1,12 @@
+
 use openssl::rand::rand_bytes;
 use std::collections::HashSet;
 use std::net::Ipv6Addr;
 use thiserror::Error;
+use ipnet::Ipv6Net;
+
 use zpr_utils::net_defs::IpAddress;
 
-use crate::config;
 
 /// Maximum allowed AAA ID value (40 bits)
 ///
@@ -14,18 +16,14 @@ use crate::config;
 /// That should be sufficient for the immediate future.
 const MAX_AAA_ID: u64 = 0xffffffffff;
 
-/// The base AAA address. This just has the constant 8 byte prefix.
-/// This will be followed by the node ID and then the AAA ID.
-const BASE_AAA_ADDRESS: [u16; 8] = [
-    0xfd5a, 0x5052, 0x0000, 0x0aaa, 0x0000, 0x0000, 0x0000, 0x0000,
-];
-
-const PREFIX_LEN: u8 = 64; // The prefix length for the AAA network.
 
 #[derive(Debug, Error)]
 pub enum AddressPoolError {
     #[error("invalid address")]
     InvalidAddress,
+
+    #[error("invalid prefix length")]
+    InvalidPrefixLength,
 }
 
 /// A "pool" of addresses for the ZPR network. Only supports AAA addresses
@@ -34,32 +32,32 @@ pub enum AddressPoolError {
 /// Each new address gets a unique 40-bit ID.
 ///
 pub struct AddressPool {
-    node_id: [u16; 2],
+    ipnet: Ipv6Net,
     active: HashSet<u64>, // Holds 40-bit IDs of active addresses
 }
 
 impl AddressPool {
-    /// Initialize the pool of AAA addresses.
-    ///
-    /// `node_id` is the lower 24 bits of the passed value. If the value is larger
-    /// than 24 bits it will be truncated.
-    pub fn new(node_id: u32) -> Self {
-        AddressPool {
-            node_id: [(node_id >> 8) as u16, (node_id & 0xFF) as u16],
-            active: HashSet::with_capacity(config::MAX_ACTIVE_LINKS),
+    /// Initialize the pool of AAA addresses.  The visa service hands us
+    /// a IP network to use for the AAA addresses.  
+    /// 
+    /// We expect to get at most a /88.
+    pub fn new(aaa_net: Ipv6Net) -> Result<Self, AddressPoolError> {
+        if aaa_net.prefix_len() > 88 {
+            return Err(AddressPoolError::InvalidPrefixLength);
         }
+        return Ok(Self {
+            ipnet: aaa_net,
+            active: HashSet::new(),
+         });
     }
 
     /// Returns the network used by this pool.
     /// For example, "fd5a:5052::/64".
     ///
     /// The lower 40 its is the AAA ID.
+    #[allow(dead_code)]
     pub fn get_prefix(&self) -> String {
-        let mut net_bytes = [0u16; 8];
-        net_bytes[..8].copy_from_slice(&BASE_AAA_ADDRESS[..8]);
-        net_bytes[4] = self.node_id[0];
-        net_bytes[5] = self.node_id[1] << 8; // The lower 8 bits of the node ID
-        format!("{}/{PREFIX_LEN}", Ipv6Addr::from(net_bytes))
+        return self.ipnet.to_string();
     }
 
     /// Returns a random AAA address that is not already in our active set,
@@ -68,9 +66,11 @@ impl AddressPool {
     /// Caller should "return" the address when done with it by calling
     /// [AddressPool::release_address].
     pub fn get_aaa_address(&mut self) -> IpAddress {
+
+        let base_addr = self.ipnet.addr();
+
         let mut addr_bytes = [0u16; 8];
-        addr_bytes[..4].copy_from_slice(&BASE_AAA_ADDRESS[..4]);
-        addr_bytes[4] = self.node_id[0];
+        addr_bytes[..6].copy_from_slice(&base_addr.segments()[..6]);
 
         let mut buf = [0u8; 8];
         rand_bytes(&mut buf).unwrap();
@@ -81,7 +81,7 @@ impl AddressPool {
 
         // We use the bottom 40 bits of the ID as the last 40 bits of the IP address.
 
-        addr_bytes[5] = (self.node_id[1] << 8) | (this_id >> 32) as u16;
+        addr_bytes[5] = (addr_bytes[5] & 0xFF00) | ((this_id >> 32) & 0xff) as u16;
         addr_bytes[6] = (this_id >> 16) as u16;
         addr_bytes[7] = (this_id & 0xFFFF) as u16;
 
@@ -125,10 +125,14 @@ impl AddressPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ipnet::Ipv6Net;
+
+    const AAA_NET: Ipv6Net =
+        Ipv6Net::new_assert(Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x1234, 0x5600, 0, 0), 88);
 
     #[test]
     fn test_basic_get_aaa_address() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         // Should be able to get an address without panicking
         let addr = pool.get_aaa_address();
@@ -143,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_basic_release_address() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();        
 
         // Get an address
         let addr = pool.get_aaa_address();
@@ -157,37 +161,12 @@ mod tests {
         assert_eq!(pool.len(), initial_active_size - 1);
     }
 
-    #[test]
-    fn test_address_pool_new() {
-        let node_id = 0x123456u32;
-        let pool = AddressPool::new(node_id);
-
-        // Check that node_id is properly stored
-        // For 0x123456: upper 16 bits = 0x1234, lower 8 bits = 0x56
-        assert_eq!(pool.node_id[0], 0x1234); // (node_id >> 8) = 0x1234
-        assert_eq!(pool.node_id[1], 0x56); // (node_id & 0xFF) = 0x56
-
-        // Check that active set is empty initially
-        assert!(pool.active.is_empty());
-    }
-
-    #[test]
-    fn test_address_pool_new_truncates_node_id() {
-        // Test with a node_id larger than 24 bits
-        let large_node_id = 0xFFFFFFFFu32;
-        let pool = AddressPool::new(large_node_id);
-
-        // Should be truncated to 24 bits
-        // (0xFFFFFFFF >> 8) & 0xFFFF = 0xFFFF
-        // 0xFFFFFFFF & 0xFF = 0xFF
-        assert_eq!(pool.node_id[0], 0xFFFF);
-        assert_eq!(pool.node_id[1], 0xFF);
-    }
-
+ 
+ 
     #[test]
     fn test_get_aaa_address_structure() {
-        let node_id = 0x123456u32;
-        let mut pool = AddressPool::new(node_id);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                
+    
 
         let addr = pool.get_aaa_address();
 
@@ -209,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_get_aaa_address_uniqueness() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                        
 
         let addr1 = pool.get_aaa_address();
         let addr2 = pool.get_aaa_address();
@@ -226,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_no_duplicate_active_addresses() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
         let mut allocated_addresses = std::collections::HashSet::new();
 
         // Allocate "many" addresses and ensure no duplicates
@@ -245,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_release_address_invalid_prefix() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
 
         // Create an IPv4 address (invalid)
         let invalid_addr = IpAddress::new_from_v4([192, 168, 1, 1]);
@@ -256,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_release_address_invalid_aaa_prefix() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
 
         // Create an IPv6 address with wrong AAA prefix
         let mut addr_bytes = [0u8; 16];
@@ -270,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_release_non_active_address() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
 
         // Create a valid AAA address that was never allocated by this pool
         let mut addr_bytes = [0u8; 16];
@@ -293,7 +272,7 @@ mod tests {
 
     #[test]
     fn test_multiple_releases_same_address() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
 
         let addr = pool.get_aaa_address();
 
@@ -308,8 +287,12 @@ mod tests {
 
     #[test]
     fn test_address_pool_different_node_ids() {
-        let mut pool1 = AddressPool::new(0x111111);
-        let mut pool2 = AddressPool::new(0x222222);
+
+        let net1 = Ipv6Net::new(Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x1111, 0x1100, 0, 0), 88).unwrap();
+        let net2 = Ipv6Net::new(Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x2222, 0x2200, 0, 0), 88).unwrap();        
+
+        let mut pool1 = AddressPool::new(net1).unwrap();
+        let mut pool2 = AddressPool::new(net2).unwrap();
 
         let addr1 = pool1.get_aaa_address();
         let addr2 = pool2.get_aaa_address();
@@ -326,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_release_address_with_valid_large_id() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
 
         // Create an address with an ID that's too large
         let mut addr_bytes = [0u8; 16];
@@ -345,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_mixed_allocation_and_release() {
-        let mut pool = AddressPool::new(0x123456);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
 
         // Get some addresses
         let addr1 = pool.get_aaa_address();
@@ -368,8 +351,7 @@ mod tests {
 
     #[test]
     fn test_node_id_encoding_in_address() {
-        let node_id = 0xABCDEF;
-        let mut pool = AddressPool::new(node_id);
+        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
 
         let addr = pool.get_aaa_address();
 
@@ -390,8 +372,7 @@ mod tests {
 
     #[test]
     fn test_get_prefix() {
-        let node_id = 0x123456;
-        let pool = AddressPool::new(node_id);
+        let pool = AddressPool::new(AAA_NET).unwrap();                                
         let prefix = pool.get_prefix();
         assert_eq!(prefix, "fd5a:5052:0:aaa:1234:5600::/64");
     }

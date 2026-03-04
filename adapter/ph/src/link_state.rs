@@ -644,21 +644,25 @@ impl LinkStateWrapper {
 
                 // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
                 // or if we do not have an external authentication service available.  For simplicity we just
-                // always hand one out.
-                let mut address_pool = asm.address_pool.lock().unwrap();
-                let Some(pool) = address_pool.as_mut() else {
-                    // Programming error: if we are a node, we must have a pool.
-                    panic!("adapter (node) handling a hello-request missing address pool");
+                // always hand one out -- if we have a pool. And we only have a pool if we have already 
+                // connected to the visa service.
+                let maybe_aaa_address = {
+                    let mut address_pool = asm.address_pool.lock().unwrap();
+                    if let Some(pool) = address_pool.as_mut() {
+                        let aaa_address = pool.get_aaa_address();
+                        debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
+                            pool.len());
+                        Some(aaa_address)
+                    } else {
+                        None
+                    }
                 };
-
-                let aaa_address = pool.get_aaa_address();
-                debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
-                    pool.len());
-
-                drop(address_pool);
-
-                // Store the AAA in the link memory so we can free it later.
-                self.process_assigned_aaa(asm, aaa_address)?;
+                if let Some(aaa_address) = maybe_aaa_address {
+                    self.process_assigned_aaa(asm, aaa_address)?;
+                }  else {
+                    // No pool.  Use dummy address.
+                    debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - no AAA pool available, no AAA address assigned");
+                }
 
                 let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
                 let asa_addresses = get_available_asa_addresses(&asm, link_id);
@@ -668,7 +672,7 @@ impl LinkStateWrapper {
                     link_id,
                     policy_id,
                     &asa_addresses,
-                    aaa_address.into(),
+                    maybe_aaa_address,
                 )
                 .enqueue();
 

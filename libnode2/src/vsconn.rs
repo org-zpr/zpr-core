@@ -1,6 +1,5 @@
 use zpr::vsapi::v1 as vsapi2;
 
-use ipnet::IpNet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,7 +24,6 @@ use zpr::vsapi_types::{
 use zpr::write_to::WriteTo;
 
 const PARAM_ZPR_ADDR: &str = "zpr_addr";
-const PARAM_AAA_PREFIX: &str = "aaa_prefix";
 
 const LIFECYCLE_EVENT_BUFFER_SIZE: usize = 64;
 
@@ -33,7 +31,6 @@ const LIFECYCLE_EVENT_BUFFER_SIZE: usize = 64;
 pub struct VSConnectRequest {
     /// Connect will fail if this does not match policy.
     pub zpr_addr: IpAddr,
-    pub aaa_prefix: IpNet,
 }
 
 #[derive(Debug)]
@@ -354,8 +351,8 @@ impl VSConn {
         vscr_bldr.set_cn(&self.node_cn);
         vscr_bldr.set_ctype(vsapi2::VSConnT::Reset);
 
-        // We set two params: the zpr_address for the node and the aaa-prefix.
-        let mut params_bldr = vscr_bldr.init_params(2);
+        // We set one param: the zpr_address for the node.
+        let mut params_bldr = vscr_bldr.init_params(1);
         {
             let mut param0 = params_bldr.reborrow().get(0);
             param0.set_name(PARAM_ZPR_ADDR);
@@ -369,12 +366,6 @@ impl VSConn {
                     param0.set_value_data(&av6.octets());
                 }
             }
-        }
-        {
-            let mut param1 = params_bldr.reborrow().get(1);
-            param1.set_ptype(vsapi2::ParamT::String);
-            param1.set_name(PARAM_AAA_PREFIX);
-            param1.set_value_text(&req.aaa_prefix.to_string());
         }
 
         debug!(target: VS_RPC, "VS-API -> connect");
@@ -586,6 +577,11 @@ impl VSConnHandle {
     }
 
     pub async fn register_vss(&self, saddr: SocketAddr) -> Result<Vec<VisaOp>, VSApiError> {
+        if saddr.port() == 0 {
+            return Err(VSApiError::CommandFailed(
+                "cannot register VSS with port 0".to_string(),
+            ));
+        }
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::RegisterVss(saddr, resp_tx);
         self.send_command(cmd).await?;

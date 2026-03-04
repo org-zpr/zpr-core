@@ -1,4 +1,3 @@
-use ipnet::IpNet;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -15,7 +14,6 @@ use zpr::vsapi_types::DisconnectReason;
 pub async fn launch(
     asm: Arc<Assembly>,
     node_zpr_addr: IpAddr,
-    aaa_prefix: IpNet,
     vss_addr: SocketAddr,
     vs_handle: VSConnHandle,
     mut lifecycle_rx: broadcast::Receiver<VSConnLifecycleEvent>,
@@ -29,7 +27,6 @@ pub async fn launch(
             // Kick off a connect request to the VS, if it succeeds, notify the VS about our VSS endpoint.
             let req = libnode::vsconn::VSConnectRequest {
                 zpr_addr: node_zpr_addr,
-                aaa_prefix,
             };
 
             // Race the connect call against lifecycle events. We use a bool here because

@@ -3,7 +3,6 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ipnet::IpNet;
 use std::io::stdout;
 use std::net::{IpAddr, SocketAddr};
 use tokio::sync::mpsc;
@@ -20,8 +19,6 @@ async fn main() {
 
     let vs_sa: SocketAddr = args.vs_addr.parse().expect("failed to parse vs-addr");
     let node_zpr_addr: IpAddr = args.self_addr.parse().expect("failed to parse self_addr");
-    let node_aaa_prefix: IpNet = args.aaa_prefix.parse().expect("failed to parse aaa_prefix");
-
     let cfg = Config { node_zpr_addr };
 
     let log_buf = LogBuffer::default();
@@ -64,7 +61,6 @@ async fn main() {
     js.spawn(run_handler(
         handle,
         node_zpr_addr,
-        node_aaa_prefix,
         life_rx,
         cmd_rx,
         vss_rx,

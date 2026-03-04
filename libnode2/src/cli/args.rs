@@ -28,9 +28,6 @@ pub struct Args {
     #[arg(long, default_value = "fd5a:5052:90de::1")]
     pub self_addr: String,
 
-    /// Node AAA prefix to present to the visa service.
-    #[arg(long, default_value = "fd5a:5052:90de:0::/64")]
-    pub aaa_prefix: String,
 }
 
 /// Runtime configuration derived from parsed CLI arguments.

@@ -76,7 +76,6 @@ mod zprtun;
 #[cfg(test)]
 mod km_testdata;
 
-use address_pool::AddressPool;
 use assembly::{Assembly, PhMode};
 use capture_worker::CaptureWorker;
 use fastpath::FastpathWorkerConfig;
@@ -486,36 +485,12 @@ fn main() -> ExitCode {
     //
 
     let mut vsconn;
-    let mut maybe_aaa_pool = None;
-    let mut aaa_prefix = None;
 
     if ph_mode == PhMode::Node {
         // Note that config parsing code ensures that IF node THEN certificate_file is set.
         let node_name = config::get_noise_cn(config.certificate_file.as_ref().unwrap())
             .expect("unable to determine node name: cannot parse CN");
         info!(target: STARTUP, "node CN is \"{node_name}\"");
-
-        // For the purposes of assigning AAA addresses, we take the bottom 24 bits of the nodes
-        // ZPR address as it's ID.
-        let node_id = match node_zpr_addr {
-            IpAddr::V4(addr) => u32::from_be_bytes(addr.octets()) & 0x00FFFFFF,
-            IpAddr::V6(addr) => {
-                u32::from_be_bytes(addr.octets()[12..16].try_into().unwrap()) & 0x00FFFFFF
-            }
-        };
-
-        // TODO: In the near future the visa service will tell us the AAA network to use instead of the other way around.
-        let aaa_pool = AddressPool::new(node_id);
-        info!(target: STARTUP, "node ID is {node_id:#010x}, AAA net is {}", aaa_pool.get_prefix());
-
-        aaa_prefix = Some(
-            aaa_pool
-                .get_prefix()
-                .parse::<ipnet::IpNet>()
-                .expect("invalid AAA prefix"),
-        );
-
-        maybe_aaa_pool = Some(aaa_pool);
 
         // Load the node's RSA private key for VS "static" authentication. The public key is mapped to the
         // node CN value in the policy.
@@ -567,7 +542,7 @@ fn main() -> ExitCode {
         peer_noise_keypair,
         certx: Some(certx),
         system_start_time,
-        address_pool: std::sync::Mutex::new(maybe_aaa_pool),
+        address_pool: std::sync::Mutex::new(None),
         config: rcu::RcuBox::new(config),
         logging: Mutex::new(logging_map),
         reload_handle,
@@ -754,12 +729,10 @@ fn main() -> ExitCode {
         });
 
         let vs_handle = asm.vsconn.as_ref().unwrap().clone();
-        let aaa_prefix = aaa_prefix.unwrap();
 
         js.spawn_local(vs_worker::launch(
             asm.clone(),
             node_zpr_addr,
-            aaa_prefix,
             vss_addr,
             vs_handle,
             vsconn_lifecycle_rx,

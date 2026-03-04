@@ -4,7 +4,6 @@
 //! processes lifecycle events, user commands, and incoming VSS messages until
 //! the user disconnects.
 
-use ipnet::IpNet;
 use openssl::rand::rand_bytes;
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::{broadcast, mpsc};
@@ -32,7 +31,6 @@ use super::crypto::{build_self_signed_blob, load_private_key};
 pub async fn run_handler(
     handle: VSConnHandle,
     node_zpr_addr: IpAddr,
-    node_aaa_prefix: IpNet,
     mut life_rx: broadcast::Receiver<VSConnLifecycleEvent>,
     mut cmd_rx: mpsc::UnboundedReceiver<Cmd>,
     mut vss_rx: mpsc::Receiver<VSSMessage>,
@@ -44,7 +42,6 @@ pub async fn run_handler(
 
     let request = VSConnectRequest {
         zpr_addr: node_zpr_addr,
-        aaa_prefix: node_aaa_prefix,
     };
 
     info!("requesting a connect");
@@ -210,10 +207,19 @@ pub async fn run_handler(
                             ));
                             let _ = resp_tx.send(ListProcessingResponse::Ack { processed: ip_addrs.len() as u32 });
                         }
-                        VSSMessage::SetServices(version, services, resp_tx) => {
+                        VSSMessage::SetServices(services, resp_tx) => {
                             let _ = output_tx.send(format!(
-                                "[VSS incoming] SetServices v{} with {} services", version, services.len()
+                                "[VSS incoming] SetServices with {} services", services.len()
                             ));
+                            let _ = resp_tx.send(Ok(()));
+                        }
+                        VSSMessage::Configure(params, resp_tx) => {
+                            let _ = output_tx.send(format!(
+                                "[VSS incoming] Configure with {} params:", params.len())
+                            );
+                            for p in &params {
+                                let _ = output_tx.send(format!("[VSS incoming] param >>  {}: {:?}", p.name, p.value));
+                            }
                             let _ = resp_tx.send(Ok(()));
                         }
                     }

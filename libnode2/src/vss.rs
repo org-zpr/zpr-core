@@ -12,7 +12,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::compat::*;
 use tracing::{debug, error, info, warn};
 use zpr::vsapi::v1;
-use zpr::vsapi_types::{ApiResponseError, ErrorCode, ServiceDescriptor, VisaOp};
+use zpr::vsapi_types::{Param, ApiResponseError, ErrorCode, ServiceDescriptor, VisaOp};
 use zpr::write_to::WriteTo;
 
 use crate::error::VSApiError;
@@ -31,7 +31,8 @@ pub enum ListProcessingResponse {
     Failed { processed: u32, e: ErrorCode }, // Zero or more items processed (but not all), with error
 }
 
-type SetServicesResponse = Result<(), ApiResponseError>;
+pub type SetServicesResponse = Result<(), ApiResponseError>;
+pub type ConfigureResponse = Result<(), ApiResponseError>;
 
 /// VSS Messages arrive from the visa service.
 #[derive(Debug)]
@@ -39,10 +40,10 @@ pub enum VSSMessage {
     PushVisaOp(Vec<VisaOp>, oneshot::Sender<ListProcessingResponse>),
     RevokeAuth(Vec<IpAddr>, oneshot::Sender<ListProcessingResponse>),
     SetServices(
-        u64,
         Vec<ServiceDescriptor>, // TODO: need to get TYPE into service descriptor
         oneshot::Sender<SetServicesResponse>,
     ),
+    Configure(Vec<Param>, oneshot::Sender<ConfigureResponse>),
 }
 
 /// Launch the VSS. Pings are responded to internally. Other VSS messages are sent
@@ -366,7 +367,6 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
         debug!(target: VSS_RPC, "set_services called by {}", self.remote);
 
         let params_rdr = params.get()?;
-        let version = params_rdr.get_version();
         let services_rdr = params_rdr.get_svcs()?;
 
         let mut services = Vec::new();
@@ -389,7 +389,7 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
 
         let (resp_tx, resp_rx) = oneshot::channel();
         if let Err(e) = self
-            .send_message(VSSMessage::SetServices(version, services, resp_tx))
+            .send_message(VSSMessage::SetServices(services, resp_tx))
             .await
         {
             // Probably our handler has gone away.
@@ -414,6 +414,68 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
             }
             Err(e) => {
                 error!("failed to receive SetServices response from handler: {}", e);
+                let res_builder = results.get().init_res();
+                let mut err_builder = res_builder.init_error();
+                ApiResponseError::new_code_msg(
+                    ErrorCode::Internal,
+                    "failed to receive response from VSS handler",
+                )
+                .write_to(&mut err_builder);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn configure(self: Rc<Self>,
+        params: v1::v_s_s_handle::ConfigureParams,
+        mut results: v1::v_s_s_handle::ConfigureResults) -> Result<(), capnp::Error> {
+        debug!(target: VSS_RPC, "configure called by {}", self.remote);
+        
+        let params_rdr = params.get()?;
+        let pargs_rdr = params_rdr.get_params()?;
+
+        let mut cfg_params = Vec::new();
+        for parg_rdr in pargs_rdr.iter() {
+            match Param::try_from(parg_rdr) {
+                Ok(p) => cfg_params.push(p),
+                Err(e) => {
+                    warn!(target: VSS_RPC, "received invalid Param from vs: {}", e);
+                    let res_builder = results.get().init_res();
+                    let mut err_builder = res_builder.init_error();
+                    ApiResponseError::new_code_msg(
+                        ErrorCode::ParamError,
+                        "failed to parse a configuration parameter",
+                    )
+                    .write_to(&mut err_builder);
+                    return Ok(()); // Exit early with error
+                }
+            }
+        }
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        if let Err(e) = self.send_message(VSSMessage::Configure(cfg_params, resp_tx)).await {
+            // Probably our handler has gone away.
+            error!("failed to send Configure message to handler: {}", e);
+            let res_builder = results.get().init_res();
+            let mut err_builder = res_builder.init_error();
+            ApiResponseError::new_code_msg(ErrorCode::Internal, "message processing failed")
+                .write_to(&mut err_builder);
+            return Ok(()); // Exit early with error
+        }
+
+        match resp_rx.await {
+            Ok(Ok(())) => {
+                let mut res_builder = results.get().init_res();
+                res_builder.set_ok(());
+            }
+            Ok(Err(api_err)) => {
+                let res_builder = results.get().init_res();
+                let mut err_builder = res_builder.init_error();
+                api_err.write_to(&mut err_builder);
+            }
+            Err(e) => {
+                error!("failed to receive Configure response from handler: {}", e);
                 let res_builder = results.get().init_res();
                 let mut err_builder = res_builder.init_error();
                 ApiResponseError::new_code_msg(

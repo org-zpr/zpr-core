@@ -19,6 +19,8 @@ use std::net::{IpAddr, SocketAddr};
 use tracing::*;
 use zpr::packet_info::{KmId, L3Type, L3TypeDeriveable, LinkId, StreamId, Tcst};
 use zpr_ext::zerocopy::IntoBytesExt;
+use zpr_utils::net_defs::IpAddress;
+
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)
 pub fn send_key_management(asm: &Assembly, link_id: LinkId, km_id: KmId, payload: &[u8]) {
@@ -64,12 +66,14 @@ pub fn send_hello_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, pkt)
 }
 
+/// AAA address is optional, but will usually be specified.  Only is not specified if this node
+/// has not established a VSS connection with the visa service yet.
 pub fn send_hello_success_response<'a>(
     asm: &'a Assembly,
     link_id: LinkId,
     policy_id: i64,
     asa_addresses: &[SocketAddr],
-    aaa_address: IpAddr,
+    aaa_address: Option<IpAddress>,
 ) -> Sent<'a> {
     let mut pkt = core::new_heap_packet();
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
@@ -85,7 +89,9 @@ pub fn send_hello_success_response<'a>(
         tlv::TlvEncoding::new_asa(*asa_address).put(&mut pkt);
     }
 
-    tlv::TlvEncoding::new_aaa(aaa_address.into()).put(&mut pkt);
+    if let Some(aaa_addr) = aaa_address {
+        tlv::TlvEncoding::new_aaa(aaa_addr).put(&mut pkt);
+    }
 
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloResponse, pkt)
 }
