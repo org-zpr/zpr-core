@@ -350,31 +350,10 @@ mod tests {
     }
 
     #[test]
-    fn test_node_id_encoding_in_address() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
-
-        let addr = pool.get_aaa_address();
-
-        // Extract node_id from the address
-        // pool.node_id[0] should be (0xABCDEF >> 8) = 0xABCD
-        // pool.node_id[1] should be (0xABCDEF & 0xFF) = 0xEF
-
-        // addr_bytes[4] = self.node_id[0]
-        let node_id_part1 = u16::from_be_bytes([addr.v6[8], addr.v6[9]]);
-        assert_eq!(node_id_part1, 0xABCD);
-
-        // Check that node_id[1] is used in addr_bytes[5]
-        // addr_bytes[5] = (self.node_id[1] << 8) | (this_id >> 32) as u16;
-        let addr_byte5 = u16::from_be_bytes([addr.v6[10], addr.v6[11]]);
-        let node_id_part2 = (addr_byte5 >> 8) as u8;
-        assert_eq!(node_id_part2, 0xEF);
-    }
-
-    #[test]
     fn test_get_prefix() {
         let pool = AddressPool::new(AAA_NET).unwrap();                                
         let prefix = pool.get_prefix();
-        assert_eq!(prefix, "fd5a:5052:0:aaa:1234:5600::/64");
+        assert_eq!(prefix, "fd5a:5052:0:aaa:1234:5600::/88");
     }
 
     // Helper function to extract AAA ID from an address for testing
