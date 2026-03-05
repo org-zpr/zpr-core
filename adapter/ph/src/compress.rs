@@ -36,13 +36,12 @@ fn compress_addrs_v4(pkt: &mut Packet) {
 
     pkt.push_header(&ttl);
 
-    let frag_info_present = frag_id != [0u8; 2] || frag_offset.get() != 0;
-    // NOTE/TODO: this differs slightly from the spec, in that the ID field
-    // is also optional.  I have an ask out to Frank to change this in the spec.
+    let frag_info_present = frag_offset.get() != 0;
     if frag_info_present {
         pkt.push_header(&frag_offset);
-        pkt.push_header(&frag_id);
     }
+
+    pkt.push_header(&frag_id);
 
     let hl_zdpflags = (hl << 4)
         | (if frag_info_present {
@@ -64,13 +63,12 @@ fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_addre
     let frag_info_present = (hl_zdpflags & ZDP_V4_FRAG_INFO_PRESENT) != 0;
     let frag_flags = hl_zdpflags & 0x07;
 
-    let frag_id;
+    let frag_id = pkt.get_array::<2>();
+
     let mut frag_offset;
     if frag_info_present {
-        frag_id = pkt.get_array::<2>();
         frag_offset = pkt.get_u16();
     } else {
-        frag_id = [0u8; 2];
         frag_offset = 0u16;
     }
     frag_offset |= (frag_flags as u16) << 13; // NOTE/TODO: spec deviation
