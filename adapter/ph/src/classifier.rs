@@ -68,7 +68,7 @@ struct TCPHeader {
 struct UDPHeader {
     pub src_port: U16,
     pub dst_port: U16,
-    pub length: [u8; 2],
+    pub length: U16,
     pub checksum: [u8; 2],
 }
 
@@ -179,7 +179,7 @@ fn classify_ipv4(
     }
 
     let offset = usize::from(header_length * 4);
-    let ret_code = classify_next_header(ft, &body[offset..], ipv4_header.proto);
+    let ret_code = classify_next_header(ft, &body[offset..], ipv4_header.proto, options);
 
     if frag_offset & MORE_FRAGMENTS_MASK != 0 {
         return Ok(ClassifierResult::FirstFragment);
@@ -230,6 +230,7 @@ fn classify_ipv6(
         ft,
         &body[size_of::<IPv6Header>()..],
         ipv6_header.next_header,
+        options,
     )
 }
 
@@ -237,22 +238,23 @@ fn classify_next_header(
     ft: &mut FiveTuple,
     body: &[u8],
     protocol: IpProtocol,
+    options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
     ft.set_l4_protocol(protocol);
     // NOTE: this code does not make any attempt to reject packets which
     // carry a payload which is "unsupported" for the IP version, e.g.
     // ICMPv4 over IPv6, or IPv6 options over IPv4
     match protocol {
-        ip_number::HOPOPT => skip_v6_option(ft, body),
+        ip_number::HOPOPT => skip_v6_option(ft, body, options),
         ip_number::ICMP => classify_icmp(ft, body),
         ip_number::IPINIP => classify_unclassified(ft),
         ip_number::TCP => classify_tcp(ft, body),
-        ip_number::UDP => classify_udp(ft, body),
-        ip_number::IPV6_ROUTE => skip_v6_option(ft, body),
-        ip_number::IPV6_FRAG => classify_frag(ft, body),
-        ip_number::AH => skip_auth_header(ft, body),
+        ip_number::UDP => classify_udp(ft, body, options),
+        ip_number::IPV6_ROUTE => skip_v6_option(ft, body, options),
+        ip_number::IPV6_FRAG => classify_frag(ft, body, options),
+        ip_number::AH => skip_auth_header(ft, body, options),
         ip_number::IPV6_ICMP => classify_icmpv6(ft, body),
-        ip_number::IPV6_OPTS => skip_v6_option(ft, body),
+        ip_number::IPV6_OPTS => skip_v6_option(ft, body, options),
         _ => classify_unclassified(ft),
     }
 }
@@ -262,7 +264,11 @@ fn is_option_length_error(remaining_len: usize, next_header: u8, option_length: 
         || (next_header != NO_NEXT_HEADER && option_length + 8 > remaining_len)
 }
 
-fn skip_v6_option(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+fn skip_v6_option(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     // Almost all Ipv6 options start with protocol and length
     let next_header = body[0];
     // The length for these options is in muliples of 8 bytes, not including the first 8
@@ -275,10 +281,14 @@ fn skip_v6_option(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &
         return Err("Packet length error");
     }
 
-    classify_next_header(ft, &body[option_length..], next_header)
+    classify_next_header(ft, &body[option_length..], next_header, options)
 }
 
-fn skip_auth_header(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+fn skip_auth_header(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     let next_header = body[0];
     // AH header is legacy v4 and therefore uses 4 octet multiples instead
     let option_length = (usize::from(body[1]) + 2) * 4;
@@ -287,10 +297,14 @@ fn skip_auth_header(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult,
         return Err("Packet length error");
     }
 
-    classify_next_header(ft, &body[option_length..], next_header)
+    classify_next_header(ft, &body[option_length..], next_header, options)
 }
 
-fn classify_frag(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+fn classify_frag(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     // Frag options have no length field and are always 8 bytes
     let next_header = body[0];
     let option_length: usize = 8;
@@ -306,7 +320,7 @@ fn classify_frag(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'
         return Ok(ClassifierResult::SubsequentFragment);
     }
 
-    classify_next_header(ft, &body[option_length..], next_header)?;
+    let _ = classify_next_header(ft, &body[option_length..], next_header, options);
     return Ok(ClassifierResult::FirstFragment);
 }
 
@@ -346,7 +360,11 @@ fn classify_tcp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'s
     Ok(ClassifierResult::OK)
 }
 
-fn classify_udp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+fn classify_udp(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     if size_of::<UDPHeader>() > body.len() {
         return Err("Packet length error");
     }
@@ -356,6 +374,13 @@ fn classify_udp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'s
 
     ft.set_src_port(udp_header.src_port.get());
     ft.set_dst_port(udp_header.dst_port.get());
+
+    let length = udp_header.length.get();
+    if (!options.ignore_truncated_packets && body.len() < length as usize)
+        || body.len() > length as usize
+    {
+        return Err("Packet length error");
+    }
 
     Ok(ClassifierResult::OK)
 }
