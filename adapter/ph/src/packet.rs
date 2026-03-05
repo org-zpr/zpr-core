@@ -533,6 +533,29 @@ impl Packet {
         };
     }
 
+    /// Copy the given data as a header into the packet's headroom.
+    pub fn push_u8(&mut self, data: u8) {
+        self.push_header(&[data])
+    }
+
+    /// Copy the given data as a header into the packet's headroom
+    /// in big-endian order.
+    pub fn push_u16(&mut self, data: u16) {
+        self.push_header(&data.to_be_bytes())
+    }
+
+    /// Copy the given data as a header into the packet's headroom
+    /// in big-endian order.
+    pub fn push_u32(&mut self, data: u32) {
+        self.push_header(&data.to_be_bytes())
+    }
+
+    /// Copy the given data as a header into the packet's headroom
+    /// in big-endian order.
+    pub fn push_u64(&mut self, data: u64) {
+        self.push_header(&data.to_be_bytes())
+    }
+
     /// Shrink the packet by `cnt` bytes (removing data from the tail).
     pub fn shrink_by(&mut self, cnt: usize) {
         let md = self.metadata_mut();

@@ -52,7 +52,7 @@ const NO_NEXT_HEADER: u8 = 59;
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
-struct TCPHeader {
+pub struct TCPHeader {
     pub src_port: U16,
     pub dst_port: U16,
     pub sequence_number: [u8; 4],
@@ -66,7 +66,7 @@ struct TCPHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
-struct UDPHeader {
+pub struct UDPHeader {
     pub src_port: U16,
     pub dst_port: U16,
     pub length: U16,
