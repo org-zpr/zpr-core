@@ -20,7 +20,6 @@ use std::net::SocketAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::runtime::Handle;
 use tracing::*;
 use zpr::packet_info::{DOCK_LINK_ID, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, Tcst};
 use zpr_ext::zerocopy::FromBytesExt;

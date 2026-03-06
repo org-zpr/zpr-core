@@ -717,20 +717,14 @@ fn resolve_next_hop_bind_originator(
 }
 
 pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stream_id: StreamId) {
-    let peer_table = match asm.peer_table.get(ingress_link_id.get()) {
-        Some(pt) => pt,
-        None => {
-            return;
-        }
+    let Some(peer_table) = asm.peer_table.get(ingress_link_id.get()) else {
+        return;
     };
 
     // Get visa id of next hop
-    let pft_pep = match peer_table.pft.get(stream_id) {
-        Some(pep) => pep,
-        None => {
-            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: no pft pep for stream {stream_id}");
-            return;
-        }
+    let Some(pft_pep) = peer_table.pft.get(stream_id) else {
+        warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: no pft pep for stream {stream_id}");
+        return;
     };
 
     // Remove entry from peer forwarding table
