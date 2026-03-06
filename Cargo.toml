@@ -1,7 +1,7 @@
 # zpr-core
 [workspace]
 resolver = "3"
-members = ["adapter/admin-api", "adapter/ph", "adapter/cli", "libnode2", "cbpf-rs", "cslab", "zpr-ext", "zpr-utils"]
+members = ["adapter/admin-api", "adapter/ph", "adapter/cli", "libnode2", "cbpf-rs", "cbpf-rs/fuzz", "cslab", "zpr-ext", "zpr-utils"]
 
 [workspace.dependencies]
 bytes = "1.11.1"
