@@ -720,7 +720,6 @@ pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stre
     let peer_table = match asm.peer_table.get(ingress_link_id.get()) {
         Some(pt) => pt,
         None => {
-            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: no peer table");
             return;
         }
     };
@@ -729,7 +728,7 @@ pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stre
     let pft_pep = match peer_table.pft.get(stream_id) {
         Some(pep) => pep,
         None => {
-            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: no pft pep");
+            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: no pft pep for stream {stream_id}");
             return;
         }
     };

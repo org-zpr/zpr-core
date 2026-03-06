@@ -20,6 +20,7 @@ use std::net::SocketAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::runtime::Handle;
 use tracing::*;
 use zpr::packet_info::{DOCK_LINK_ID, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, Tcst};
 use zpr_ext::zerocopy::FromBytesExt;
@@ -778,8 +779,7 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
     let link_type = match asm.peer_table.get(ingress_link_id.get()) {
         Some(peer_state) => peer_state.link_state_machine.get_link_type(),
         None => {
-            error!(target: FLOW_MGMT, "ingress link id not recognized");
-            return Ok(());
+            return Err(HandleMgmtError::LinkClosed);
         }
     };
 
