@@ -2,4 +2,6 @@
 integration-test/vs-admin
 integration-test/vs
 integration-test/pregen/zplc
+integration-test/valkey-server
 target/
+completions/
