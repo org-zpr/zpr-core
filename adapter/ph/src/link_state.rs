@@ -142,7 +142,7 @@ pub enum LinkEvent {
     KeyingDone,
     ReceivedHelloRequest,
     AssignedAAA(IpAddress), // Assigned AAA address for this link
-    ReceivedHelloResponse(ResponseCode, IpAddress, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
+    ReceivedHelloResponse(ResponseCode, Option<IpAddress>, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
     ReceivedInitAuthAck,
@@ -648,7 +648,7 @@ impl LinkStateWrapper {
 
                 // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
                 // or if we do not have an external authentication service available.  For simplicity we just
-                // always hand one out -- if we have a pool. And we only have a pool if we have already 
+                // always hand one out -- if we have a pool. And we only have a pool if we have already
                 // connected to the visa service.
                 let maybe_aaa_address = {
                     let mut address_pool = asm.address_pool.lock().unwrap();
@@ -663,7 +663,7 @@ impl LinkStateWrapper {
                 };
                 if let Some(aaa_address) = maybe_aaa_address {
                     self.process_assigned_aaa(asm, aaa_address)?;
-                }  else {
+                } else {
                     // No pool.  Use dummy address.
                     debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - no AAA pool available, no AAA address assigned");
                 }
@@ -733,7 +733,7 @@ impl LinkStateWrapper {
         &self,
         asm: &Arc<Assembly>,
         code: ResponseCode,
-        aaa_addr: IpAddress,
+        maybe_aaa_addr: Option<IpAddress>,
         maybe_asa_addrs: Option<Vec<SocketAddr>>,
     ) -> Result<(), LinkStateError> {
         if code == ResponseCode::Other {
@@ -752,7 +752,7 @@ impl LinkStateWrapper {
                 // On the node side, the aaa_address link_data field is used to keep track of the
                 // AAA we handed out to the peer.  On the client-adapter side, we hold the AAA
                 // we got from the node in there.
-                link_data.aaa_address = Some(aaa_addr);
+                link_data.aaa_address = maybe_aaa_addr;
                 drop(link_data);
 
                 // The adapter is waiting for an init-auth-request.

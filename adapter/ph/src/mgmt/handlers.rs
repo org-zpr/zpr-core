@@ -315,10 +315,10 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
         }
     }
 
-    // AAA is required.
     if aaa_address.is_none() {
+        // Pretty sure only happens if node has no AAA pool from VS yet.
+        // Not an issue unless this adapter needs to talk to an authentication service.
         warn!(target: ZDP, "Link {link_id}: HelloResponse did not include AAA");
-        return Err(HandleMgmtError::BadStructure);
     }
 
     let maybe_asa_addrs = if asa_addresses.is_empty() {
@@ -330,7 +330,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 
     asm.process_link_state_event(
         link_id,
-        LinkEvent::ReceivedHelloResponse(status, aaa_address.unwrap(), maybe_asa_addrs),
+        LinkEvent::ReceivedHelloResponse(status, aaa_address, maybe_asa_addrs),
     )?;
 
     Ok(())
