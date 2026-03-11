@@ -147,6 +147,7 @@ wait_for 15 check_vs_valkey_port
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     -c vs-config.toml \
+    --clear-state \
     "$PREGEN/$POLICY_BIN" 2>&1 | tee vs.log | prefix_log vs &
 
 sleep 2

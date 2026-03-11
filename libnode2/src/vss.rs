@@ -12,7 +12,7 @@ use tokio_rustls::TlsAcceptor;
 use tokio_util::compat::*;
 use tracing::{debug, error, info, warn};
 use zpr::vsapi::v1;
-use zpr::vsapi_types::{Param, ApiResponseError, ErrorCode, ServiceDescriptor, VisaOp};
+use zpr::vsapi_types::{ApiResponseError, ErrorCode, Param, ServiceDescriptor, VisaOp};
 use zpr::write_to::WriteTo;
 
 use crate::error::VSApiError;
@@ -427,11 +427,13 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
         Ok(())
     }
 
-    async fn configure(self: Rc<Self>,
+    async fn configure(
+        self: Rc<Self>,
         params: v1::v_s_s_handle::ConfigureParams,
-        mut results: v1::v_s_s_handle::ConfigureResults) -> Result<(), capnp::Error> {
+        mut results: v1::v_s_s_handle::ConfigureResults,
+    ) -> Result<(), capnp::Error> {
         debug!(target: VSS_RPC, "configure called by {}", self.remote);
-        
+
         let params_rdr = params.get()?;
         let pargs_rdr = params_rdr.get_params()?;
 
@@ -454,7 +456,10 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
         }
 
         let (resp_tx, resp_rx) = oneshot::channel();
-        if let Err(e) = self.send_message(VSSMessage::Configure(cfg_params, resp_tx)).await {
+        if let Err(e) = self
+            .send_message(VSSMessage::Configure(cfg_params, resp_tx))
+            .await
+        {
             // Probably our handler has gone away.
             error!("failed to send Configure message to handler: {}", e);
             let res_builder = results.get().init_res();

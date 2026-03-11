@@ -21,7 +21,6 @@ use zpr::packet_info::{KmId, L3Type, L3TypeDeriveable, LinkId, StreamId, Tcst};
 use zpr_ext::zerocopy::IntoBytesExt;
 use zpr_utils::net_defs::IpAddress;
 
-
 /// send a Key Management message (RFC 6.5 § 6.2.8)
 pub fn send_key_management(asm: &Assembly, link_id: LinkId, km_id: KmId, payload: &[u8]) {
     let mut pkt = core::new_heap_packet();

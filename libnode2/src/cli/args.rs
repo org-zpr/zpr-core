@@ -27,7 +27,6 @@ pub struct Args {
     /// Nodes ZPR address to present to the visa service.
     #[arg(long, default_value = "fd5a:5052:90de::1")]
     pub self_addr: String,
-
 }
 
 /// Runtime configuration derived from parsed CLI arguments.

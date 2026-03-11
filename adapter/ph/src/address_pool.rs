@@ -1,12 +1,10 @@
-
+use ipnet::Ipv6Net;
 use openssl::rand::rand_bytes;
 use std::collections::HashSet;
 use std::net::Ipv6Addr;
 use thiserror::Error;
-use ipnet::Ipv6Net;
 
 use zpr_utils::net_defs::IpAddress;
-
 
 /// Maximum allowed AAA ID value (40 bits)
 ///
@@ -15,7 +13,6 @@ use zpr_utils::net_defs::IpAddress;
 /// the birthday problem.
 /// That should be sufficient for the immediate future.
 const MAX_AAA_ID: u64 = 0xffffffffff;
-
 
 #[derive(Debug, Error)]
 pub enum AddressPoolError {
@@ -39,7 +36,7 @@ pub struct AddressPool {
 impl AddressPool {
     /// Initialize the pool of AAA addresses.  The visa service hands us
     /// a IP network to use for the AAA addresses.  
-    /// 
+    ///
     /// We expect to get at most a /88.
     pub fn new(aaa_net: Ipv6Net) -> Result<Self, AddressPoolError> {
         if aaa_net.prefix_len() > 88 {
@@ -48,7 +45,7 @@ impl AddressPool {
         return Ok(Self {
             ipnet: aaa_net,
             active: HashSet::new(),
-         });
+        });
     }
 
     /// Returns the network used by this pool.
@@ -66,7 +63,6 @@ impl AddressPool {
     /// Caller should "return" the address when done with it by calling
     /// [AddressPool::release_address].
     pub fn get_aaa_address(&mut self) -> IpAddress {
-
         let base_addr = self.ipnet.addr();
 
         let mut addr_bytes = [0u16; 8];
@@ -127,8 +123,10 @@ mod tests {
     use super::*;
     use ipnet::Ipv6Net;
 
-    const AAA_NET: Ipv6Net =
-        Ipv6Net::new_assert(Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x1234, 0x5600, 0, 0), 88);
+    const AAA_NET: Ipv6Net = Ipv6Net::new_assert(
+        Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x1234, 0x5600, 0, 0),
+        88,
+    );
 
     #[test]
     fn test_basic_get_aaa_address() {
@@ -147,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_basic_release_address() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();        
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         // Get an address
         let addr = pool.get_aaa_address();
@@ -161,12 +159,9 @@ mod tests {
         assert_eq!(pool.len(), initial_active_size - 1);
     }
 
- 
- 
     #[test]
     fn test_get_aaa_address_structure() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                
-    
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         let addr = pool.get_aaa_address();
 
@@ -188,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_get_aaa_address_uniqueness() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                        
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         let addr1 = pool.get_aaa_address();
         let addr2 = pool.get_aaa_address();
@@ -205,7 +200,7 @@ mod tests {
 
     #[test]
     fn test_no_duplicate_active_addresses() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
         let mut allocated_addresses = std::collections::HashSet::new();
 
         // Allocate "many" addresses and ensure no duplicates
@@ -224,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_release_address_invalid_prefix() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         // Create an IPv4 address (invalid)
         let invalid_addr = IpAddress::new_from_v4([192, 168, 1, 1]);
@@ -235,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_release_address_invalid_aaa_prefix() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         // Create an IPv6 address with wrong AAA prefix
         let mut addr_bytes = [0u8; 16];
@@ -249,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_release_non_active_address() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         // Create a valid AAA address that was never allocated by this pool
         let mut addr_bytes = [0u8; 16];
@@ -272,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_multiple_releases_same_address() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         let addr = pool.get_aaa_address();
 
@@ -287,9 +282,16 @@ mod tests {
 
     #[test]
     fn test_address_pool_different_node_ids() {
-
-        let net1 = Ipv6Net::new(Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x1111, 0x1100, 0, 0), 88).unwrap();
-        let net2 = Ipv6Net::new(Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x2222, 0x2200, 0, 0), 88).unwrap();        
+        let net1 = Ipv6Net::new(
+            Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x1111, 0x1100, 0, 0),
+            88,
+        )
+        .unwrap();
+        let net2 = Ipv6Net::new(
+            Ipv6Addr::new(0xfd5a, 0x5052, 0, 0x0aaa, 0x2222, 0x2200, 0, 0),
+            88,
+        )
+        .unwrap();
 
         let mut pool1 = AddressPool::new(net1).unwrap();
         let mut pool2 = AddressPool::new(net2).unwrap();
@@ -309,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_release_address_with_valid_large_id() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         // Create an address with an ID that's too large
         let mut addr_bytes = [0u8; 16];
@@ -328,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_mixed_allocation_and_release() {
-        let mut pool = AddressPool::new(AAA_NET).unwrap();                                
+        let mut pool = AddressPool::new(AAA_NET).unwrap();
 
         // Get some addresses
         let addr1 = pool.get_aaa_address();
@@ -351,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_get_prefix() {
-        let pool = AddressPool::new(AAA_NET).unwrap();                                
+        let pool = AddressPool::new(AAA_NET).unwrap();
         let prefix = pool.get_prefix();
         assert_eq!(prefix, "fd5a:5052:0:aaa:1234:5600::/88");
     }

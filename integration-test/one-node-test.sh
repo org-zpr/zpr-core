@@ -155,6 +155,7 @@ echo "Launching Visa Service"
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     -c vs-config.toml \
+    --clear-state \
     "$PREGEN/$POLICY_BIN" 2>&1 | tee vs.log | prefix_log vs &
 
 sleep 2

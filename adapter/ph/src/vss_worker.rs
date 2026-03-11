@@ -1,14 +1,14 @@
+use crate::address_pool::AddressPool;
 use crate::assembly::Assembly;
 use crate::logging::targets::{VISA_MGMT, VSS_RPC};
 use crate::{visa_mgmt, visa_table};
-use crate::address_pool::AddressPool;
 
-use libnode::vss::{ListProcessingResponse, VSSMessage, ConfigureResponse};
+use libnode::vss::{ConfigureResponse, ListProcessingResponse, VSSMessage};
 use std::sync::Arc;
-use tokio::sync::{mpsc};
+use tokio::sync::mpsc;
 use tracing::*;
 use zpr::packet_info::VisaId;
-use zpr::vsapi_types::{ErrorCode, Param, ParamValue, pname, VisaOp, ApiResponseError};
+use zpr::vsapi_types::{ApiResponseError, ErrorCode, Param, ParamValue, VisaOp, pname};
 
 pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMessage>) {
     while let Some(msg) = queue.recv().await {
@@ -56,7 +56,7 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMessage>) {
             VSSMessage::Configure(params, resp_tx) => {
                 debug!(target: VSS_RPC, "received VSS configuration update with {} entries", params.len());
                 let resp = process_configuration(&asm, params);
-                let _ = resp_tx.send(resp);                
+                let _ = resp_tx.send(resp);
             }
         }
     }
@@ -77,13 +77,9 @@ pub fn process_visaop(asm: &Arc<Assembly>, op: VisaOp) -> Result<(), visa_table:
     Ok(())
 }
 
-
 /// Visa service sends configuration info here. Currently includes:
 /// - AAA network to use (will be updated on the assembly).
-fn process_configuration(
-    asm: &Arc<Assembly>,
-    params: Vec<Param>,
-) -> ConfigureResponse {
+fn process_configuration(asm: &Arc<Assembly>, params: Vec<Param>) -> ConfigureResponse {
     let mut aaa_ipnet_str = None;
 
     for param in params {
@@ -92,15 +88,23 @@ fn process_configuration(
                 ParamValue::StrParam(s) => {
                     if aaa_ipnet_str.is_some() {
                         error!(target: VSS_RPC, "multiple AAA_PREFIX parameters received");
-                        return Err(ApiResponseError { code: ErrorCode::ParamError, message: "multiple AAA_PREFIX parameters".into(), retry_in: 0 });
+                        return Err(ApiResponseError {
+                            code: ErrorCode::ParamError,
+                            message: "multiple AAA_PREFIX parameters".into(),
+                            retry_in: 0,
+                        });
                     }
                     aaa_ipnet_str = Some(s);
                 }
                 _ => {
                     error!(target: VSS_RPC, "invalid value type for AAA_PREFIX param");
-                    return Err(ApiResponseError { code: ErrorCode::ParamError, message: "invalid type for AAA_PREFIX".into(), retry_in: 0 });
-                }                                   
-            }
+                    return Err(ApiResponseError {
+                        code: ErrorCode::ParamError,
+                        message: "invalid type for AAA_PREFIX".into(),
+                        retry_in: 0,
+                    });
+                }
+            },
             _ => {
                 info!(target: VSS_RPC, "unrecognized configuration parameter: {}", param.name);
             }
@@ -112,7 +116,11 @@ fn process_configuration(
             Ok(ipnet) => {
                 let pool = AddressPool::new(ipnet).map_err(|e| {
                     error!(target: VSS_RPC, "rejected AAA_PREFIX value: {e}");
-                    ApiResponseError { code: ErrorCode::ParamError, message: format!("AAA_PREFIX rejected"), retry_in: 0 }
+                    ApiResponseError {
+                        code: ErrorCode::ParamError,
+                        message: format!("AAA_PREFIX rejected"),
+                        retry_in: 0,
+                    }
                 })?;
 
                 debug!(target: VSS_RPC, "updating local AAA address pool with network {}", ipnet);
@@ -120,11 +128,14 @@ fn process_configuration(
             }
             Err(e) => {
                 error!(target: VSS_RPC, "invalid AAA_PREFIX value: {e}");
-                return Err(ApiResponseError { code: ErrorCode::ParamError, message: format!("invalid AAA_PREFIX"), retry_in: 0 });
+                return Err(ApiResponseError {
+                    code: ErrorCode::ParamError,
+                    message: format!("invalid AAA_PREFIX"),
+                    retry_in: 0,
+                });
             }
         }
     }
-
 
     Ok(())
 }
