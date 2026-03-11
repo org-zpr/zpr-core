@@ -2,7 +2,7 @@
 
 
 # Our PKI helper tool
-ZPR_PKI_BIN=$(realpath "$(dirname $0)/../tools/zpr-pki")
+ZPR_PKI_BIN=$(realpath "$(dirname $0)/lib/zpr-pki")
 
 
 #

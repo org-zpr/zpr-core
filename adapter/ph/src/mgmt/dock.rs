@@ -715,3 +715,42 @@ fn resolve_next_hop_bind_originator(
 
     Ok((ingress_link_id, ingress_txn_id))
 }
+
+pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stream_id: StreamId) {
+    let Some(peer_table) = asm.peer_table.get(ingress_link_id.get()) else {
+        return;
+    };
+
+    // Get visa id of next hop
+    let Some(pft_pep) = peer_table.pft.get(stream_id) else {
+        warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: no pft pep for stream {stream_id}");
+        return;
+    };
+
+    // Remove entry from peer forwarding table
+    peer_table.pft.remove(stream_id);
+
+    // Remove stream id from visa
+    match asm
+        .visa_table
+        .write()
+        .unwrap()
+        .unlink_forwarding_entry(pft_pep.visa_id, &pft_pep.next_hop)
+    {
+        Ok(b) => {
+            if !b {
+                warn!(target: FLOW_MGMT, "Link {ingress_link_id}: stream {} not found in visa {}", pft_pep.next_hop.1, pft_pep.visa_id)
+            }
+        }
+        Err(e) => {
+            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: error removing stream from visa: {}", e)
+        }
+    }
+
+    // Issue unbind request to next hop
+    if pft_pep.next_hop.0 == LOCAL_ACTOR_LINK_ID {
+        adapter::unbind_stream(asm, NonZero::new(DOCK_LINK_ID).unwrap(), stream_id);
+    } else {
+        requests::send_unbind_egress_stream_request(asm, pft_pep.next_hop.0, stream_id).enqueue();
+    }
+}

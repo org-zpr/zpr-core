@@ -9,7 +9,7 @@ use super::{adapter, dock};
 use crate::assembly::{Assembly, PhMode};
 use crate::auth;
 use crate::counters;
-use crate::link_state::{LinkEvent, LinkStateError};
+use crate::link_state::{LinkEvent, LinkStateError, LinkType};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::packet::Packet;
 use crate::tc;
@@ -21,7 +21,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
-use zpr::packet_info::{L3Type, LinkId, Tcst};
+use zpr::packet_info::{DOCK_LINK_ID, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, Tcst};
 use zpr_ext::zerocopy::FromBytesExt;
 use zpr_utils::net_defs::IpAddress;
 
@@ -766,4 +766,56 @@ pub async fn handle_bind_egress_stream_response(
 
         _ => Err(HandleMgmtError::BadStructure),
     }
+}
+
+pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
+    let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
+        // who sent this??
+        error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
+        return Ok(());
+    };
+
+    let link_type = match asm.peer_table.get(ingress_link_id.get()) {
+        Some(peer_state) => peer_state.link_state_machine.get_link_type(),
+        None => {
+            return Err(HandleMgmtError::LinkClosed);
+        }
+    };
+
+    match (link_type, ingress_link_id.get()) {
+        (LinkType::NodeToAdapter, _) | (LinkType::Internal, LOCAL_ACTOR_LINK_ID) => {
+            // We are the node
+            debug!(target: ZDP, "Link {ingress_link_id}: unbind actor address, node -> adapter");
+            // Remove from PFT
+            dock::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
+        }
+        (LinkType::AdapterToNode, _) | (LinkType::Internal, DOCK_LINK_ID) => {
+            // We are the adapter
+            debug!(
+                target: ZDP,
+                "Link {}: unbind egress stream, adapter -> node",
+                ingress_link_id.get()
+            );
+            // Remove from DLT
+            adapter::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
+        }
+        (LinkType::NodeToNode, _) => {
+            debug!(
+                target: ZDP,
+                "Link {}: node -> node UNIMPLEMENTED",
+                ingress_link_id.get()
+            );
+            return Err(HandleMgmtError::MessageNotPermitted);
+        }
+        (LinkType::Internal, _) => {
+            error!(
+                target: ZDP,
+                "Link {}: internal",
+                ingress_link_id.get()
+            );
+            return Err(HandleMgmtError::MessageNotPermitted);
+        }
+    }
+
+    Ok(())
 }

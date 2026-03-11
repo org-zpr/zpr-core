@@ -133,6 +133,18 @@ impl Visa {
     pub fn get_tc(&self) -> tc::Ip5TupleTc {
         tc::Ip5TupleTc::new_with_compression_mode(0, self.visa.get_five_tuple().into())
     }
+
+    pub fn unlink_forwarding_entry(&mut self, forwarding_entry: &ForwardingEntry) -> bool {
+        let idx = self.streams.iter().position(|fe| forwarding_entry == fe);
+
+        match idx {
+            Some(idx) => {
+                self.streams.swap_remove(idx);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 pub struct VisaTable {
@@ -309,6 +321,18 @@ impl VisaTable {
             Ok(visa) => Ok(IpAddress::from(visa.ftuple.dest_addr.clone())),
             Err(e) => Err(e),
         }
+    }
+
+    pub fn unlink_forwarding_entry(
+        &mut self,
+        visa_id: VisaId,
+        forwarding_entry: &ForwardingEntry,
+    ) -> Result<bool, VisaTableError> {
+        let Some(visa) = self.table.get_mut(&visa_id) else {
+            return Err(VisaTableError::NotFound(visa_id));
+        };
+
+        Ok(visa.unlink_forwarding_entry(forwarding_entry))
     }
 }
 

@@ -22,8 +22,7 @@ pub enum ZdpPacketType {
     BindActorAddressResponse = 7,
     BindEgressStreamRequest = 8,  // TODO: add to RFC 17
     BindEgressStreamResponse = 9, // TODO: add to RFC 17
-    UnbindActorAddressRequest = 13,
-    UnbindActorAddressResponse = 14,
+    UnbindEgressStreamIndication = 13,
 
     // Not flow-based
     ZprArp = 128,

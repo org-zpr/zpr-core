@@ -131,7 +131,9 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 )
                 .await
             }
-
+            ZdpPacketType::UnbindEgressStreamIndication => {
+                handlers::handle_unbind_indication(asm, pkt).await
+            }
             packet_type => Err(HandleMgmtError::UnknownType(packet_type.0)),
         }
     } else {

@@ -24,7 +24,6 @@ tokio-rustls = "0.26.4"
 rustls = "0.23.36"
 rcgen = "0.14.7"
 
-
 [features]
 build-lnt = ["clap", "tracing-subscriber", "ratatui", "crossterm", "tui-input"]
 

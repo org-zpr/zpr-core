@@ -353,6 +353,10 @@ impl LinkStateWrapper {
             && (locked_fsm.state == LinkState::Active || locked_fsm.state == LinkState::RegisterAA)
     }
 
+    pub fn get_link_type(&self) -> LinkType {
+        self.link_type
+    }
+
     /// Schedule a `Timeout` event to occur after the specified duration.
     ///
     /// Any existing timeout is canceled atomically.
