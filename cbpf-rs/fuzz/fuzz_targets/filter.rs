@@ -9,6 +9,6 @@ fuzz_target!(|fuzz_in: FuzzIn| {
             // println!("good");
             prog.filter(&fuzz_in.pkt);
         }
-        _ => (),//println!("err"),
+        _ => (), //println!("err"),
     };
 });
