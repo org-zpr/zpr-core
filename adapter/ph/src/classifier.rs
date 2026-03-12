@@ -159,11 +159,8 @@ fn classify_ipv4(
 
     let header_length = ipv4_header.vhl & IPV4_HEADER_LENGTH_MASK;
     let total_length = ipv4_header.total_length.get();
-    if (!options.ignore_truncated_packets && body.len() < total_length as usize)
-        || body.len() > total_length as usize
-        || header_length < 5
-        || (header_length as usize) * 4 > body.len()
-    {
+    if header_length < 5 {
+        // header is likely corrupted, do not attempt to extract addresses
         return Err("Packet length error");
     }
 
@@ -176,6 +173,13 @@ fn classify_ipv4(
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
         ft.set_l4_protocol(ipv4_header.proto);
         return Ok(ClassifierResult::SubsequentFragment);
+    }
+
+    if (!options.ignore_truncated_packets && body.len() < total_length as usize)
+        || body.len() > total_length as usize
+        || (header_length as usize) * 4 > body.len()
+    {
+        return Err("Packet length error");
     }
 
     let offset = usize::from(header_length * 4);
@@ -349,13 +353,13 @@ fn classify_tcp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'s
     let header_bytes = &body[..size_of::<TCPHeader>()];
     let tcp_header = TCPHeader::ref_from_bytes(header_bytes).unwrap();
 
+    ft.set_src_port(tcp_header.src_port.get());
+    ft.set_dst_port(tcp_header.dst_port.get());
+
     let data_offset = (tcp_header.data_offset_and_reserved >> 4) * 4;
     if data_offset < 20 || data_offset as usize > body.len() {
         return Err("Packet length error");
     }
-
-    ft.set_src_port(tcp_header.src_port.get());
-    ft.set_dst_port(tcp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
@@ -623,8 +627,14 @@ mod tests {
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
-        assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
-        assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
+        );
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_l4_protocol());
@@ -1219,8 +1229,8 @@ mod tests {
             [0x01, 0x02, 0x03, 0x04],
             metadata.get_src_address().read_as_v4()
         );
-        assert_eq!(0x0u16, metadata.get_src_port_hbo());
-        assert_eq!(0x0u16, metadata.get_dst_port_hbo());
+        assert_eq!(20u16, metadata.get_src_port_hbo());
+        assert_eq!(80u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
@@ -1253,8 +1263,8 @@ mod tests {
             [0x01, 0x02, 0x03, 0x04],
             metadata.get_src_address().read_as_v4()
         );
-        assert_eq!(0x0u16, metadata.get_src_port_hbo());
-        assert_eq!(0x0u16, metadata.get_dst_port_hbo());
+        assert_eq!(20u16, metadata.get_src_port_hbo());
+        assert_eq!(80u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
