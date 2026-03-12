@@ -396,6 +396,70 @@ pub fn vsapi_ip_to_defs_ip(vsapi_proto: VsapiIpProtocol) -> Result<IpProtocol, &
     }
 }
 
+/// Add an IPv4/v6 pseudo-header to an Internet checksum.
+pub fn checksum_ip_pseudo_header(
+    csum: &mut internet_checksum::Checksum,
+    ip_version: IpVersion,
+    src_address: &IpAddress,
+    dst_address: &IpAddress,
+    ip_protocol: IpProtocol,
+    l4_length: u32,
+) {
+    match ip_version {
+        4 => {
+            csum.add_bytes(&src_address.read_as_v4());
+            csum.add_bytes(&dst_address.read_as_v4());
+            csum.add_bytes(&[0u8, ip_protocol]);
+            csum.add_bytes(&(l4_length as u16).to_be_bytes());
+        }
+
+        6 => {
+            csum.add_bytes(&src_address.v6);
+            csum.add_bytes(&dst_address.v6);
+            csum.add_bytes(&l4_length.to_be_bytes());
+            csum.add_bytes(&[0u8, ip_protocol]); // technically should have two more leading 0 bytes, but these do not affect the result
+        }
+
+        _ => panic!("bad IP version"),
+    }
+}
+
+pub fn inet_l4_checksum(
+    ip_version: IpVersion,
+    src_address: &IpAddress,
+    dst_address: &IpAddress,
+    ip_protocol: IpProtocol,
+    l4_payload: &[u8],
+) -> [u8; 2] {
+    let mut csum = internet_checksum::Checksum::new();
+    checksum_ip_pseudo_header(
+        &mut csum,
+        ip_version,
+        src_address,
+        dst_address,
+        ip_protocol,
+        l4_payload.len() as u32,
+    );
+    csum.add_bytes(l4_payload);
+    csum.checksum()
+}
+
+pub fn validate_inet_l4_checksum(
+    ip_version: IpVersion,
+    src_address: &IpAddress,
+    dst_address: &IpAddress,
+    ip_protocol: IpProtocol,
+    l4_payload: &[u8],
+) -> bool {
+    inet_l4_checksum(
+        ip_version,
+        src_address,
+        dst_address,
+        ip_protocol,
+        l4_payload,
+    ) == [0u8; 2]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,4 +495,51 @@ mod tests {
         let vec_octets = Vec::from(invalid_octets);
         assert_eq!(true, IpAddress::try_from(vec_octets).is_err());
     }
+
+    #[test]
+    fn test_pseudo_header_checksum() {
+        for (ip_version, src_address, dst_address, ip_protocol, data) in L4_TEST_DATA {
+            assert_eq!(
+                inet_l4_checksum(*ip_version, src_address, dst_address, *ip_protocol, data),
+                [0u8; 2]
+            );
+        }
+    }
+
+    const L4_TEST_DATA: &[(IpVersion, IpAddress, IpAddress, IpProtocol, &[u8])] = &[
+        (
+            4,
+            IpAddress::new_from_v4([139, 255, 192, 233]),
+            IpAddress::new_from_v4([10, 132, 4, 55]),
+            ip_number::TCP,
+            &[
+                0x01, 0xbb, 0xc3, 0x74, 0x4b, 0xad, 0x33, 0x82, 0x10, 0xc5, 0x41, 0xfe, 0x80, 0x18,
+                0x03, 0x5f, 0x7b, 0x94, 0x00, 0x00, 0x01, 0x01, 0x08, 0x0a, 0x26, 0x09, 0x2c, 0x37,
+                0x55, 0x41, 0x13, 0xf5, 0x17, 0x03, 0x03, 0x00, 0x1a, 0xed, 0x93, 0xf6, 0x3d, 0xc0,
+                0xf6, 0x2f, 0xaa, 0x80, 0x03, 0xc7, 0xc8, 0x5b, 0x99, 0xba, 0xf1, 0xc5, 0xd0, 0x8a,
+                0xfe, 0x12, 0xb8, 0x6f, 0xee, 0x5c, 0xd5,
+            ],
+        ),
+        (
+            6,
+            IpAddress {
+                v6: [
+                    0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0xc, 0xbb, 0x7e, 0xa4, 0x55, 0xf1, 0x7, 0x9f,
+                ],
+            },
+            IpAddress {
+                v6: [
+                    0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0xc, 0xbb, 0x7e, 0xa4, 0x55, 0xf1, 0x7, 0x9f,
+                ],
+            },
+            ip_number::IPV6_ICMP,
+            &[
+                0x80, 0x00, 0x16, 0x20, 0x00, 0x05, 0x00, 0x01, 0xca, 0xd5, 0xb1, 0x69, 0x00, 0x00,
+                0x00, 0x00, 0x51, 0x6b, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x11, 0x12, 0x13,
+                0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21,
+                0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+                0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+            ],
+        ),
+    ];
 }
