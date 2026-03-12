@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::defs::FiveTuple;
 use arrayref::array_ref;
+use internet_checksum;
 use std::mem::size_of;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
@@ -90,12 +91,23 @@ struct ICMPHeader {
 
 #[derive(Clone, Default)]
 pub struct ClassifierOptions {
+    /// Allows packets whose length is less than what is declared in the headers.
+    /// (Still rejects packets whose length is greater than what is declared.)
+    /// Also disables validation of checksums as if `ignore_bad_checksums` were true.
     ignore_truncated_packets: bool,
+    /// Allows packets with bad checksums.  This flag is ignored (and checksums
+    /// are never validated) if `ignore_truncated_packets` is false.
+    ignore_bad_checksums: bool,
 }
 
 impl ClassifierOptions {
     pub fn ignore_truncated_packets(mut self, value: bool) -> Self {
         self.ignore_truncated_packets = value;
+        self
+    }
+
+    pub fn ignore_bad_checksums(mut self, value: bool) -> Self {
+        self.ignore_bad_checksums = value;
         self
     }
 }
@@ -157,11 +169,24 @@ fn classify_ipv4(
     let header_bytes = &body[..size_of::<IPv4Header>()];
     let ipv4_header = IPv4Header::ref_from_bytes(header_bytes).unwrap();
 
-    let header_length = ipv4_header.vhl & IPV4_HEADER_LENGTH_MASK;
+    let header_length = ((ipv4_header.vhl & IPV4_HEADER_LENGTH_MASK) as usize) * 4;
+
     let total_length = ipv4_header.total_length.get();
-    if header_length < 5 {
+    if header_length < size_of::<IPv4Header>() {
         // header is likely corrupted, do not attempt to extract addresses
         return Err("Packet length error");
+    }
+
+    if !options.ignore_bad_checksums && !options.ignore_truncated_packets {
+        if header_length > body.len() {
+            // Note that if checksums aren't allowed, we don't check this until
+            // after extracting addresses, to allow for better error reporting.
+            return Err("Packet length error");
+        }
+
+        if internet_checksum::checksum(&body[..header_length]) != [0u8; 2] {
+            return Err("Bad L3 checksum");
+        }
     }
 
     ft.set_src_address(IpAddress::new_from_v4(ipv4_header.src_address));
@@ -177,13 +202,12 @@ fn classify_ipv4(
 
     if (!options.ignore_truncated_packets && body.len() < total_length as usize)
         || body.len() > total_length as usize
-        || (header_length as usize) * 4 > body.len()
+        || header_length > body.len()
     {
         return Err("Packet length error");
     }
 
-    let offset = usize::from(header_length * 4);
-    let ret_code = classify_next_header(ft, &body[offset..], ipv4_header.proto, options);
+    let ret_code = classify_next_header(ft, &body[header_length..], ipv4_header.proto, options);
 
     if frag_offset & MORE_FRAGMENTS_MASK != 0 {
         return Ok(ClassifierResult::FirstFragment);
@@ -250,14 +274,14 @@ fn classify_next_header(
     // ICMPv4 over IPv6, or IPv6 options over IPv4
     match protocol {
         ip_number::HOPOPT => skip_v6_option(ft, body, options),
-        ip_number::ICMP => classify_icmp(ft, body),
+        ip_number::ICMP => classify_icmp(ft, body, options),
         ip_number::IPINIP => classify_unclassified(ft),
-        ip_number::TCP => classify_tcp(ft, body),
+        ip_number::TCP => classify_tcp(ft, body, options),
         ip_number::UDP => classify_udp(ft, body, options),
         ip_number::IPV6_ROUTE => skip_v6_option(ft, body, options),
         ip_number::IPV6_FRAG => classify_frag(ft, body, options),
         ip_number::AH => skip_auth_header(ft, body, options),
-        ip_number::IPV6_ICMP => classify_icmpv6(ft, body),
+        ip_number::IPV6_ICMP => classify_icmpv6(ft, body, options),
         ip_number::IPV6_OPTS => skip_v6_option(ft, body, options),
         _ => classify_unclassified(ft),
     }
@@ -328,26 +352,59 @@ fn classify_frag(
     return Ok(ClassifierResult::FirstFragment);
 }
 
-fn classify_icmp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+fn classify_icmp(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPHeader>()];
     let icmp_header = ICMPHeader::ref_from_bytes(icmp_bytes).unwrap();
     ft.set_src_port(icmp_header.icmp_type as u16);
     ft.set_dst_port(icmp_header.icmp_code as u16);
+    // NOTE: we do not currently check ICMP length
+    if !options.ignore_bad_checksums
+        && !options.ignore_truncated_packets
+        && internet_checksum::checksum(body) != [0u8; 2]
+    {
+        return Err("Bad L4 checksum");
+    }
     Ok(ClassifierResult::OK)
 }
 
-fn classify_icmpv6(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+fn classify_icmpv6(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPv6Header>()];
     let icmp_header = ICMPv6Header::ref_from_bytes(icmp_bytes).unwrap();
     ft.set_src_port(icmp_header.icmp_type as u16);
     ft.set_dst_port(icmp_header.icmp_code as u16);
+    // NOTE: we do not currently check ICMPv6 length
+    if !options.ignore_bad_checksums
+        && !options.ignore_truncated_packets
+        && !validate_inet_l4_checksum_with_5t(&ft, body)
+    {
+        return Err("Bad L4 checksum");
+    }
     Ok(ClassifierResult::OK)
 }
 
-fn classify_tcp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+fn classify_tcp(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<TCPHeader>() > body.len() {
         return Err("Packet length error");
+    }
+
+    if !options.ignore_bad_checksums
+        && !options.ignore_truncated_packets
+        && !validate_inet_l4_checksum_with_5t(&ft, body)
+    {
+        return Err("Bad L4 checksum");
     }
 
     let header_bytes = &body[..size_of::<TCPHeader>()];
@@ -357,7 +414,7 @@ fn classify_tcp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'s
     ft.set_dst_port(tcp_header.dst_port.get());
 
     let data_offset = (tcp_header.data_offset_and_reserved >> 4) * 4;
-    if data_offset < 20 || data_offset as usize > body.len() {
+    if data_offset < size_of::<TCPHeader>() as u8 || data_offset as usize > body.len() {
         return Err("Packet length error");
     }
 
@@ -376,6 +433,14 @@ fn classify_udp(
     let header_bytes = &body[..size_of::<UDPHeader>()];
     let udp_header = UDPHeader::ref_from_bytes(header_bytes).unwrap();
 
+    if !options.ignore_bad_checksums
+        && !options.ignore_truncated_packets
+        && udp_header.checksum != [0u8; 2]
+        && !validate_inet_l4_checksum_with_5t(&ft, body)
+    {
+        return Err("Bad L4 checksum");
+    }
+
     ft.set_src_port(udp_header.src_port.get());
     ft.set_dst_port(udp_header.dst_port.get());
 
@@ -393,6 +458,16 @@ fn classify_unclassified(ft: &mut FiveTuple) -> Result<ClassifierResult, &'stati
     ft.set_src_port(0);
     ft.set_dst_port(0);
     Ok(ClassifierResult::UnclassifiedL4)
+}
+
+fn validate_inet_l4_checksum_with_5t(ft: &FiveTuple, data: &[u8]) -> bool {
+    validate_inet_l4_checksum(
+        ft.l3_type.0,
+        &ft.src_address,
+        &ft.dst_address,
+        ft.l4_protocol,
+        data,
+    )
 }
 
 #[cfg(test)]
@@ -483,7 +558,7 @@ mod tests {
         let packet_data =
             [
                 0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x20, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+                0x40, 0x06, 0x50, 0xC6, 0x01, 0x02, 0x03, 0x04,
                 0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
@@ -521,7 +596,7 @@ mod tests {
         let packet_data =
             [
                 0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0xC0,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+                0x40, 0x06, 0x70, 0x06, 0x01, 0x02, 0x03, 0x04,
                 0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
@@ -627,14 +702,8 @@ mod tests {
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
-        assert_eq!(
-            [0x04, 0x03, 0x02, 0x01],
-            metadata.get_dst_address().read_as_v4()
-        );
-        assert_eq!(
-            [0x01, 0x02, 0x03, 0x04],
-            metadata.get_src_address().read_as_v4()
-        );
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_l4_protocol());
@@ -746,8 +815,8 @@ mod tests {
             },
             metadata.get_src_address()
         );
-        assert_eq!(6363u16, metadata.get_dst_port_hbo());
-        assert_eq!(6363u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(17u8, metadata.get_l4_protocol());
     }
 
@@ -1174,7 +1243,7 @@ mod tests {
         #[rustfmt::skip]
         let packet_data = [
             0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
-            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x40, 0x06, 0x70, 0xCE, 0x01, 0x02, 0x03, 0x04,
             0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
@@ -1210,7 +1279,7 @@ mod tests {
             0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
             0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x30, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
+            0x30, 0x02, 0x20, 0x00, 0xA5, 0x75, 0x00, 0x00,
         ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -1244,7 +1313,7 @@ mod tests {
             0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
             0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x30, 0x02, 0x30, 0x00, 0x85, 0x75, 0x00, 0x00,
+            0x30, 0x02, 0x30, 0x00, 0x95, 0x75, 0x00, 0x00,
         ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -1277,7 +1346,7 @@ mod tests {
         #[rustfmt::skip]
         let packet_data = [
             0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
-            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x40, 0x06, 0x70, 0xCE, 0x01, 0x02, 0x03, 0x04,
             0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
@@ -1452,10 +1521,11 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (metadata, body) = packet.metadata_mut_and_body_mut();
+        let options = ClassifierOptions::default().ignore_bad_checksums(true);
 
         assert_eq!(
             ClassifierResult::OK,
-            classify(metadata.five_tuple_mut(), body).unwrap()
+            classify_with_options(metadata.five_tuple_mut(), body, &options).unwrap()
         );
 
         let metadata = packet.metadata();
@@ -1480,7 +1550,7 @@ mod tests {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
 
-        // echo request 127.0.0.1 -> 127.0.0.1
+        // echo request 127.0.0.1 -> 127.0.0.1 (checksum invalid)
         #[rustfmt::skip]
         let packet_data: &[u8] = &[
             0x45, 0x00, 0x00, 0x54, 0x41, 0xde, 0x00, 0x00,
@@ -1498,10 +1568,11 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (metadata, body) = packet.metadata_mut_and_body_mut();
+        let options = ClassifierOptions::default().ignore_bad_checksums(true);
 
         assert_eq!(
             ClassifierResult::OK,
-            classify(metadata.five_tuple_mut(), body).unwrap()
+            classify_with_options(metadata.five_tuple_mut(), body, &options).unwrap()
         );
 
         let metadata = packet.metadata();
@@ -1536,10 +1607,11 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (metadata, body) = packet.metadata_mut_and_body_mut();
+        let options = ClassifierOptions::default().ignore_bad_checksums(true);
 
         assert_eq!(
             ClassifierResult::OK,
-            classify(metadata.five_tuple_mut(), body).unwrap()
+            classify_with_options(metadata.five_tuple_mut(), body, &options).unwrap()
         );
 
         let metadata = packet.metadata();
