@@ -4,6 +4,7 @@ use crate::classifier;
 use crate::defs::FiveTuple;
 use crate::packet::Packet;
 use bytes::Buf;
+use internet_checksum;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::*;
 use zpr::packet_info::{CompressionMode, L3Type};
@@ -89,7 +90,7 @@ fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_addre
     hdr.dst_address = dst_address.octets();
 
     let header_len = (hl as usize) << 2;
-    let csum = net_defs::inet_checksum(&pkt.body()[..header_len]);
+    let csum = internet_checksum::checksum(&pkt.body()[..header_len]);
     classifier::IPv4Header::mut_from_prefix(pkt.body_mut())
         .unwrap()
         .0

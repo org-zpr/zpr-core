@@ -22,6 +22,7 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use classifier::{IPv4Header, IPv6Header};
+use internet_checksum;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -578,7 +579,8 @@ pub fn maybe_capture_batch<'a>(
 pub fn encrypt_null(pkt: &mut Packet) {
     // RFC 6.5 § 5.25.2
     pkt.put(
-        net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice(),
+        internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
+            .as_slice(),
     );
 }
 
@@ -639,7 +641,9 @@ impl From<DecryptError> for FastpathCounterType {
 /// "Decrypt" a packet using NULL encryption.
 fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
-    if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
+    if internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
+        != [0u8; 2]
+    {
         return Err(DecryptError::BadChecksum);
     }
 

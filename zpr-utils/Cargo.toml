@@ -1,8 +1,9 @@
 [package]
 name = "zpr-utils"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 [dependencies]
+internet-checksum = { workspace = true }
 zerocopy = { workspace = true }
 zpr = { workspace = true }

@@ -9,6 +9,7 @@ capnp = { version = "0.25.0", features = ["sync_reader"] }
 capnp-rpc = "0.25.0"
 clap = { version = "4.5.23", features = ["derive"] }
 clap_complete = "4.5.57"
+internet-checksum = "0.2.1"
 ipnet = "2.11.0"
 libc = "0.2.175"
 nix = "0.29.0"
