@@ -443,7 +443,15 @@ impl LinkStateWrapper {
         asm: &Arc<Assembly>,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
-        debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+        match event {
+            LinkEvent::Timeout { .. } | LinkEvent::ReceivedKeepAliveResponse => {
+                // Noisy so these go out on TRACE level.
+                trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+            }
+            _ => {
+                debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+            }
+        }
 
         match event {
             LinkEvent::Start => self.process_start(asm),
