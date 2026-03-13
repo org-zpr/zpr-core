@@ -571,10 +571,9 @@ impl LinkStateWrapper {
             match peer_cert {
                 PeerCertificate::Unverified(cert) => {
                     warn!(target: LINK_STATE, "Link {link_id} has unverified name {:?}", cert.subject_name());
-
-                    // Nodes should accept unverified certs from adapters.
-                    // Nodes should not accept unverified certs from other nodes.
-                    // Adapters should not accept unverified certs from nodes.
+                    // - Nodes should accept unverified certs from adapters.
+                    // - Nodes should not accept unverified certs from other nodes.
+                    // - Adapters should not accept unverified certs from nodes.
                     match self.link_type {
                         LinkType::AdapterToNode => {
                             return Err(LinkStateError::InvalidOperation(

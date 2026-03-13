@@ -38,17 +38,41 @@ want a service or two that run on the net, plus some client adapters
 that connect in and access the services.
 
 
-1. Create a certificate authority keypair.
-2. Create a "zpr" RSA keypair (used for signing policy and more)
-3. Create Noise keys and signed certificates for all adapters and the
-   node.
-4. Create bootstrap keys for client adapters.
-5. Create a configuration file for your node.
-6. Create a configuration file for your visa service and its adapter.
-7. Write a policy and compile it.
-8. Start up the node, the visa service and the visa service adapter.
+### Create authentication keys to share with the visa service
+
+In order to connect to the initial ZPRnet each adapter needs to share an
+RSA key with the visa service.  This is done via policy.  Since we are
+going to need a node and a visa service we need two keys.
+
+```sh
+openssl genrsa -out node-private-key.pem
+openssl genrsa -out vs-private-key.pem
+```
+
+The private keys stay with the visa service adapter and node, but we need
+to put the public keys in the policy, so first extract them:
+
+```sh
+openssl rsa -in node-private-key.pem -pubout -out node-public-key.pem
+openssl rsa -in vs-private-key.pem -pubout -out vs-public-key.pem
+```
+
+Then in the policy `zplc` file, add a bootstrap section that looks like 
+this:
+
+```toml
+[bootstrap]
+"node.zpr.org" = "/path/to/node-public-key.pem"
+"vs.zpr" = "/path/to/vs-public-key.pem"
+```
 
 ### Create a certificate authority keypair
+
+In addition to the visa service authentication, there is a separate 
+authentication check when the link is first brought up between an adapter
+and a node.  This uses certificates holding noise keys and signed by a 
+certificate authority (CA).  Adapters verify the certs they get from
+a node.  So we need a certificate authority:
 
 We'll put the authority related file into a directory named `authority`.
 You will be prompted for a pass phrase. You'll need to use that whenever
@@ -67,80 +91,37 @@ openssl genrsa -aes256 -out auth-ca.key 4096
 openssl req -x509 -new -nodes -key auth-ca.key -sha256 -days 1826 -out auth-ca.crt
 ```
 
-### Createa a "zpr" RSA keypair
+### Create a signed noise certificate for the node
 
-This key and its usage is required because we are still using the
-prototype Visa Service.  We just create a key and sign it using our
-recently created authority.
+Using the handy `zpr-pki` script:
 
-```bash
-# Create the key
-openssl genrsa -out zpr-rsa-key.pem 2048
+```sh
+./integration-test/lib/zpr-pki genkey >node-noise.key
 
-# Create the certificate request
-openssl req -new -key zpr-rsa-key.pem -out zpr.csr
-```
-
-Then use the authority created earlier to generate a certificate. Note that this
-certificate will be used for signing policies and for using TLS on the admin
-interface so you need to add some extensions when you generate the certificate.
-
-Create a file named `sign.ext` and with these contents (replace the '*.zpr.org' with
-a domain you are using):
-
-```
-authorityKeyIdentifier=keyid,issuer
-basicConstraints=CA:FALSE
-keyUsage = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment
-subjectAltName = DNS:*.zpr.org
-```
-
-Then create the certificate:
-
-```bash
-openssl x509 -req -in zpr.csr -CA auth-ca.crt -CAkey auth-ca.key -CAcreateserial \
-  -out zpr-rsa.crt -days 1825 -sha256 -extfile sign.ext
-```
-
-### Create Noise keys and signed certificates for all
-
-Use the `tools/zpr-pki` tool to create NOISE keys for all the participants:
-- `./zpr-pki genkey >node-noise.key`
-- `./zpr-pki genkey >adapter-vs-noise.key`
-- (and so on for other adapters)
-
-Once you have private key (PEM) files, you need to create certificates as follows:
-
-```bash
 # First extract a public key from the private one
-./zpr-pki pubkey <node-noise.key >node-noise-pub.pem
+./integration-test/lib/zpr-pki pubkey <node-noise.key >node-noise-pub.pem
 
 # Then sign the public key
 ./zpr-pki gensignedcert authority/auth-ca.crt authority/auth-ca.key \
   /CN=node.zpr.org 365 < node-noise-pub.pem >node-noise.crt
 ```
-Do that for all the NOISE keys you have. Note that the visa servcie NOISE certificate
-**must** use `vs.zpr` for its CN.
 
+### Create TLS credentials for the visa service
 
-### Create RSA keys for any client adapters
+These are used over the HTTPS admin interface.  By default the visa service will 
+look for two files:
 
-Since we will not be setting up an authentication service, you must embed public keys for
-all client adapters (not nodes) in your policy.  In this tutorial the only explicit
-client adapter is the one for the visa service, to create that do this:
+- `admin-tls-cert.pem`
+- `admin-tls-key.pem`
 
-```bash
-# Create the key
-openssl genrsa -out vs-zpr-rsa-key.pem 2048
+Create them like so:
 
-# Extract the public key
-openssl rsa -pubout -in vs-zpr-rsa-key.pem -out vs-zpr-pubkey.pem
+```sh
+openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out admin-tls-cert.pem -keyout admin-tls-key.pem
 ```
 
-Repeat that operation for any other client adapters you have.
 
-
-### Create a configuration file for your node.
+### Create a configuration file for your node
 
 Assuming:
 - Node substrate (dock) address is `129.6.7.1`
@@ -150,100 +131,99 @@ Sample configuration, place in a file named `node-conf.toml`.
 
 ```toml
 [global]
-name = "node"
-ca_file = "auth-ca.crt"
+name = "node.zpr.org"
 certificate_file = "node-noise.crt"
 private_key_file = "node-noise.key"
 self_addr = "129.6.7.1:5000"
 zpr_addr = [ "fd5a:5052:90de::1" ]
 tun_if = "tun9"
+
+[authentication]
+auth_private_key = "node-private-key.pem"
 ```
 
-Note that the key and certificate files referenced in the node configuration must
-be present in the same directory as the configuration file.
 
-
-### Create a configuration file for your visa service and its adapter.
-
-Place the visa service configuration in a file named, `vs-config.yaml`.
-
-```yaml
-adapter_cert: adapter-vs-noise.crt
-root_ca: auth-ca.crt
-vs_cert: zpr-rsa.crt
-vs_key: zpr-rsa-key.pem
-```
-
-The adapter for the visa service needs to know the substrate address of the node
-which above we set to `129.6.7.1`.
-
-
-The visa service adapter configuration should go in `adapter-vs-conf.toml`:
+### Create a configuration file for the visa service adapter
 
 ```toml
 [global]
-name = "vs"
-ca_file = "auth-ca.crt"
-certificate_file = "adapter-vs-noise.crt"
-private_key_file = "adapter-vs-noise.key"
-zpr_addr = [ "fd5a:5052::1" ] # visa service well known addr
+zpr_addr = [ "fd5a:5052::1" ]
 tun_if = "tun9"
 
 [adapter]
+node = "vs.zpr"
 node_addr = "129.6.7.1:5000"
 node_public_key_file = "node-noise-pub.pem"
-bootstrap_key = "vs-zpr-rsa-key.pem"
+bootstrap_key = "vs-private-key.pem"
 ```
 
-Note that the key and certificate files referenced in the configuration files
-be present in the same directory as the configuration file.
+
+### Configure the visa service (optional)
+
+The visa service does not require custom configuration. However if you want 
+to customize it you can get it to spit out a configuration file. The default
+name for it is `vs.toml`, so:
+
+```sh
+./vs --gen-config >vs.toml
+```
+
+
+### Start Valkey
+
+Valkey is **required** by the visa serivce.
+
+On linux systems it may be installed as a service:
+
+```sh
+# check status
+systemctl status valkey-server
+
+# and if not running:
+systemctl start valkey-server
+```
+
+Or you can just start it in the foreground in a termina;
+
+```sh
+valkey-server
+```
+
 
 ### Write a policy and compile it.
 
-Here is a simple policy to let any adapter with a signed Noise key access
-some service called a WebService.
+Here is a simple policy to let any connected "user" access a "WebService".
 
 We assume:
 - WebService is connected using an adapter with `CN=web.zpr.org`.
-- WebService has a bootstrap public RSA key in `web-zpr-pubkey.pem`.
+- WebService has a bootstrap public RSA key in `web-public-key.pem`.
 - WebService is accessed using HTTP port 80.
 
 Create a file called `zpr-full-access.zpl` with these contents:
 
 ```
-Define adapter as an endpoint with 'zpr.adapter.cn'.
 Define WebService as a service with endpoint.zpr.adapter.cn:'web.zpr.org'.
-Allow zpr.adapter.cn: adapters to access WebService.
+Allow user to access WebService.
 ```
 
 Then write a configuration file.
 Create a file called `zpr-full-access.zplc` with these contents.
 
 ```toml
-[resolver]
-order = ["hosts", "dns"]
-
-[resolver.hosts]
-"node0.zpr" = "fd5a:5052:90de::1"
-"node0.overlay" = "129.6.7.1"
-
 [nodes."node"]
-key = "<node-public-noise-key-in-base64-here>"
 provider = [ ["endpoint.zpr.adapter.cn", "node.zpr.org"]]
-zpr_address = "node0.zpr"
-interfaces = ["in1"]
-in1.netaddr = "node0.overlay:5000"
+zpr_address = "fd5a:5052:90de::1"
 
 [trusted_services.default]
-cert_path = "auth-ca.crt"
 
 [visa_service]
 dock_node = "node"
 admin_attrs = [ [ "endpoint.zpr.adapter.cn", "admin.zpr.org" ] ]
 
 [bootstrap]
-"vs.zpr" = "vs-zpr-pubkey.pem"
-"web.zpr.org" = "web-zpr-pubkey.pem"
+"node.zpr.org" = "node-public-key.pem"
+"vs.zpr" = "vs-public-key.pem"
+"web.zpr.org" = "web-public-key.pem"
 
 [protocols.http]
 l4protocol = "iana.TCP"
@@ -256,9 +236,9 @@ protocol = "http"
 To compile, use the compiler:
 
 ```bash
-zplc -k zpr-rsa-key.pem zpr-full-access.zpl
+zplc zpr-full-access.zpl
 
-# This will create the binary policy file, "zpr-full-access.bin"
+# This will create the binary policy file, "zpr-full-access.bin2"
 ```
 
 ### Start up the node, the visa service and the visa service adapter.
@@ -287,7 +267,7 @@ The binary also expects to be able to access directory `/var/run/zpr`, so:
 
 Then you can start the node:
 
-    sudo ph node -c /path/to/node-conf.toml
+    ./ph node -c /path/to/node-conf.toml
 
 If the visa service is also running on linux as this guide assumes, then we
 need to configure its TUN interface similar to what we did for the node.
@@ -301,11 +281,11 @@ sudo ip link set tun9 up
 
 Now start the visa service:
 
-    vsevrice -c /path/to/vs-config.yaml -p zpr-full-access.bin
+    ./vs /path/to/zpr-full-access.bin2
 
 On the visa service host, in another terminal start the adapter:
 
-    sudo ph adapter -c /path/to/adapter-vs-conf.toml
+    ./ph adapter -c /path/to/adapter-vs-conf.toml
 
 
 Now you can attach additional adapters and start up the "WebService".
@@ -313,6 +293,8 @@ Now you can attach additional adapters and start up the "WebService".
 
 ## Updates
 
++ March 13, 2026
+  + Rewrote the setup steps for latest code.
 + Aug 20, 2025
   + `device` class renamed to `endpoint`.
 + July 31, 2025

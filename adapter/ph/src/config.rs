@@ -118,7 +118,8 @@ pub struct Config {
     pub self_addr: SocketAddr,
 
     /// Path to a PEM file containing the Certificate Authority certificate.
-    pub ca_file: PathBuf,
+    /// Optional and if present is used by the link management system to verify passed noise certificates.
+    pub ca_file: Option<PathBuf>,
 
     /// Path to a PEM file containing the signed certificate listing the noise public key.
     pub certificate_file: Option<PathBuf>,
@@ -279,10 +280,9 @@ impl Config {
                 Err(e) => return Err(e),
             }
         }
-        if self.ca_file.to_str().unwrap().is_empty() {
-            return Err("ca_file".arg_missing());
+        if let Some(ca_file) = &self.ca_file {
+            check_file_exists("certificate authority file", ca_file)?;
         }
-        check_file_exists("certificate authority file", &self.ca_file)?;
         if let Some(ref cf) = self.certificate_file {
             check_file_exists("certificate file", cf)?;
         }
@@ -359,9 +359,9 @@ impl Config {
         }
         if let Some(ca_file) = &config.ca_file {
             if ca_file.is_relative() {
-                self.ca_file = base_dir.join(ca_file);
+                self.ca_file = Some(base_dir.join(ca_file));
             } else {
-                self.ca_file = ca_file.clone();
+                self.ca_file = Some(ca_file.clone());
             }
         }
         if let Some(certificate_file) = &config.certificate_file {
@@ -506,14 +506,14 @@ impl Config {
         if let Some(ca_file) = &common.ca_file {
             let cf = PathBuf::from(ca_file);
             if cf.is_relative() {
-                self.ca_file = fs::canonicalize(cf).or_else(|e| {
+                self.ca_file = Some(fs::canonicalize(cf).or_else(|e| {
                     Err(ArgsError::PathError(format!(
                         "path error for ca_file: {:?}",
                         e
                     )))
-                })?;
+                })?);
             } else {
-                self.ca_file = PathBuf::from(ca_file);
+                self.ca_file = Some(PathBuf::from(ca_file));
             }
         }
         if let Some(certificate_file) = &common.certificate_file {
@@ -586,7 +586,7 @@ impl Default for Config {
             control_path: get_data_home().join("control.sock"),
             capture_path: get_data_home().join("capture.sock"),
             self_addr: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0),
-            ca_file: PathBuf::from(""),
+            ca_file: None,
             certificate_file: None,
             private_key_file: None,
             private_key_data: None,

@@ -50,13 +50,13 @@ struct CertExchgHdr {
 #[derive(Clone)]
 pub struct KmCertExchange {
     local_cert: X509,
-    authority_cert: X509,
+    authority_cert: Option<X509>,
 }
 
 impl KmCertExchange {
     /// - `cert` - the certificate of the initiator.
     /// - `authority_cert` - the certificate of the authority that is expected to have signed the responders certificate.
-    pub fn new(cert: X509, authority_cert: X509) -> Self {
+    pub fn new(cert: X509, authority_cert: Option<X509>) -> Self {
         KmCertExchange {
             local_cert: cert,
             authority_cert,
@@ -80,7 +80,7 @@ impl KmCertExchange {
                 return Err(ParseError::PEMFormatError);
             }
         };
-        Ok(KmCertExchange::new(cert, authority_cert))
+        Ok(KmCertExchange::new(cert, Some(authority_cert)))
     }
 
     /// Write a cert exhange payload into the supplied buffer.
@@ -151,17 +151,21 @@ impl KmCertExchange {
             }
         };
 
-        let authority_pkey = self.authority_cert.public_key().unwrap(); // TODO: check this unwrap in ctor
-        let is_verified = match initiator_cert.verify(&authority_pkey) {
-            Ok(true) => true,
-            Ok(false) => {
-                warn!(target: KEY_MGMT, "cert failed signature verification");
-                false
+        let is_verified = if let Some(authority_cert) = &self.authority_cert {
+            let authority_pkey = authority_cert.public_key().unwrap(); // TODO: check this unwrap in ctor
+            match initiator_cert.verify(&authority_pkey) {
+                Ok(true) => true,
+                Ok(false) => {
+                    warn!(target: KEY_MGMT, "cert failed signature verification");
+                    false
+                }
+                Err(e) => {
+                    error!(target: KEY_MGMT, "cert verification failed with unexpected error: {e}");
+                    return Err(CertExchangeError::CertificateVerificationError);
+                }
             }
-            Err(e) => {
-                error!(target: KEY_MGMT, "cert verification failed with unexpected error: {e}");
-                return Err(CertExchangeError::CertificateVerificationError);
-            }
+        } else {
+            false
         };
 
         // Extract the public key from the cert and check it against expected

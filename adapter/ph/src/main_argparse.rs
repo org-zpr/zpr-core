@@ -364,7 +364,7 @@ mod test {
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
         );
-        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.ca_file, Some(ca_file.get_path().into()));
         assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
@@ -540,7 +540,7 @@ mod test {
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
         );
-        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.ca_file, Some(ca_file.get_path().into()));
         assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
@@ -615,7 +615,7 @@ mod test {
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
-        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.ca_file, Some(ca_file.get_path().into()));
         assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
@@ -678,7 +678,7 @@ mod test {
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
-        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.ca_file, Some(ca_file.get_path().into()));
         assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
@@ -725,7 +725,7 @@ mod test {
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
-        assert_eq!(config.ca_file, PathBuf::from(&ca_file_fname));
+        assert_eq!(config.ca_file, Some(PathBuf::from(&ca_file_fname)));
         assert_eq!(
             config.certificate_file,
             Some(PathBuf::from(&cert_file_fname))

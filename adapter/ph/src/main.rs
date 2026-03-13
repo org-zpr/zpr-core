@@ -209,14 +209,24 @@ fn main() -> ExitCode {
             }
         },
     };
-    let ca_cert = match load_cert(&config.ca_file) {
-        Ok(cert) => cert,
-        Err(e) => {
-            error!(target: STARTUP, "failed to load CA certificate from {:?}: {e:?}", config.ca_file);
-            return ExitCode::FAILURE;
-        }
+    let opt_ca_cert = if let Some(ref ca_file) = config.ca_file {
+        let ca_cert = match load_cert(&ca_file) {
+            Ok(cert) => cert,
+            Err(e) => {
+                error!(target: STARTUP, "failed to load CA certificate from {:?}: {e:?}", ca_file);
+                return ExitCode::FAILURE;
+            }
+        };
+        Some(ca_cert)
+    } else {
+        None
     };
-    certx = KmCertExchange::new(self_cert, ca_cert);
+    // Adapters still need a ca_cert to verify a nodes cert.
+    if ph_mode == PhMode::Adapter && opt_ca_cert.is_none() {
+        error!(target: STARTUP, "adapters require a CA certificate (set ca_cert in config)");
+        return ExitCode::FAILURE;
+    }
+    certx = KmCertExchange::new(self_cert, opt_ca_cert);
 
     //
     // instantiate bounded resources (queues and buffers)
