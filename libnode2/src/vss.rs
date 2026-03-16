@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_rustls::TlsAcceptor;
 use tokio_util::compat::*;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use zpr::vsapi::v1;
 use zpr::vsapi_types::{ApiResponseError, ErrorCode, Param, ServiceDescriptor, VisaOp};
 use zpr::write_to::WriteTo;
@@ -499,7 +499,7 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
         _params: v1::v_s_s_handle::PingParams,
         mut results: v1::v_s_s_handle::PingResults,
     ) -> Result<(), capnp::Error> {
-        debug!(target: VSS_RPC, "ping called by {}", self.remote);
+        trace!(target: VSS_RPC, "ping called by {}", self.remote);
         let mut res_builder = results.get().init_res();
         res_builder.set_ok(());
         self.data.borrow_mut().last_ping = Some(std::time::Instant::now());

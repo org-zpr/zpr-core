@@ -35,6 +35,9 @@ pub enum VSApiError {
 
     #[error("TLS error: {0}")]
     TLSError(String),
+
+    #[error("operation timed out: {0}")]
+    Timeout(String),
 }
 
 #[derive(Debug, Error)]

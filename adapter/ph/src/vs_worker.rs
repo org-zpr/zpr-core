@@ -41,6 +41,10 @@ pub async fn launch(
                             true
                         }
                         Err(e) => {
+                            // TODO: We will end up with a code 3 error here (no state) if the visa service
+                            // has denied our "reconnect" attempt. In that case we should clear state and
+                            // try again.  CLEAR STATE means all adapters need to re-auth and potentially
+                            // get new addresses.
                             error!(target: STARTUP, "failed to get access to visa service: {e:?}");
                             false
                         }
@@ -69,7 +73,7 @@ pub async fn launch(
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             error!(target: STARTUP, "VSConn lifecycle channel closed unexpectedly");
-                            panic!("VSConn lifecycle channel closed unexpectedly");
+                            panic!("VSConn lifecycle channel closed unexpectedly (1)");
                         }
                     }
                 }
@@ -120,7 +124,7 @@ async fn wait_for_runloop_start(lifecycle_rx: &mut broadcast::Receiver<VSConnLif
             }
             Err(broadcast::error::RecvError::Closed) => {
                 error!(target: STARTUP, "VSConn lifecycle channel closed unexpectedly");
-                panic!("VSConn lifecycle channel closed unexpectedly"); // can't recover?
+                panic!("VSConn lifecycle channel closed unexpectedly (2)"); // can't recover?
             }
         }
     }

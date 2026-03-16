@@ -27,6 +27,9 @@ const PARAM_ZPR_ADDR: &str = "zpr_addr";
 
 const LIFECYCLE_EVENT_BUFFER_SIZE: usize = 64;
 
+const VSAPI_PING_INTERVAL: Duration = Duration::from_secs(5);
+const VSAPI_MAX_PING_FAILURES: u32 = 2;
+
 #[derive(Debug)]
 pub struct VSConnectRequest {
     /// Connect will fail if this does not match policy.
@@ -58,6 +61,7 @@ type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
 type VSRegisterVssResponse = Result<Vec<VisaOp>, VSApiError>;
 type VSAuthorizeConnectResponse = Result<Connection, VSApiError>;
 type VSNotifyDisconnectResponse = Result<(), VSApiError>;
+type VSPingResponse = Result<(), VSApiError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -78,6 +82,8 @@ enum VS2Command {
         VSDisconnectNotice,
         oneshot::Sender<VSNotifyDisconnectResponse>,
     ),
+
+    Ping(oneshot::Sender<VSPingResponse>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -99,11 +105,32 @@ pub struct VSConn {
     node_cn: String,
     node_private_key: PKey<Private>,
     life_tx: broadcast::Sender<VSConnLifecycleEvent>,
+    connect_count: u64,
 }
 
 #[derive(Clone)]
 pub struct VSConnHandle {
     cmd_tx: mpsc::Sender<VS2Command>,
+}
+
+struct VSCommandState {
+    vs_service: vsapi2::visa_service::Client,
+    vs_handle: Option<vsapi2::v_s_handle::Client>,
+}
+
+impl VSCommandState {
+    pub fn new(vs_service: vsapi2::visa_service::Client) -> Self {
+        VSCommandState {
+            vs_service,
+            vs_handle: None,
+        }
+    }
+
+    /// This is used synchronously in the command handlers to check if
+    /// we are currently connected to the VS API.
+    fn is_connected(&self) -> bool {
+        self.vs_handle.is_some()
+    }
 }
 
 impl VSConn {
@@ -129,10 +156,11 @@ impl VSConn {
             node_cn,
             node_private_key,
             life_tx,
+            connect_count: 0,
         }
     }
 
-    /// Subscribe to broadcast lifecycle events from this VSConn.
+    /// Subscribe to recieve broadcast lifecycle events from this VSConn.
     pub fn subscribe_lifecycle_events(&self) -> broadcast::Receiver<VSConnLifecycleEvent> {
         self.life_tx.subscribe()
     }
@@ -193,148 +221,76 @@ impl VSConn {
         let vs_service: vsapi2::visa_service::Client =
             rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
+        let mut cmd_state = VSCommandState::new(vs_service);
+
         tokio::task::LocalSet::new()
             .run_until(async move {
                 tokio::task::spawn_local(rpc_system);
 
-                let mut vs_handle: Option<vsapi2::v_s_handle::Client> = None;
                 self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopStarts);
+                //let mut ping_interval = tokio::time::interval(VSAPI_PING_INTERVAL);
 
+                let ping_timeout = tokio::time::sleep(VSAPI_PING_INTERVAL);
+                tokio::pin!(ping_timeout);
+                let mut ping_failures = 0;
 
-                // TODO: The VSAPI does support a PING but we are not doing it.
-                // So, rework this WHILE statement so that we can do a periodic
-                // ping to the VS.
-
-
-
-                // Then loop over commands.
-                while let Some(cmd) = self.cmd_rx.recv().await {
-                    match cmd {
-                        VS2Command::Stop(deregister) => {
-                            debug!(target: VS_RPC, "VSConn: stop");
-                            if deregister && let Some(ref handle) = vs_handle {
-                                let mut disconnect_request = handle.notify_disconnect_request();
-                                let mut dnotice_bldr = disconnect_request.get().init_req();
-
-                                // We are disconnecting "self" so we do not set a ZPR addr.
-
-                                dnotice_bldr
-                                    .set_reason_code(vsapi2::DisconnectReason::NodeShutdown);
-
-                                debug!(target: VS_RPC, "VS-API -> notify_disconnect");
-                                let disconnect_request_response =
-                                    disconnect_request.send().promise.await?;
-                                let ok_or_err = disconnect_request_response.get()?.get_res()?;
-                                match ok_or_err.which()? {
-                                    vsapi2::ok_or_error::Which::Ok(_) => {
-                                        info!(target: VS_RPC, "VS API notify_disconnect succeeded");
-                                    }
-                                    vsapi2::ok_or_error::Which::Error(err_obj) => {
-                                        let err_obj = err_obj?;
-                                        let err = new_coded_error(err_obj);
-
-                                        // There is no back channel for the Stop command so we just log the error.
-                                        error!(
-                                            target: VS_RPC,
-                                            "VS API notify_disconnect failed: {:?}", err
-                                        );
+                // Then loop over commands and periodically ping.
+                loop {
+                    tokio::select! {
+                        // If we get a command, handle it.
+                        cmd = self.cmd_rx.recv() => {
+                            match cmd {
+                                Some(cmd) => {
+                                    let is_stop_cmd = matches!(cmd, VS2Command::Stop(_));
+                                    match self.handle_command(&mut cmd_state, cmd).await {
+                                        Ok(_) => {}
+                                        Err(e) => {
+                                            error!(target: VS_RPC, "VSConn: handle_command error: {:?}", e);
+                                            self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopExits);
+                                            return Err(e.into());
+                                        }
+                                    };
+                                    if is_stop_cmd {
+                                        break;
                                     }
                                 }
+                                None => {
+                                    info!(target: VS_RPC, "VSConn: command channel closed, exiting run loop");
+                                    // TODO: What is the cause here? Is this an error or just an exit?
+                                    break;
+                                }
                             }
-
-                            // This is the only clean break from the run loop and the only way to get an
-                            // OK out of the run function.
-                            break;
                         }
 
-                        VS2Command::Connect(req, resp_tx) => {
-                            debug!(target: VS_RPC, "VSConn: connect");
-                            let resp = if vs_handle.is_some() {
-                                Err(VSApiError::CommandFailed(
-                                    "connect called but already connected to VS-API".to_string(),
-                                ))
-                            } else {
-                                self.do_connect(&vs_service, req).await
-                            };
-
-                            let retval = match resp {
-                                Ok(handle) => {
-                                    info!(target: VS_RPC, "VS API connect succeeded");
-                                    vs_handle = Some(handle);
-                                    self.send_lifecycle_event(VSConnLifecycleEvent::ConnectedToVsApi);
-                                    Ok(())
+                        // If the ping interval elapses, do a ping (not implemented yet).
+                        () = &mut ping_timeout => {
+                            if !cmd_state.is_connected() {
+                                // Not connected, just reset the ping timer.
+                                ping_timeout.as_mut().reset(tokio::time::Instant::now() + VSAPI_PING_INTERVAL);
+                                continue;
+                            }
+                            match self.do_ping(cmd_state.vs_handle.as_ref().unwrap()).await {
+                                Ok(_) => {
+                                    trace!(target: VS_RPC, "VSConn: ping successful");
+                                    ping_failures = 0;
+                                    ping_timeout.as_mut().reset(tokio::time::Instant::now() + VSAPI_PING_INTERVAL);
                                 }
                                 Err(e) => {
-                                    error!(target: VS_RPC, "VS API connect failed: {:?}", e);
-                                    Err(e)
+                                    ping_failures += 1;
+                                    warn!(target: VS_RPC, "VSConn: ping error (count = {ping_failures}): {:?}", e);
+                                    if ping_failures >= VSAPI_MAX_PING_FAILURES {
+                                        error!(target: VS_RPC, "VSConn: maximum ping failures reached, exiting run loop");
+                                        self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopExits);
+                                        return Err(VSApiError::Timeout("ping".to_string()).into());
+                                    }
+                                    ping_timeout.as_mut().reset(tokio::time::Instant::now() + Duration::from_secs(1));
                                 }
-                            };
-
-                            if let Err(e) = resp_tx.send(retval) {
-                                error!(target: VS_RPC, "failed to send connect response: {:?}", e);
-                            }
-                        }
-
-                        VS2Command::VisaRequest(req, resp_tx) => {
-                            debug!(target: VS_RPC, "VSConn: visa_request");
-                            let resp = if vs_handle.is_none() {
-                                Err(VSApiError::CommandFailed(
-                                    "not connected to VS-API".to_string(),
-                                ))
-                            } else {
-                                self.do_visa_request(vs_handle.as_ref().unwrap(), req).await
-                            };
-                            if let Err(e) = resp_tx.send(resp) {
-                                error!(target: VS_RPC, "failed to send visa_request response: {:?}", e);
-                            }
-                        }
-
-                        VS2Command::RegisterVss(saddr, resp_tx) => {
-                            debug!(target: VS_RPC, "VSConn: register_vss");
-                            let resp = if vs_handle.is_none() {
-                                Err(VSApiError::CommandFailed(
-                                    "not connected to VS-API".to_string(),
-                                ))
-                            } else {
-                                self.do_register_vss(vs_handle.as_ref().unwrap(), saddr).await
-                            };
-                            if let Err(e) = resp_tx.send(resp) {
-                                error!(target: VS_RPC, "failed to send register_vss response: {:?}", e);
-                            }
-                        }
-
-                        VS2Command::AuthorizeConnect(req, resp_tx) => {
-                            debug!(target: VS_RPC, "VSConn: authorize_connect");
-                            let resp = if vs_handle.is_none() {
-                                Err(VSApiError::CommandFailed(
-                                    "not connected to VS-API".to_string(),
-                                ))
-                            } else {
-                                self.do_authorize_connect(vs_handle.as_ref().unwrap(), req)
-                                    .await
-                            };
-                            if let Err(e) = resp_tx.send(resp) {
-                                error!(target: VS_RPC, "failed to send authorize_connect response: {:?}", e);
-                            }
-                        }
-
-                        VS2Command::NotifyDisconnect(req, resp_tx) => {
-                            debug!(target: VS_RPC, "VSConn: notify_disconnect");
-                            let resp = if vs_handle.is_none() {
-                                Err(VSApiError::CommandFailed(
-                                    "not connected to VS-API".to_string(),
-                                ))
-                            } else {
-                                self.do_notify_disconnect(vs_handle.as_ref().unwrap(), req)
-                                    .await
-                            };
-                            if let Err(e) = resp_tx.send(resp) {
-                                error!(target: VS_RPC, "failed to send notify_disconnect response: {:?}", e);
                             }
                         }
                     }
                 }
-                info!(target: VS_RPC, "VSConn: exiting run loop");
+
+                info!(target: VS_RPC, "VSConn: exiting run loop (non-error)");
                 self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopExits);
                 Ok::<(), VSApiError>(())
             })
@@ -347,6 +303,155 @@ impl VSConn {
         }
     }
 
+    async fn handle_command(
+        &mut self,
+        cmd_state: &mut VSCommandState,
+        cmd: VS2Command,
+    ) -> Result<(), VSApiError> {
+        match cmd {
+            VS2Command::Stop(deregister) => {
+                debug!(target: VS_RPC, "VSConn: stop");
+                if deregister && let Some(ref handle) = cmd_state.vs_handle {
+                    let mut disconnect_request = handle.notify_disconnect_request();
+                    let mut dnotice_bldr = disconnect_request.get().init_req();
+
+                    // We are disconnecting "self" so we do not set a ZPR addr.
+
+                    dnotice_bldr.set_reason_code(vsapi2::DisconnectReason::NodeShutdown);
+
+                    debug!(target: VS_RPC, "VS-API -> notify_disconnect");
+                    let disconnect_request_response = disconnect_request.send().promise.await?;
+                    let ok_or_err = disconnect_request_response.get()?.get_res()?;
+                    match ok_or_err.which()? {
+                        vsapi2::ok_or_error::Which::Ok(_) => {
+                            info!(target: VS_RPC, "VS API notify_disconnect succeeded");
+                        }
+                        vsapi2::ok_or_error::Which::Error(err_obj) => {
+                            let err_obj = err_obj?;
+                            let err = new_coded_error(err_obj);
+
+                            // There is no back channel for the Stop command so we just log the error.
+                            error!(
+                                target: VS_RPC,
+                                "VS API notify_disconnect failed: {:?}", err
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            }
+
+            VS2Command::Connect(req, resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: connect");
+                let resp = if cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "connect called but already connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_connect(&cmd_state.vs_service, req).await
+                };
+
+                let retval = match resp {
+                    Ok(handle) => {
+                        info!(target: VS_RPC, "VS API connect succeeded");
+                        cmd_state.vs_handle = Some(handle);
+                        self.connect_count = self.connect_count.saturating_add(1);
+                        self.send_lifecycle_event(VSConnLifecycleEvent::ConnectedToVsApi);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!(target: VS_RPC, "VS API connect failed: {:?}", e);
+                        Err(e)
+                    }
+                };
+
+                if let Err(e) = resp_tx.send(retval) {
+                    error!(target: VS_RPC, "failed to send connect response: {:?}", e);
+                }
+                Ok(())
+            }
+
+            VS2Command::VisaRequest(req, resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: visa_request");
+                let resp = if !cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "not connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_visa_request(cmd_state.vs_handle.as_ref().unwrap(), req)
+                        .await
+                };
+                if let Err(e) = resp_tx.send(resp) {
+                    error!(target: VS_RPC, "failed to send visa_request response: {:?}", e);
+                }
+                Ok(())
+            }
+
+            VS2Command::RegisterVss(saddr, resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: register_vss");
+                let resp = if !cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "not connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_register_vss(cmd_state.vs_handle.as_ref().unwrap(), saddr)
+                        .await
+                };
+                if let Err(e) = resp_tx.send(resp) {
+                    error!(target: VS_RPC, "failed to send register_vss response: {:?}", e);
+                }
+                Ok(())
+            }
+
+            VS2Command::AuthorizeConnect(req, resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: authorize_connect");
+                let resp = if !cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "not connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_authorize_connect(cmd_state.vs_handle.as_ref().unwrap(), req)
+                        .await
+                };
+                if let Err(e) = resp_tx.send(resp) {
+                    error!(target: VS_RPC, "failed to send authorize_connect response: {:?}", e);
+                }
+                Ok(())
+            }
+
+            VS2Command::NotifyDisconnect(req, resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: notify_disconnect");
+                let resp = if !cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "not connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_notify_disconnect(cmd_state.vs_handle.as_ref().unwrap(), req)
+                        .await
+                };
+                if let Err(e) = resp_tx.send(resp) {
+                    error!(target: VS_RPC, "failed to send notify_disconnect response: {:?}", e);
+                }
+                Ok(())
+            }
+
+            VS2Command::Ping(resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: ping");
+                let resp = if !cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "not connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_ping(cmd_state.vs_handle.as_ref().unwrap()).await
+                };
+                if let Err(e) = resp_tx.send(resp) {
+                    error!(target: VS_RPC, "failed to send ping response: {:?}", e);
+                }
+                Ok(())
+            }
+        }
+    }
+
     async fn do_connect(
         &self,
         vs_service: &vsapi2::visa_service::Client,
@@ -356,7 +461,13 @@ impl VSConn {
 
         let mut vscr_bldr = vs_request.get().init_req();
         vscr_bldr.set_cn(&self.node_cn);
-        vscr_bldr.set_ctype(vsapi2::VSConnT::Reset);
+
+        let ctype = if self.connect_count > 0 {
+            vsapi2::VSConnT::Reconnect
+        } else {
+            vsapi2::VSConnT::Reset
+        };
+        vscr_bldr.set_ctype(ctype);
 
         // We set one param: the zpr_address for the node.
         let mut params_bldr = vscr_bldr.init_params(1);
@@ -375,7 +486,7 @@ impl VSConn {
             }
         }
 
-        debug!(target: VS_RPC, "VS-API -> connect");
+        debug!(target: VS_RPC, "VS-API -> connect (type = {:?})", ctype);
 
         let vs_request_response = vs_request.send().promise.await?;
         let gate_or_error = vs_request_response.get()?.get_resp()?;
@@ -553,6 +664,21 @@ impl VSConn {
             }
         }
     }
+
+    async fn do_ping(&self, vs_h: &vsapi2::v_s_handle::Client) -> Result<(), VSApiError> {
+        let ping_request = vs_h.ping_request();
+        trace!(target: VS_RPC, "VS-API -> ping");
+        let ping_response = ping_request.send().promise.await?;
+        let ok_or_err = ping_response.get()?.get_res()?;
+
+        match ok_or_err.which()? {
+            vsapi2::ok_or_error::Which::Ok(_) => Ok(()),
+            vsapi2::ok_or_error::Which::Error(err_obj) => {
+                let err_obj = err_obj?;
+                Err(new_coded_error(err_obj))
+            }
+        }
+    }
 }
 
 impl VSConnHandle {
@@ -605,6 +731,13 @@ impl VSConnHandle {
     pub async fn notify_disconnect(&self, req: VSDisconnectNotice) -> Result<(), VSApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::NotifyDisconnect(req, resp_tx);
+        self.send_command(cmd).await?;
+        resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
+    }
+
+    pub async fn ping(&self) -> Result<(), VSApiError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = VS2Command::Ping(resp_tx);
         self.send_command(cmd).await?;
         resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
     }
