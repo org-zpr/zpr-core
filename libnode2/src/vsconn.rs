@@ -200,6 +200,13 @@ impl VSConn {
                 let mut vs_handle: Option<vsapi2::v_s_handle::Client> = None;
                 self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopStarts);
 
+
+                // TODO: The VSAPI does support a PING but we are not doing it.
+                // So, rework this WHILE statement so that we can do a periodic
+                // ping to the VS.
+
+
+
                 // Then loop over commands.
                 while let Some(cmd) = self.cmd_rx.recv().await {
                     match cmd {
