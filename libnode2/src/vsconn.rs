@@ -12,6 +12,7 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
 use tokio_util::compat::*;
 use tracing::*;
@@ -280,9 +281,10 @@ impl VSConn {
                             if !cmd_state.is_connected() {
                                 // Not connected, just reset the ping timer.
                                 ping_timeout.as_mut().reset(tokio::time::Instant::now() + VSAPI_PING_INTERVAL);
+                                ping_failures = 0;
                                 continue;
                             }
-                            match self.do_ping(cmd_state.vs_handle.as_ref().unwrap()).await {
+                            match self.do_ping(cmd_state.vs_handle.as_ref().unwrap(), ping_failures).await {
                                 Ok(_) => {
                                     trace!(target: VS_RPC, "VSConn: ping successful");
                                     ping_failures = 0;
@@ -457,7 +459,7 @@ impl VSConn {
                         "not connected to VS-API".to_string(),
                     ))
                 } else {
-                    self.do_ping(cmd_state.vs_handle.as_ref().unwrap()).await
+                    self.do_ping(cmd_state.vs_handle.as_ref().unwrap(), 0).await
                 };
                 if let Err(e) = resp_tx.send(resp) {
                     error!(target: VS_RPC, "failed to send ping response: {:?}", e);
@@ -679,17 +681,44 @@ impl VSConn {
         }
     }
 
-    async fn do_ping(&self, vs_h: &vsapi2::v_s_handle::Client) -> Result<(), VSApiError> {
+    async fn do_ping(
+        &self,
+        vs_h: &vsapi2::v_s_handle::Client,
+        ping_failures: u32,
+    ) -> Result<(), VSApiError> {
         let ping_request = vs_h.ping_request();
         trace!(target: VS_RPC, "VS-API -> ping");
-        let ping_response = ping_request.send().promise.await?;
-        let ok_or_err = ping_response.get()?.get_res()?;
 
-        match ok_or_err.which()? {
-            vsapi2::ok_or_error::Which::Ok(_) => Ok(()),
-            vsapi2::ok_or_error::Which::Error(err_obj) => {
-                let err_obj = err_obj?;
-                Err(new_coded_error(err_obj))
+        match timeout(
+            Duration::from_secs(1 + ping_failures as u64),
+            ping_request.send().promise,
+        )
+        .await
+        {
+            Ok(Ok(ping_response_rdr)) => {
+                let ping_response_ok_or_error = ping_response_rdr.get();
+                match ping_response_ok_or_error
+                    .unwrap()
+                    .get_res()
+                    .unwrap()
+                    .which()
+                    .unwrap()
+                {
+                    vsapi2::ok_or_error::Which::Ok(_) => {
+                        return Ok(());
+                    }
+                    vsapi2::ok_or_error::Which::Error(err_rdr) => {
+                        let err_obj = err_rdr.unwrap();
+                        return Err(new_coded_error(err_obj));
+                    }
+                }
+            }
+            Ok(Err(capnp_err)) => {
+                return Err(capnp_err.into());
+            }
+            Err(_) => {
+                // TIMEOUT
+                return Err(VSApiError::Timeout("ping".to_string()));
             }
         }
     }
