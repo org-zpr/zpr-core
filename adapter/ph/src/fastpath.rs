@@ -296,70 +296,64 @@ impl FastpathWorker {
     /// fulfilling a bind request (so as to prevent the theoretical
     /// possibility of a packet loop).
     pub fn actor_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
-        // note: this weird two-phase structure is needed to appease the borrow checker
-        let forward = {
-            // lookup five tuple in ELT
-            let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
-            let Some(entry) = self.asm.elt.get(&five_tuple) else {
-                if !allow_bind_request {
-                    // avoid the (all-but purely theoretical) chance of a packet loop,
-                    // when this is initiated due to a requeue from bind setup code
-                    self.drop_and_count(pkt, FastpathCounterType::OtherError);
-                    return;
-                }
-
-                // issue bind request
-                match self.adapter_manager.try_request_tether_id(pkt) {
-                    Ok(()) => self.batch_counters[FastpathCounterType::ActorSlowpath].increment(),
-                    Err(TryEnqueueError::Full(pkt)) => {
-                        self.drop_and_count(pkt, FastpathCounterType::QueueBackpressure)
-                    }
-                }
-
+        // lookup five tuple in ELT
+        let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
+        let Some(entry) = self.asm.elt.get(&five_tuple) else {
+            if !allow_bind_request {
+                // avoid the (all-but purely theoretical) chance of a packet loop,
+                // when this is initiated due to a requeue from bind setup code
+                self.drop_and_count(pkt, FastpathCounterType::OtherError);
                 return;
-            };
+            }
 
-            match &*entry {
-                EltEntry::Active(pep) => {
-                    // compute A2A MAC
-                    // TODO: use actual A2A SAID & keyed hash
-                    let a2a_said: A2aSaid = 0;
-                    let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
-                    let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
-                    // SECURITY: truncating BLAKE3 is safe
-                    a2a_mac[..a2a_mac_size]
-                        .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
-
-                    // compress packet
-                    compress::compress(
-                        pep.compression_mode,
-                        five_tuple.l3_type,
-                        five_tuple.l4_protocol,
-                        &mut pkt,
-                    );
-
-                    // append A2A MAC
-                    pkt.put(&a2a_mac[..a2a_mac_size]);
-                    pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
-
-                    pkt.metadata_mut().ingress_stream_id = pep.tether_id;
-
-                    // forward packet on
-                    true
-                }
-
-                EltEntry::Pending(..) => {
-                    // do not forward
-                    false
+            // issue bind request
+            match self.adapter_manager.try_request_tether_id(pkt) {
+                Ok(()) => self.batch_counters[FastpathCounterType::ActorSlowpath].increment(),
+                Err(TryEnqueueError::Full(pkt)) => {
+                    self.drop_and_count(pkt, FastpathCounterType::QueueBackpressure)
                 }
             }
+
+            return;
         };
 
-        if forward {
-            self.forward(pkt);
-        } else {
-            // Bind request pending; drop this packet
-            self.drop_and_count(pkt, FastpathCounterType::DroppedAwaitingBind);
+        match &*entry {
+            EltEntry::Active(pep) => {
+                // compute A2A MAC
+                // TODO: use actual A2A SAID & keyed hash
+                let a2a_said: A2aSaid = 0;
+                let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
+                let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+                // SECURITY: truncating BLAKE3 is safe
+                a2a_mac[..a2a_mac_size]
+                    .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
+
+                // compress packet
+                compress::compress(
+                    pep.compression_mode,
+                    five_tuple.l3_type,
+                    five_tuple.l4_protocol,
+                    &mut pkt,
+                );
+
+                // append A2A MAC
+                pkt.put(&a2a_mac[..a2a_mac_size]);
+                pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
+
+                pkt.metadata_mut().ingress_stream_id = pep.tether_id;
+
+                drop(entry);
+
+                // forward packet on
+                self.forward(pkt);
+            }
+
+            EltEntry::Pending(..) => {
+                drop(entry);
+
+                // Bind request pending; drop this packet
+                self.drop_and_count(pkt, FastpathCounterType::DroppedAwaitingBind);
+            }
         }
     }
 
