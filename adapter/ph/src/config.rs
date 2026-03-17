@@ -47,6 +47,11 @@ pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::
 
 pub const DEFAULT_VSS_PORT: u16 = 8183;
 
+/// Visa service minimum visa ID value. Values below this are reserved.
+/// More importantly, if code puts visas into the table with IDs below this, they will not be cleared
+/// out during normal operation.
+pub const MIN_VISA_ID: u64 = 1000;
+
 /// If we loose the Cap'n Proto connection to the VS, or are unable to establish it in the first place,
 /// wait this long before retry.
 pub const VSCONN_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(1);

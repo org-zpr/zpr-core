@@ -79,7 +79,7 @@ pub async fn launch(
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             error!(target: STARTUP, "VSConn lifecycle channel closed unexpectedly");
-                            panic!("VSConn lifecycle channel closed unexpectedly (1)");
+                            return; // ABORT entire worker
                         }
                     }
                 }
@@ -132,8 +132,7 @@ async fn wait_for_runloop_start(lifecycle_rx: &mut broadcast::Receiver<VSConnLif
             }
             Err(broadcast::error::RecvError::Closed) => {
                 error!(target: STARTUP, "VSConn lifecycle channel closed unexpectedly");
-                //panic!("VSConn lifecycle channel closed unexpectedly (2)"); // can't recover?
-                return;
+                return; // ABORT entire worker
             }
         }
     }

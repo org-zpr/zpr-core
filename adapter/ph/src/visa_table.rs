@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use crate::config;
 use crate::defs::FiveTuple;
 use crate::five_tuple_lookup_table::FiveTupleLookupTable;
 use crate::logging::targets::VISA_MGMT;
@@ -47,6 +48,16 @@ pub struct Visa {
     pub visa: vsapi_types::Visa,
     streams: Vec<ForwardingEntry>,
     pub ftuple: VsapiFiveTuple,
+}
+
+impl std::fmt::Debug for Visa {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Visa")
+            .field("visa", &self.visa)
+            .field("streams_count", &self.streams.len())
+            .field("ftuple", &self.ftuple)
+            .finish()
+    }
 }
 
 /// Struct for the visa timeout queue
@@ -300,6 +311,8 @@ impl VisaTable {
 
     /// Revoke all visas that have any forwarding entry referencing `link_id`.
     ///
+    /// Visas with IDs below the `MIN_VISA_ID` constant are not affected.
+    ///
     /// Full revocation is chosen here: even if a visa has forwarding entries on
     /// other (surviving) links, it is revoked entirely.  This is safe and simple
     /// — a partially-cleaned visa could forward traffic over a stale route.
@@ -313,23 +326,25 @@ impl VisaTable {
             .table
             .iter()
             .filter_map(|(visa_id, visa)| {
-                if visa.streams.iter().any(|entry| entry.0 == link_id) {
+                if *visa_id >= config::MIN_VISA_ID as i32
+                    && visa.streams.iter().any(|entry| entry.0 == link_id)
+                {
                     Some(*visa_id)
                 } else {
                     None
                 }
             })
             .collect();
-
-        info!(target: VISA_MGMT, "ejecting {} visa(s) for removed link {link_id}", to_revoke.len());
-        for visa_id in to_revoke {
-            // Ignore NotFound: the visa may have been concurrently revoked
-            // (e.g., by handle_expirations) between the collect and this loop.
-            let _ = self.revoke_no_rebuild(peer_table, visa_id);
+        if !to_revoke.is_empty() {
+            info!(target: VISA_MGMT, "ejecting {} visa(s) for removed link {link_id}", to_revoke.len());
+            for visa_id in to_revoke {
+                // Ignore NotFound: the visa may have been concurrently revoked
+                // (e.g., by handle_expirations) between the collect and this loop.
+                let _ = self.revoke_no_rebuild(peer_table, visa_id);
+            }
+            self.lookup_table = FiveTupleLookupTable::new();
+            self.lookup_table.build_table_from_hash(&self.table);
         }
-
-        self.lookup_table = FiveTupleLookupTable::new();
-        self.lookup_table.build_table_from_hash(&self.table);
     }
 
     fn revoke_no_rebuild(
@@ -562,7 +577,7 @@ mod tests {
             ))
             .get();
 
-        let visa_id = 100;
+        let visa_id = 1000;
         let mut visa_table = asm.visa_table.write().unwrap();
         let v = new_vsapi_visa_tcp_default(visa_id as u64, DateTime::<Utc>::MAX_UTC.into());
         let _ = visa_table.insert_visa(v);
@@ -660,7 +675,7 @@ mod tests {
             ))
             .get();
 
-        let visa_id = 300;
+        let visa_id = 3000;
         let mut visa_table = asm.visa_table.write().unwrap();
         let v = new_vsapi_visa_tcp_default(visa_id as u64, DateTime::<Utc>::MAX_UTC.into());
         let _ = visa_table.insert_visa(v);
@@ -728,8 +743,8 @@ mod tests {
             + Duration::from_secs(3600))
         .as_millis() as i64;
 
-        let visa1_raw = make_tcp_visa(400, &client1_addr, 0, &service_addr, 80, expires_ms, 100);
-        let visa2_raw = make_tcp_visa(401, &client2_addr, 0, &service_addr, 80, expires_ms, 100);
+        let visa1_raw = make_tcp_visa(4000, &client1_addr, 0, &service_addr, 80, expires_ms, 100);
+        let visa2_raw = make_tcp_visa(4001, &client2_addr, 0, &service_addr, 80, expires_ms, 100);
 
         let mut visa_table = asm.visa_table.write().unwrap();
         let visa1_id = visa_table.insert_visa(visa1_raw).unwrap();
