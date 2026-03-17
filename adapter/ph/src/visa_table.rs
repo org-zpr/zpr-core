@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
 use zpr::addrs::{VISA_SERVICE_ADDR, VISA_SERVICE_PORT};
-use zpr::packet_info::{ForwardingEntry, VisaId};
+use zpr::packet_info::{ForwardingEntry, LinkId, VisaId};
 use zpr::vsapi_types;
 use zpr::vsapi_types::{DockPep, VsapiFiveTuple};
 use zpr_utils::net_defs::IpAddress;
@@ -298,6 +298,40 @@ impl VisaTable {
         self.lookup_table.build_table_from_hash(&self.table);
     }
 
+    /// Revoke all visas that have any forwarding entry referencing `link_id`.
+    ///
+    /// Full revocation is chosen here: even if a visa has forwarding entries on
+    /// other (surviving) links, it is revoked entirely.  This is safe and simple
+    /// — a partially-cleaned visa could forward traffic over a stale route.
+    /// In the future, if visas legitimately span multiple links and partial
+    /// cleanup (retaining entries on surviving links) is needed, this method
+    /// should be split into a "remove entries for link" path followed by a
+    /// lookup table rebuild, leaving the visa alive when it still has valid
+    /// entries.
+    pub fn revoke_for_link(&mut self, link_id: LinkId, peer_table: &peer_table::PeerTable) {
+        let to_revoke: Vec<VisaId> = self
+            .table
+            .iter()
+            .filter_map(|(visa_id, visa)| {
+                if visa.streams.iter().any(|entry| entry.0 == link_id) {
+                    Some(*visa_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        info!(target: VISA_MGMT, "ejecting {} visa(s) for removed link {link_id}", to_revoke.len());
+        for visa_id in to_revoke {
+            // Ignore NotFound: the visa may have been concurrently revoked
+            // (e.g., by handle_expirations) between the collect and this loop.
+            let _ = self.revoke_no_rebuild(peer_table, visa_id);
+        }
+
+        self.lookup_table = FiveTupleLookupTable::new();
+        self.lookup_table.build_table_from_hash(&self.table);
+    }
+
     fn revoke_no_rebuild(
         &mut self,
         peer_table: &peer_table::PeerTable,
@@ -509,6 +543,239 @@ mod tests {
 
         assert!(visa_table.revoke(&asm.peer_table, visa1).is_ok());
         assert_eq!(0, peer_state.pft.len());
+    }
+
+    #[tokio::test]
+    async fn test_revoke_for_link_revokes_matching_visa() {
+        let mut builder = TestAssemblyBuilder::new();
+        builder.visa_table = Some(VisaTable::new());
+        let asm = Arc::new(create_assembly(builder));
+
+        let entry = asm.peer_table.vacant_entry().unwrap();
+        let entry_key = entry.key();
+        let link_a = entry
+            .insert(create_dummy_peer_state(
+                entry_key,
+                LinkType::Internal,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(1, 2, 3, 5)),
+            ))
+            .get();
+
+        let visa_id = 100;
+        let mut visa_table = asm.visa_table.write().unwrap();
+        let v = new_vsapi_visa_tcp_default(visa_id as u64, DateTime::<Utc>::MAX_UTC.into());
+        let _ = visa_table.insert_visa(v);
+
+        let peer_state = asm.peer_table.get(link_a).unwrap();
+        let pep = PftPep {
+            next_hop: ForwardingEntry(link_a, 1),
+            visa_id,
+        };
+        let tether_id = peer_state.pft.insert(pep).unwrap();
+        visa_table
+            .link_forwarding_entry(visa_id, ForwardingEntry(link_a, tether_id))
+            .unwrap();
+
+        visa_table.revoke_for_link(link_a, &asm.peer_table);
+
+        assert!(!visa_table.table.contains_key(&visa_id));
+        assert_eq!(peer_state.pft.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_revoke_for_link_spares_unrelated_visa() {
+        let mut builder = TestAssemblyBuilder::new();
+        builder.visa_table = Some(VisaTable::new());
+        let asm = Arc::new(create_assembly(builder));
+
+        let entry_a = asm.peer_table.vacant_entry().unwrap();
+        let key_a = entry_a.key();
+        let link_a = entry_a
+            .insert(create_dummy_peer_state(
+                key_a,
+                LinkType::Internal,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(1, 2, 3, 5)),
+            ))
+            .get();
+
+        let entry_b = asm.peer_table.vacant_entry().unwrap();
+        let key_b = entry_b.key();
+        let link_b = entry_b
+            .insert(create_dummy_peer_state(
+                key_b,
+                LinkType::Internal,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(2, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(2, 2, 3, 5)),
+            ))
+            .get();
+
+        let visa_id = 200;
+        let mut visa_table = asm.visa_table.write().unwrap();
+        let v = new_vsapi_visa_tcp_default(visa_id as u64, DateTime::<Utc>::MAX_UTC.into());
+        let _ = visa_table.insert_visa(v);
+
+        let peer_b = asm.peer_table.get(link_b).unwrap();
+        let pep = PftPep {
+            next_hop: ForwardingEntry(link_b, 1),
+            visa_id,
+        };
+        let tether_id = peer_b.pft.insert(pep).unwrap();
+        visa_table
+            .link_forwarding_entry(visa_id, ForwardingEntry(link_b, tether_id))
+            .unwrap();
+
+        visa_table.revoke_for_link(link_a, &asm.peer_table);
+
+        assert!(visa_table.table.contains_key(&visa_id));
+        assert_eq!(peer_b.pft.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_revoke_for_link_full_revocation_across_links() {
+        let mut builder = TestAssemblyBuilder::new();
+        builder.visa_table = Some(VisaTable::new());
+        let asm = Arc::new(create_assembly(builder));
+
+        let entry_a = asm.peer_table.vacant_entry().unwrap();
+        let key_a = entry_a.key();
+        let link_a = entry_a
+            .insert(create_dummy_peer_state(
+                key_a,
+                LinkType::Internal,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(1, 2, 3, 5)),
+            ))
+            .get();
+
+        let entry_b = asm.peer_table.vacant_entry().unwrap();
+        let key_b = entry_b.key();
+        let link_b = entry_b
+            .insert(create_dummy_peer_state(
+                key_b,
+                LinkType::Internal,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(2, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(2, 2, 3, 5)),
+            ))
+            .get();
+
+        let visa_id = 300;
+        let mut visa_table = asm.visa_table.write().unwrap();
+        let v = new_vsapi_visa_tcp_default(visa_id as u64, DateTime::<Utc>::MAX_UTC.into());
+        let _ = visa_table.insert_visa(v);
+
+        let peer_a = asm.peer_table.get(link_a).unwrap();
+        let pep_a = PftPep {
+            next_hop: ForwardingEntry(link_a, 1),
+            visa_id,
+        };
+        let tether_a = peer_a.pft.insert(pep_a).unwrap();
+        visa_table
+            .link_forwarding_entry(visa_id, ForwardingEntry(link_a, tether_a))
+            .unwrap();
+
+        let peer_b = asm.peer_table.get(link_b).unwrap();
+        let pep_b = PftPep {
+            next_hop: ForwardingEntry(link_b, 1),
+            visa_id,
+        };
+        let tether_b = peer_b.pft.insert(pep_b).unwrap();
+        visa_table
+            .link_forwarding_entry(visa_id, ForwardingEntry(link_b, tether_b))
+            .unwrap();
+
+        visa_table.revoke_for_link(link_a, &asm.peer_table);
+
+        assert!(!visa_table.table.contains_key(&visa_id));
+        assert_eq!(peer_a.pft.len(), 0);
+        assert_eq!(peer_b.pft.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_revoke_for_link_rebuilds_lookup_table() {
+        let mut builder = TestAssemblyBuilder::new();
+        builder.visa_table = Some(VisaTable::new());
+        let asm = Arc::new(create_assembly(builder));
+
+        let entry_a = asm.peer_table.vacant_entry().unwrap();
+        let key_a = entry_a.key();
+        let link_a = entry_a
+            .insert(create_dummy_peer_state(
+                key_a,
+                LinkType::Internal,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(1, 2, 3, 5)),
+            ))
+            .get();
+
+        let entry_b = asm.peer_table.vacant_entry().unwrap();
+        let key_b = entry_b.key();
+        let link_b = entry_b
+            .insert(create_dummy_peer_state(
+                key_b,
+                LinkType::Internal,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(2, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(2, 2, 3, 5)),
+            ))
+            .get();
+
+        let client1_addr: Ipv6Addr = "fd5a:5052:8::1".parse().unwrap();
+        let client2_addr: Ipv6Addr = "fd5a:5052:8::2".parse().unwrap();
+        let service_addr: Ipv6Addr = "fd5a:5052:8::10".parse().unwrap();
+
+        let expires_ms = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+            + Duration::from_secs(3600))
+        .as_millis() as i64;
+
+        let visa1_raw = make_tcp_visa(400, &client1_addr, 0, &service_addr, 80, expires_ms, 100);
+        let visa2_raw = make_tcp_visa(401, &client2_addr, 0, &service_addr, 80, expires_ms, 100);
+
+        let mut visa_table = asm.visa_table.write().unwrap();
+        let visa1_id = visa_table.insert_visa(visa1_raw).unwrap();
+        let visa2_id = visa_table.insert_visa(visa2_raw).unwrap();
+
+        let peer_a = asm.peer_table.get(link_a).unwrap();
+        let pep_a = PftPep {
+            next_hop: ForwardingEntry(link_a, 1),
+            visa_id: visa1_id,
+        };
+        let tether_a = peer_a.pft.insert(pep_a).unwrap();
+        visa_table
+            .link_forwarding_entry(visa1_id, ForwardingEntry(link_a, tether_a))
+            .unwrap();
+
+        let peer_b = asm.peer_table.get(link_b).unwrap();
+        let pep_b = PftPep {
+            next_hop: ForwardingEntry(link_b, 1),
+            visa_id: visa2_id,
+        };
+        let tether_b = peer_b.pft.insert(pep_b).unwrap();
+        visa_table
+            .link_forwarding_entry(visa2_id, ForwardingEntry(link_b, tether_b))
+            .unwrap();
+
+        visa_table.revoke_for_link(link_a, &asm.peer_table);
+
+        let visa1_tuple = FiveTuple {
+            src_address: IpAddress::new_from_std_v6(&client1_addr),
+            dst_address: IpAddress::new_from_std_v6(&service_addr),
+            l3_type: L3Type::Ipv6,
+            l4_protocol: ip_number::TCP,
+            src_port: 20345,
+            dst_port: 80,
+        };
+        let visa2_tuple = FiveTuple {
+            src_address: IpAddress::new_from_std_v6(&client2_addr),
+            dst_address: IpAddress::new_from_std_v6(&service_addr),
+            l3_type: L3Type::Ipv6,
+            l4_protocol: ip_number::TCP,
+            src_port: 20346,
+            dst_port: 80,
+        };
+
+        assert_eq!(visa_table.match_traffic(&visa1_tuple), None);
+        assert_eq!(visa_table.match_traffic(&visa2_tuple), Some(visa2_id));
     }
 
     #[test]

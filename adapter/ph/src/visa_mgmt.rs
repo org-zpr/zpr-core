@@ -3,17 +3,17 @@ use crate::auth::AuthBlob;
 use crate::counters::ManagementCounterType;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
+use crate::special_peers::SpecialPeerName;
 use crate::visa_table;
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use libnode::claims;
 use libnode::vsconn::VSDisconnectNotice;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use tracing::*;
-
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use zpr::dn::VISA_SERVICE_CN;
 use zpr::packet_info::{LinkId, VisaId};
 use zpr::vsapi_types::{self, DisconnectReason};
 use zpr_utils::net_defs::IpAddress;
@@ -71,11 +71,21 @@ pub fn build_connect_request(
     addr: IpAddress,
     blob: &AuthBlob,
 ) -> Result<Option<vsapi_types::ConnectRequest>, LinkStateError> {
-    let cn = get_common_name(asm, id)?;
-
-    if cn == VISA_SERVICE_CN {
-        return Ok(None);
+    // Check if this link is "blessed" as the visa service. This happens in link_state and is sensitive
+    // to whether the certificate was verified or not.
+    {
+        let vs_peer = asm
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+        if let Some(vs_peer_id) = vs_peer {
+            if vs_peer_id.get() == id {
+                // This link is to the visa service itself, so no connect request is needed.
+                return Ok(None);
+            }
+        }
     }
+
+    let cn = get_common_name(asm, id)?;
 
     // Convert the adapter's AuthBlob to the vsapi_types AuthBlob for the v2 protocol.
     let vsapi_blob = match blob {
@@ -118,6 +128,7 @@ pub fn build_connect_request(
     Ok(Some(connect_req))
 }
 
+/// WARNING! Using this ignores whether the certificate was verified or not.
 fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateError> {
     let Some(peer_state) = asm.peer_table.get(id) else {
         return Err(LinkStateError::NotFound(id));

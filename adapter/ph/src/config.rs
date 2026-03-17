@@ -133,7 +133,7 @@ pub struct Config {
     pub private_key_data: Option<String>,
 
     /// The RSA private key used by a node to authenticate with the visa service.
-    /// TODO: Optional for now but will be required with libnode2.
+    /// Required for nodes.
     pub auth_private_key: Option<PathBuf>,
 
     /// Optionally specify the name of the TUN interface to use. In most cases this

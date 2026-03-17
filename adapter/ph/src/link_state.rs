@@ -576,40 +576,52 @@ impl LinkStateWrapper {
         };
 
         if let Some(ref peer_cert) = sa.peer_cert {
-            match peer_cert {
+            let require_ca_signature = asm.config.get().ca_file.is_some();
+            let (cert, is_verified) = match peer_cert {
                 PeerCertificate::Unverified(cert) => {
                     warn!(target: LINK_STATE, "Link {link_id} has unverified name {:?}", cert.subject_name());
-                    // - Nodes should accept unverified certs from adapters.
-                    // - Nodes should not accept unverified certs from other nodes.
-                    // - Adapters should not accept unverified certs from nodes.
-                    match self.link_type {
-                        LinkType::AdapterToNode => {
-                            return Err(LinkStateError::InvalidOperation(
-                                "adapter received unverified certificate from node".to_string(),
-                            ));
+                    if require_ca_signature {
+                        // If this node has been configured with a CA certificate for checking these things
+                        // then these rules kick in:
+                        //
+                        // - Nodes should accept unverified certs from adapters.
+                        // - Nodes should not accept unverified certs from other nodes.
+                        // - Adapters should not accept unverified certs from nodes.
+                        match self.link_type {
+                            LinkType::AdapterToNode => {
+                                return Err(LinkStateError::InvalidOperation(
+                                    "adapter received unverified certificate from node".to_string(),
+                                ));
+                            }
+                            LinkType::NodeToAdapter => (), // OK
+                            LinkType::NodeToNode => {
+                                return Err(LinkStateError::InvalidOperation(
+                                    "node received unverified certificate from peer node"
+                                        .to_string(),
+                                ));
+                            }
+                            _ => (),
                         }
-                        LinkType::NodeToAdapter => (), // OK
-                        LinkType::NodeToNode => {
-                            return Err(LinkStateError::InvalidOperation(
-                                "node received unverified certificate from peer node".to_string(),
-                            ));
-                        }
-                        _ => (),
                     }
+                    (cert, false)
                 }
                 PeerCertificate::Verified(cert) => {
                     info!(target: LINK_STATE, "Link {link_id} has verified name {:?}", cert.subject_name());
-                    // assign special-peer name if this peer is special
-                    for name in special_peers::special_peer_names_from_x509_subject_name(
-                        cert.subject_name(),
-                    ) {
-                        match asm.peer_table.assign_special_name(name, link_id) {
-                            Ok(()) => {
-                                info!(target: LINK_STATE, "Link {link_id} assigned special name {name:?}")
-                            }
-                            Err(_) => {
-                                warn!(target: LINK_STATE, "Unable to assign link {link_id} special name {name:?}")
-                            }
+                    (cert, true)
+                }
+            };
+
+            if (require_ca_signature && is_verified) || !require_ca_signature {
+                // assign special-peer name if this peer is special
+                for name in
+                    special_peers::special_peer_names_from_x509_subject_name(cert.subject_name())
+                {
+                    match asm.peer_table.assign_special_name(name, link_id) {
+                        Ok(()) => {
+                            info!(target: LINK_STATE, "Link {link_id} assigned special name {name:?} (secure = {is_verified})")
+                        }
+                        Err(_) => {
+                            warn!(target: LINK_STATE, "Unable to assign link {link_id} special name {name:?}")
                         }
                     }
                 }

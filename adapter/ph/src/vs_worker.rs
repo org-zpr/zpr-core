@@ -46,9 +46,8 @@ pub async fn launch(
                         }
                         Err(VSApiError::CodedError(code, _msg, _)) if matches!(code, ErrorCode::OutOfSync) => {
                             state = StateFlag::NoState;
-                            // TODO: XXX Need to boot off all non-vs adapters, clear all old visas.
                             info!(target: STARTUP, "visa service reports out-of-sync; clearing adapters and visas");
-                            asm.disconnect_adapters().await;
+                            asm.disconnect_adapters().await; // drops visas too
                             false
                         }
                         Err(e) => {
@@ -133,7 +132,8 @@ async fn wait_for_runloop_start(lifecycle_rx: &mut broadcast::Receiver<VSConnLif
             }
             Err(broadcast::error::RecvError::Closed) => {
                 error!(target: STARTUP, "VSConn lifecycle channel closed unexpectedly");
-                panic!("VSConn lifecycle channel closed unexpectedly (2)"); // can't recover?
+                //panic!("VSConn lifecycle channel closed unexpectedly (2)"); // can't recover?
+                return;
             }
         }
     }
