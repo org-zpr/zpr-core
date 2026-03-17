@@ -8,8 +8,9 @@ use crate::config;
 use crate::logging::targets::STARTUP;
 use crate::vss_worker;
 
-use libnode::vsconn::{VSConnHandle, VSConnLifecycleEvent, VSDisconnectNotice};
-use zpr::vsapi_types::DisconnectReason;
+use libnode::error::VSApiError;
+use libnode::vsconn::{StateFlag, VSConnHandle, VSConnLifecycleEvent, VSDisconnectNotice};
+use zpr::vsapi_types::{DisconnectReason, ErrorCode};
 
 pub async fn launch(
     asm: Arc<Assembly>,
@@ -18,6 +19,8 @@ pub async fn launch(
     vs_handle: VSConnHandle,
     mut lifecycle_rx: broadcast::Receiver<VSConnLifecycleEvent>,
 ) {
+    // When launched, we have no state with the VS.
+    let mut state = StateFlag::NoState;
     // TODO: The new visa service supports a "reconnect" signal. That is not yet exposed by libnode2
     loop {
         // This acts as a gate -- waiting for runloop to start.
@@ -27,6 +30,7 @@ pub async fn launch(
             // Kick off a connect request to the VS, if it succeeds, notify the VS about our VSS endpoint.
             let req = libnode::vsconn::VSConnectRequest {
                 zpr_addr: node_zpr_addr,
+                state,
             };
 
             // Race the connect call against lifecycle events. We use a bool here because
@@ -40,11 +44,14 @@ pub async fn launch(
                             info!(target: STARTUP, "node access granted to visa service");
                             true
                         }
+                        Err(VSApiError::CodedError(code, _msg, _)) if matches!(code, ErrorCode::OutOfSync) => {
+                            state = StateFlag::NoState;
+                            // TODO: XXX Need to boot off all non-vs adapters, clear all old visas.
+                            info!(target: STARTUP, "visa service reports out-of-sync; clearing adapters and visas");
+                            asm.disconnect_adapters().await;
+                            false
+                        }
                         Err(e) => {
-                            // TODO: We will end up with a code 3 error here (no state) if the visa service
-                            // has denied our "reconnect" attempt. In that case we should clear state and
-                            // try again.  CLEAR STATE means all adapters need to re-auth and potentially
-                            // get new addresses.
                             error!(target: STARTUP, "failed to get access to visa service: {e:?}");
                             false
                         }
@@ -61,10 +68,10 @@ pub async fn launch(
                             // harmless duplicate start
                             false
                         }
-                        Ok(VSConnLifecycleEvent::ConnectedToVsApi) => {
+                        Ok(VSConnLifecycleEvent::ConnectedToVsApi(stateflag)) => {
                             // The connect() future was in-flight when this fired: the run loop
                             // already has a handle. Treat as success; do not retry connect().
-                            info!(target: STARTUP, "node access granted to visa service");
+                            info!(target: STARTUP, "node access granted to visa service (state = {:?})", stateflag);
                             true
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -88,6 +95,8 @@ pub async fn launch(
                                 error!(target: STARTUP, "failed to process initial visa op from VS: {e:?}");
                             }
                         }
+                        // Next time we connect, we have state.
+                        state = StateFlag::HasState;
                         break; // Exit inner loop; go back to waiting for a state change.
                     }
                     Err(e) => {
