@@ -19,7 +19,7 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, Connection, DenyCode, DisconnectReason, PacketDesc, Visa, VisaOp,
+    ConnectRequest, Connection, DenyCode, DisconnectReason, ErrorCode, PacketDesc, Visa, VisaOp,
 };
 use zpr::write_to::WriteTo;
 
@@ -34,6 +34,7 @@ const VSAPI_MAX_PING_FAILURES: u32 = 2;
 pub struct VSConnectRequest {
     /// Connect will fail if this does not match policy.
     pub zpr_addr: IpAddr,
+    pub state: StateFlag,
 }
 
 #[derive(Debug)]
@@ -92,10 +93,20 @@ pub enum VSConnLifecycleEvent {
     RunLoopStarts,
 
     /// Means that the node connect-request was successful.
-    ConnectedToVsApi,
+    ConnectedToVsApi(StateFlag),
 
     /// When run loop has stopped.
     RunLoopExits,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateFlag {
+    /// Visa service / node has no state for this connection.
+    #[default]
+    NoState,
+
+    /// Visa service / node has existing state for this connection.
+    HasState,
 }
 
 pub struct VSConn {
@@ -105,7 +116,6 @@ pub struct VSConn {
     node_cn: String,
     node_private_key: PKey<Private>,
     life_tx: broadcast::Sender<VSConnLifecycleEvent>,
-    connect_count: u64,
 }
 
 #[derive(Clone)]
@@ -156,7 +166,6 @@ impl VSConn {
             node_cn,
             node_private_key,
             life_tx,
-            connect_count: 0,
         }
     }
 
@@ -178,6 +187,10 @@ impl VSConn {
     /// Just like [VSConn::run] but will attempt to reconnect if the connection to the VS is lost, after
     /// pausing for `reconnect_after`.
     /// Sending a [VS2Command::Stop] will break the reconnect loop and cause this to return.
+    ///
+    /// Note that "reconnect" here just means that we attempt to re-open the base Cap'n Proto connection.
+    /// We rely on external code to call us with an API level "connect" command.  To know when reconnects
+    /// and such are happening, follow the lifecycle events.
     pub async fn run_with_reconnect(
         &mut self,
         reconnect_after: Duration,
@@ -343,6 +356,7 @@ impl VSConn {
 
             VS2Command::Connect(req, resp_tx) => {
                 debug!(target: VS_RPC, "VSConn: connect");
+                let stateflag = req.state.clone();
                 let resp = if cmd_state.is_connected() {
                     Err(VSApiError::CommandFailed(
                         "connect called but already connected to VS-API".to_string(),
@@ -355,8 +369,9 @@ impl VSConn {
                     Ok(handle) => {
                         info!(target: VS_RPC, "VS API connect succeeded");
                         cmd_state.vs_handle = Some(handle);
-                        self.connect_count = self.connect_count.saturating_add(1);
-                        self.send_lifecycle_event(VSConnLifecycleEvent::ConnectedToVsApi);
+                        self.send_lifecycle_event(VSConnLifecycleEvent::ConnectedToVsApi(
+                            stateflag,
+                        ));
                         Ok(())
                     }
                     Err(e) => {
@@ -462,10 +477,9 @@ impl VSConn {
         let mut vscr_bldr = vs_request.get().init_req();
         vscr_bldr.set_cn(&self.node_cn);
 
-        let ctype = if self.connect_count > 0 {
-            vsapi2::VSConnT::Reconnect
-        } else {
-            vsapi2::VSConnT::Reset
+        let ctype = match req.state {
+            StateFlag::HasState => vsapi2::VSConnT::Reconnect,
+            StateFlag::NoState => vsapi2::VSConnT::Reset,
         };
         vscr_bldr.set_ctype(ctype);
 
@@ -769,9 +783,9 @@ fn sign_payload(
 
 /// Create a VSApiError::CodedError from a capn proto vsapi2::error::Reader.
 fn new_coded_error(rdr: vsapi2::error::Reader) -> VSApiError {
-    let err_code: u16 = match rdr.get_code() {
+    let err_code: ErrorCode = match rdr.get_code() {
         Ok(c) => c.into(),
-        Err(_) => u16::MAX,
+        Err(_) => ErrorCode::Internal,
     };
     let err_msg = match rdr.get_message() {
         Ok(m) => m.to_string().unwrap(),

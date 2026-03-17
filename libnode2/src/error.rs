@@ -1,5 +1,5 @@
 use thiserror::Error;
-use zpr::vsapi_types::VsapiTypeError;
+use zpr::vsapi_types::{ErrorCode, VsapiTypeError};
 
 #[derive(Debug, Error)]
 pub enum VSApiError {
@@ -15,8 +15,8 @@ pub enum VSApiError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("VS API error code {0}: {1} (retry in {2} seconds)")]
-    CodedError(u16, String, u32),
+    #[error("VS API error code {0:?}: {1} (retry in {2} seconds)")]
+    CodedError(ErrorCode, String, u32),
 
     #[error("capn proto error: {0}")]
     Capnp(#[from] capnp::Error),
