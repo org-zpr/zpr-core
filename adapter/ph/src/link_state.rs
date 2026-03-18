@@ -1748,6 +1748,7 @@ impl LinkStateWrapper {
         match locked_fsm.state {
             LinkState::Closing => {
                 locked_fsm.cancel_timeout();
+                drop(locked_fsm);
                 self.clean_up_link_state(asm).detach_all();
                 Ok(())
             }
