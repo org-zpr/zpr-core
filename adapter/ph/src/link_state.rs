@@ -444,13 +444,11 @@ impl LinkStateWrapper {
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
         match event {
-            LinkEvent::Timeout { .. } | LinkEvent::ReceivedKeepAliveResponse => {
-                // Noisy so these go out on TRACE level.
-                trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+            LinkEvent::ReceivedKeepAliveResponse | LinkEvent::Timeout { .. } => {
+                trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id)
             }
-            _ => {
-                debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
-            }
+
+            _ => debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id),
         }
 
         match event {

@@ -4,6 +4,7 @@
 //! and the serialization/deserialization should move into the zdp module.
 //! For now, it's all here together.
 
+use crate::classifier::{self, ClassifierResult};
 use crate::defs;
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -14,8 +15,6 @@ use zpr_utils::net_defs;
 /// IP 5-Tuple Traffic Classifier
 #[derive(Clone)]
 pub struct Ip5TupleTc(defs::FiveTuple);
-
-// TODO: actually add traffic classification code here
 
 impl Ip5TupleTc {
     #[allow(dead_code)]
@@ -63,7 +62,7 @@ impl Ip5TupleTc {
         mode
     }
 
-    /// Serialize.
+    /// Serialize the classifier to a buffer.
     pub fn serialize(&self, buf: &mut impl BufMut) {
         let mut flags = 0;
 
@@ -111,6 +110,7 @@ impl Ip5TupleTc {
         }
     }
 
+    /// Deserialize the classifier from a buffer.
     pub fn deserialize(buf: &mut impl Buf) -> Result<Self, ()> {
         let Ok(hdr) = zdp::ZdpTrafficClassifierHeader::read_from_buf(buf) else {
             return Err(());
@@ -159,6 +159,59 @@ impl Ip5TupleTc {
             src_port,
             dst_port,
         }));
+    }
+
+    #[allow(dead_code)]
+    /// Does the specified packet body match this classifier.
+    pub fn classify_packet(&self, l3_type: L3Type, body: &[u8]) -> bool {
+        // Derive the 5-tuple from the packet body.  Reject if packet is malformed.
+        let mut ft = defs::FiveTuple::default();
+        let Ok(classification) = classifier::classify(&mut ft, body) else {
+            return false;
+        };
+
+        // We do not accept fragments non-IP packets.
+        if !matches!(
+            classification,
+            ClassifierResult::OK | ClassifierResult::UnclassifiedL4
+        ) {
+            return false;
+        }
+
+        // The classifier guesses the L3 type from the packet body; confirm it matches
+        // the claimed L3 type from the upper layer.
+        if ft.l3_type != l3_type {
+            return false;
+        }
+
+        self.classify_5t(&ft)
+    }
+
+    /// Does a packet with the specified 5-tuple match this classifier.
+    pub fn classify_5t(&self, five_tuple: &defs::FiveTuple) -> bool {
+        if five_tuple.l3_type != self.0.l3_type {
+            return false;
+        }
+
+        if five_tuple.src_address != self.0.src_address
+            || five_tuple.dst_address != self.0.dst_address
+        {
+            return false;
+        }
+
+        if five_tuple.l4_protocol != self.0.l4_protocol {
+            return false;
+        }
+
+        if self.0.src_port != 0 && five_tuple.src_port != self.0.src_port {
+            return false;
+        }
+
+        if self.0.dst_port != 0 && five_tuple.dst_port != self.0.dst_port {
+            return false;
+        }
+
+        true
     }
 }
 
