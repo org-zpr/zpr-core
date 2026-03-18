@@ -1,5 +1,6 @@
 use zpr::vsapi::v1 as vsapi2;
 
+use std::future::Future;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,7 +13,6 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio::time::timeout;
 use tokio_rustls::TlsConnector;
 use tokio_util::compat::*;
 use tracing::*;
@@ -30,6 +30,15 @@ const LIFECYCLE_EVENT_BUFFER_SIZE: usize = 64;
 
 const VSAPI_PING_INTERVAL: Duration = Duration::from_secs(5);
 const VSAPI_MAX_PING_FAILURES: u32 = 2;
+
+/// Minimum (and initial) timeout for a ping RPC call.
+const PING_MIN_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Default timeout for a single Cap'n Proto RPC call.
+const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Timeout for connect/challenge/authenticate — longer due to crypto.
+const DEFAULT_CONNECT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub struct VSConnectRequest {
@@ -335,7 +344,12 @@ impl VSConn {
                     dnotice_bldr.set_reason_code(vsapi2::DisconnectReason::NodeShutdown);
 
                     debug!(target: VS_RPC, "VS-API -> notify_disconnect");
-                    let disconnect_request_response = disconnect_request.send().promise.await?;
+                    let disconnect_request_response = rpc_with_timeout(
+                        "notify_disconnect",
+                        DEFAULT_RPC_TIMEOUT,
+                        disconnect_request.send().promise,
+                    )
+                    .await?;
                     let ok_or_err = disconnect_request_response.get()?.get_res()?;
                     match ok_or_err.which()? {
                         vsapi2::ok_or_error::Which::Ok(_) => {
@@ -504,7 +518,12 @@ impl VSConn {
 
         debug!(target: VS_RPC, "VS-API -> connect (type = {:?})", ctype);
 
-        let vs_request_response = vs_request.send().promise.await?;
+        let vs_request_response = rpc_with_timeout(
+            "connect",
+            DEFAULT_CONNECT_RPC_TIMEOUT,
+            vs_request.send().promise,
+        )
+        .await?;
         let gate_or_error = vs_request_response.get()?.get_resp()?;
 
         let vs_gate_svc: vsapi2::v_s_gate::Client = match gate_or_error.which()? {
@@ -519,7 +538,12 @@ impl VSConn {
         let gate_request = vs_gate_svc.challenge_request();
 
         debug!(target: VS_RPC, "VS-API -> challenge");
-        let gate_response = gate_request.send().promise.await?;
+        let gate_response = rpc_with_timeout(
+            "challenge",
+            DEFAULT_CONNECT_RPC_TIMEOUT,
+            gate_request.send().promise,
+        )
+        .await?;
         let challenge = gate_response.get()?.get_challenge()?;
 
         let chal_data = challenge.get_bytes()?;
@@ -549,7 +573,12 @@ impl VSConn {
         auth_bldr.set_bytes(&signed_payload);
 
         debug!(target: VS_RPC, "VS-API -> authenticate");
-        let gate_response = gate_request.send().promise.await?;
+        let gate_response = rpc_with_timeout(
+            "authenticate",
+            DEFAULT_CONNECT_RPC_TIMEOUT,
+            gate_request.send().promise,
+        )
+        .await?;
         let handle_or_error = gate_response.get()?.get_res()?;
 
         let vs_handle_svc: vsapi2::v_s_handle::Client = match handle_or_error.which()? {
@@ -574,7 +603,12 @@ impl VSConn {
         vrr_bldr.set_previous_id(0);
         let mut pd_bldr = vrr_bldr.init_packet();
         req.pdesc.write_to(&mut pd_bldr);
-        let vr_response = vr_request.send().promise.await?;
+        let vr_response = rpc_with_timeout(
+            "visa_request",
+            DEFAULT_RPC_TIMEOUT,
+            vr_request.send().promise,
+        )
+        .await?;
         let allow_deny_error = vr_response.get()?.get_resp()?;
 
         match allow_deny_error.which()? {
@@ -605,7 +639,12 @@ impl VSConn {
         req.write_to(&mut cr_bldr);
 
         debug!(target: VS_RPC, "VS-API -> authorize_connect");
-        let ac_response = ac_request.send().promise.await?;
+        let ac_response = rpc_with_timeout(
+            "authorize_connect",
+            DEFAULT_RPC_TIMEOUT,
+            ac_request.send().promise,
+        )
+        .await?;
         let conn_or_error = ac_response.get()?.get_resp()?;
 
         match conn_or_error.which()? {
@@ -636,7 +675,12 @@ impl VSConn {
         dn_bldr.set_reason_code(req.reason.into());
 
         debug!(target: VS_RPC, "VS-API -> notify_disconnect");
-        let nd_response = nd_request.send().promise.await?;
+        let nd_response = rpc_with_timeout(
+            "notify_disconnect",
+            DEFAULT_RPC_TIMEOUT,
+            nd_request.send().promise,
+        )
+        .await?;
         let ok_or_err = nd_response.get()?.get_res()?;
 
         match ok_or_err.which()? {
@@ -660,7 +704,12 @@ impl VSConn {
         let mut ip_bldr = saddr_bldr.init_addr();
         saddr.ip().write_to(&mut ip_bldr);
 
-        let rvs_response = rvs_request.send().promise.await?;
+        let rvs_response = rpc_with_timeout(
+            "register_vss",
+            DEFAULT_RPC_TIMEOUT,
+            rvs_request.send().promise,
+        )
+        .await?;
         let ops_or_error = rvs_response.get()?.get_res()?;
 
         match ops_or_error.which()? {
@@ -686,40 +735,13 @@ impl VSConn {
         vs_h: &vsapi2::v_s_handle::Client,
         ping_failures: u32,
     ) -> Result<(), VSApiError> {
-        let ping_request = vs_h.ping_request();
+        let dur = PING_MIN_TIMEOUT + Duration::from_secs(ping_failures as u64);
         trace!(target: VS_RPC, "VS-API -> ping");
-
-        match timeout(
-            Duration::from_secs(1 + ping_failures as u64),
-            ping_request.send().promise,
-        )
-        .await
-        {
-            Ok(Ok(ping_response_rdr)) => {
-                let ping_response_ok_or_error = ping_response_rdr.get();
-                match ping_response_ok_or_error
-                    .unwrap()
-                    .get_res()
-                    .unwrap()
-                    .which()
-                    .unwrap()
-                {
-                    vsapi2::ok_or_error::Which::Ok(_) => {
-                        return Ok(());
-                    }
-                    vsapi2::ok_or_error::Which::Error(err_rdr) => {
-                        let err_obj = err_rdr.unwrap();
-                        return Err(new_coded_error(err_obj));
-                    }
-                }
-            }
-            Ok(Err(capnp_err)) => {
-                return Err(capnp_err.into());
-            }
-            Err(_) => {
-                // TIMEOUT
-                return Err(VSApiError::Timeout("ping".to_string()));
-            }
+        let ping_response_rdr =
+            rpc_with_timeout("ping", dur, vs_h.ping_request().send().promise).await?;
+        match ping_response_rdr.get()?.get_res()?.which()? {
+            vsapi2::ok_or_error::Which::Ok(_) => Ok(()),
+            vsapi2::ok_or_error::Which::Error(err_rdr) => Err(new_coded_error(err_rdr?)),
         }
     }
 }
@@ -808,6 +830,22 @@ fn sign_payload(
     signer.update(&data).unwrap();
     let signature = signer.sign_to_vec().unwrap();
     signature
+}
+
+/// Wrap a Cap'n Proto RPC future with a timeout, mapping errors to VSApiError.
+async fn rpc_with_timeout<F, T>(
+    name: &'static str,
+    duration: Duration,
+    fut: F,
+) -> Result<T, VSApiError>
+where
+    F: Future<Output = Result<T, capnp::Error>>,
+{
+    match tokio::time::timeout(duration, fut).await {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(capnp_err)) => Err(capnp_err.into()),
+        Err(_elapsed) => Err(VSApiError::Timeout(name.to_string())),
+    }
 }
 
 /// Create a VSApiError::CodedError from a capn proto vsapi2::error::Reader.
