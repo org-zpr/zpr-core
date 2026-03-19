@@ -207,10 +207,10 @@ impl<Pkt> Sender<Pkt> {
     /// Implementation of `Future::poll` to wait for send of a given packet.
     pub fn poll_send(&mut self, cx: &mut Context<'_>, id: QueuedPacketId) -> Poll<Option<SeqNum>> {
         let offset = id.wrapping_sub(self.last_enqueued) as i64;
-        assert!(
-            offset <= 0,
-            "poll of packet which has not yet been enqueued"
-        );
+        if offset > 0 {
+            // The sender was reset; this packet is no longer tracked.  Treat as cancelled.
+            return Poll::Ready(None);
+        }
 
         if -offset >= self.blocked.len() as i64 {
             return Poll::Ready(self.lookup_seq_num(id));
@@ -231,7 +231,10 @@ impl<Pkt> Sender<Pkt> {
     /// of a given packet.
     pub fn poll_ack(&mut self, cx: &mut Context<'_>, sn: SeqNum) -> Poll<()> {
         let offset = sn.wrapping_sub(self.last_sent) as i64;
-        assert!(offset <= 0, "poll of packet which has not yet been sent");
+        if offset > 0 {
+            // The sender was reset; this packet is no longer tracked.  Treat as acked.
+            return Poll::Ready(());
+        }
 
         if -offset >= self.unacked.len() as i64 {
             return Poll::Ready(());
@@ -442,6 +445,12 @@ impl<Pkt> Sender<Pkt> {
                 pkt.as_mut()
                     .map(|(pkt, _waker)| (sn_base.wrapping_add(offset as u64), pkt))
             })
+    }
+
+    /// Reset to the same state as `Sender::new()`.
+    /// Any queued or unacknowledged packets are discarded.
+    pub fn reset(&mut self) {
+        *self = Self::new();
     }
 
     /// Destructs this object, returning all currently queued packets for
@@ -655,13 +664,18 @@ impl Receiver {
     pub fn window_size(&self) -> usize {
         self.window_size
     }
+
+    /// Reset to the same state as `Receiver::new(self.window_size)`.
+    pub fn reset(&mut self) {
+        *self = Self::new(self.window_size);
+    }
 }
 
 #[cfg(test)]
 mod sender_tests {
     use super::{EnqueueResult::*, QueuedPacketId, Sender, SeqNum};
     use std::sync::{Arc, atomic};
-    use std::task::{Context, Wake};
+    use std::task::{Context, Poll, Wake};
 
     struct TestWaker {
         woken: atomic::AtomicBool,
@@ -1026,6 +1040,92 @@ mod sender_tests {
     }
 
     #[test]
+    fn test_reset_quiesces() {
+        // After sending and acking a packet, reset should restore to initial state.
+        let mut send: Sender<_> = Sender::new();
+        enqueue_packet_expect_sent_with_sn(&mut send, 42u32, 0);
+        send.process_ack(0);
+        send.reset();
+        assert_quiesced(&send);
+        // First packet after reset should be seq=0 again.
+        enqueue_packet_expect_sent_with_sn(&mut send, 99u32, 0);
+        send.process_ack(0);
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_reset_discards_in_flight_packets() {
+        // Reset should discard unacked and blocked packets, waking their wakers.
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(2);
+
+        let tw0 = TestWaker::new();
+        let wk0 = tw0.clone().into();
+        let mut cx0 = Context::from_waker(&wk0);
+        let (sn0, _) = enqueue_packet_expect_sent(&mut send, ());
+        let _ = send.poll_ack(&mut cx0, sn0);
+
+        let tw1 = TestWaker::new();
+        let wk1 = tw1.clone().into();
+        let mut cx1 = Context::from_waker(&wk1);
+        let (sn1, _) = enqueue_packet_expect_sent(&mut send, ());
+        let _ = send.poll_ack(&mut cx1, sn1);
+
+        let tw2 = TestWaker::new();
+        let wk2 = tw2.clone().into();
+        let mut cx2 = Context::from_waker(&wk2);
+        let id2 = enqueue_packet_expect_queued(&mut send, ());
+        let _ = send.poll_send(&mut cx2, id2);
+
+        send.reset();
+
+        // All wakers should have been notified.
+        assert!(tw0.woken());
+        assert!(tw1.woken());
+        assert!(tw2.woken());
+
+        assert_quiesced(&send);
+        // First packet after reset is seq=0.
+        enqueue_packet_expect_sent_with_sn(&mut send, (), 0);
+    }
+
+    #[test]
+    fn test_poll_ack_after_reset_returns_ready() {
+        // Regression: after reset(), poll_ack with a stale seq_num must not panic.
+        // This mirrors what happens when an async Acked future re-polls after the
+        // sender is reset at the start of a new session.
+        let mut send: Sender<()> = Sender::new();
+        let tw = TestWaker::new();
+        let wk = tw.clone().into();
+        let mut cx = Context::from_waker(&wk);
+
+        let (sn, _) = enqueue_packet_expect_sent(&mut send, ());
+        assert!(send.poll_ack(&mut cx, sn).is_pending());
+
+        send.reset();
+
+        // poll_ack with the old sn must return Ready (not panic).
+        assert!(send.poll_ack(&mut cx, sn).is_ready());
+    }
+
+    #[test]
+    fn test_poll_send_after_reset_returns_ready() {
+        // Regression: after reset(), poll_send with a stale QueuedPacketId must not panic.
+        let mut send: Sender<()> = Sender::new();
+        let (_, _) = enqueue_packet_expect_sent(&mut send, ()); // fills the window (size=1)
+        let tw = TestWaker::new();
+        let wk = tw.clone().into();
+        let mut cx = Context::from_waker(&wk);
+        let id = enqueue_packet_expect_queued(&mut send, ());
+        assert!(send.poll_send(&mut cx, id).is_pending());
+
+        send.reset();
+
+        // poll_send with the old id must return Ready(None) (not panic).
+        assert!(matches!(send.poll_send(&mut cx, id), Poll::Ready(None)));
+    }
+
+    #[test]
     fn test_polls() {
         let mut send: Sender<_> = Sender::new();
         send.adjust_window_size(3);
@@ -1176,5 +1276,35 @@ mod receiver_tests {
         assert!(matches!(recv.process_packet(0), Ignore));
         assert!(matches!(recv.process_packet(4), AckAndProcess));
         assert!(matches!(recv.process_packet(1), Ignore));
+    }
+
+    #[test]
+    fn test_reset_allows_seq0_again() {
+        // This is the core regression scenario: after receiving seq=0 in a first
+        // session, reset should allow seq=0 to be accepted again in a new session.
+        let mut recv = Receiver::new(32);
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        // Without reset, a second seq=0 would be a duplicate.
+        assert!(matches!(recv.process_packet(0), AckDoNotProcess));
+
+        recv.reset();
+
+        // After reset, seq=0 must be accepted as a fresh packet.
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+    }
+
+    #[test]
+    fn test_reset_preserves_window_size() {
+        // reset() should restore state but keep the configured window size.
+        let window = 16;
+        let mut recv = Receiver::new(window);
+        for i in 0..20u64 {
+            recv.process_packet(i);
+        }
+        recv.reset();
+        assert_eq!(recv.window_size(), window);
+        // Should accept in-order packets from seq=0 again.
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        assert!(matches!(recv.process_packet(1), AckAndProcess));
     }
 }

@@ -617,6 +617,11 @@ impl LinkStateWrapper {
 
         debug!(target: LINK_STATE, "Link {link_id} finished keying.  Starting hello");
 
+        // Reset ZDPR state for the new session.  The previous session's sequence
+        // numbers must not carry over because the remote peer will start fresh.
+        peer_state.zdpr_send.lock().unwrap().reset();
+        peer_state.zdpr_recv.lock().unwrap().reset();
+
         locked_fsm.set_state(LinkState::Helloing);
 
         // IF this is an adapter, it's expected to issue the hello
