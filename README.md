@@ -25,7 +25,7 @@ To run the ZPRnet you need at least:
 
 * The packet handler (called `ph`) which can run as either a **node** or an **adapter**.
   * Find that in this repo under `adapter/ph`.
-* The Visa Service (called `vservice`)
+* The Visa Service (called `vs`)
   * In the [zpr-visaservice repo](https://github.com/org-zpr/zpr-visaservice)
 * If you do not have a compiled policy you need the ZPL compiler (called `zplc`)
   * In the [zpr-compiler repo](https://github.com/org-zpr/zpr-compiler)
@@ -57,7 +57,7 @@ openssl rsa -in node-private-key.pem -pubout -out node-public-key.pem
 openssl rsa -in vs-private-key.pem -pubout -out vs-public-key.pem
 ```
 
-Then in the policy `zplc` file, add a bootstrap section that looks like 
+Then in the policy `zplc` file, add a bootstrap section that looks like
 this:
 
 ```toml
@@ -66,11 +66,14 @@ this:
 "vs.zpr" = "/path/to/vs-public-key.pem"
 ```
 
+_Note: The visa service key is not yet required (as of 3/18/2026) -- but soon will be._
+
+
 ### Create a certificate authority keypair
 
-In addition to the visa service authentication, there is a separate 
+In addition to the visa service authentication, there is a separate
 authentication check when the link is first brought up between an adapter
-and a node.  This uses certificates holding noise keys and signed by a 
+and a node.  This uses certificates holding noise keys and signed by a
 certificate authority (CA).  Adapters verify the certs they get from
 a node.  So we need a certificate authority:
 
@@ -108,7 +111,7 @@ Using the handy `zpr-pki` script:
 
 ### Create TLS credentials for the visa service
 
-These are used over the HTTPS admin interface.  By default the visa service will 
+These are used over the HTTPS admin interface.  By default the visa service will
 look for two files:
 
 - `admin-tls-cert.pem`
@@ -131,6 +134,8 @@ Sample configuration, place in a file named `node-conf.toml`.
 
 ```toml
 [global]
+# ca_file is optional:
+#   ca_file = "auth-ca.crt"
 name = "node.zpr.org"
 certificate_file = "node-noise.crt"
 private_key_file = "node-noise.key"
@@ -147,6 +152,8 @@ auth_private_key = "node-private-key.pem"
 
 ```toml
 [global]
+# ca_file is required.
+ca_file = "auth-ca.crt"
 zpr_addr = [ "fd5a:5052::1" ]
 tun_if = "tun9"
 
@@ -160,7 +167,7 @@ bootstrap_key = "vs-private-key.pem"
 
 ### Configure the visa service (optional)
 
-The visa service does not require custom configuration. However if you want 
+The visa service does not require custom configuration. However if you want
 to customize it you can get it to spit out a configuration file. The default
 name for it is `vs.toml`, so:
 
@@ -222,7 +229,6 @@ admin_attrs = [ [ "endpoint.zpr.adapter.cn", "admin.zpr.org" ] ]
 
 [bootstrap]
 "node.zpr.org" = "node-public-key.pem"
-"vs.zpr" = "vs-public-key.pem"
 "web.zpr.org" = "web-public-key.pem"
 
 [protocols.http]
@@ -255,6 +261,7 @@ In the config file above we set the name to `tun9` so we set that up
 here:
 
 ```bash
+# IP configuration for the node.
 sudo ip tuntap add name tun9 mode tun multi_queue
 sudo ip link set tun9 mtu 1400
 sudo addr add fd5a:5052:90de::1/32 dev tun9
@@ -273,6 +280,7 @@ If the visa service is also running on linux as this guide assumes, then we
 need to configure its TUN interface similar to what we did for the node.
 
 ```bash
+# IP configuration for the visa service adapter.
 sudo ip tuntap add name tun9 mode tun multi_queue
 sudo ip link set tun9 mtu 1400
 sudo addr add fd5a:5052::1/32 dev tun9
