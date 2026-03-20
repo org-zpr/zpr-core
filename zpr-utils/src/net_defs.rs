@@ -396,70 +396,68 @@ pub fn vsapi_ip_to_defs_ip(vsapi_proto: VsapiIpProtocol) -> Result<IpProtocol, &
     }
 }
 
-/// RFC 1071 Internet Checksum.  The input data must be non-empty, and
-/// length at most ~128 KiB.
-pub fn inet_checksum(data: &[u8]) -> [u8; 2] {
-    // NOTE: This benchmarks about twice as fast as the `internet-checksum` crate,
-    // and is many fewer lines of code.
-
-    fn inet_checksum_helper(extra_sum: u16, data16: &[u16]) -> u16 {
-        let mut sum = extra_sum as u32;
-
-        for &x in data16 {
-            sum += x as u32;
+/// Add an IPv4/v6 pseudo-header to an Internet checksum.
+pub fn checksum_ip_pseudo_header(
+    csum: &mut internet_checksum::Checksum,
+    ip_version: IpVersion,
+    src_address: &IpAddress,
+    dst_address: &IpAddress,
+    ip_protocol: IpProtocol,
+    l4_length: u32,
+) {
+    match ip_version {
+        4 => {
+            csum.add_bytes(&src_address.read_as_v4());
+            csum.add_bytes(&dst_address.read_as_v4());
+            csum.add_bytes(&[0u8, ip_protocol]);
+            csum.add_bytes(&(l4_length as u16).to_be_bytes());
         }
 
-        // reduce to form ones-complement sum
-        sum = (sum & 0xffff) + (sum >> 16);
-        sum += sum >> 16;
+        6 => {
+            csum.add_bytes(&src_address.v6);
+            csum.add_bytes(&dst_address.v6);
+            csum.add_bytes(&l4_length.to_be_bytes());
+            csum.add_bytes(&[0u8, ip_protocol]); // technically should have two more leading 0 bytes, but these do not affect the result
+        }
 
-        // Internet checksum is bitwise negated
-        !sum as u16
-    }
-
-    if data.is_empty() {
-        return [0xffu8; 2];
-    }
-
-    // Longer than this, our 32-bit temporary sum would overflow.
-    debug_assert!(data.len() <= ((u32::MAX / (u16::MAX as u32)) * 2) as usize);
-
-    // Split into the aligned and unaligned case.  We could sum 32 bits at a
-    // time instead, but we're mostly summing short spans, so having only
-    // one unaligned case shortens the branch logic here.
-    if (&data[0] as *const u8 as *const u16).is_aligned() ^ (data.len() % 2 == 1) {
-        let first_byte = if data.len() % 2 == 0 { 0 } else { data[0] };
-        let extra_sum = u16::from_ne_bytes([0, first_byte]);
-
-        // SAFETY: we have verified alignment and length
-        let data16 = unsafe {
-            std::slice::from_raw_parts(
-                &data[data.len() % 2] as *const u8 as *const u16,
-                data.len() / 2,
-            )
-        };
-
-        inet_checksum_helper(extra_sum, data16).to_ne_bytes()
-    } else {
-        let first_byte = if data.len() % 2 == 0 { data[0] } else { 0 };
-        let extra_sum = u16::from_ne_bytes([data[data.len() - 1], first_byte]);
-
-        // SAFETY: we are compensating for alignment
-        let data16 = unsafe {
-            std::slice::from_raw_parts(
-                &data[1 - data.len() % 2] as *const u8 as *const u16,
-                (data.len() - 1) / 2,
-            )
-        };
-        // NOTE: purposefully to_le_bytes(), to compensate for misalignment
-        inet_checksum_helper(extra_sum, data16)
-            .swap_bytes()
-            .to_ne_bytes()
+        _ => panic!("bad IP version"),
     }
 }
 
-pub fn validate_inet_checksum(data: &[u8]) -> bool {
-    inet_checksum(data) == [0u8; 2]
+pub fn inet_l4_checksum(
+    ip_version: IpVersion,
+    src_address: &IpAddress,
+    dst_address: &IpAddress,
+    ip_protocol: IpProtocol,
+    l4_payload: &[u8],
+) -> [u8; 2] {
+    let mut csum = internet_checksum::Checksum::new();
+    checksum_ip_pseudo_header(
+        &mut csum,
+        ip_version,
+        src_address,
+        dst_address,
+        ip_protocol,
+        l4_payload.len() as u32,
+    );
+    csum.add_bytes(l4_payload);
+    csum.checksum()
+}
+
+pub fn validate_inet_l4_checksum(
+    ip_version: IpVersion,
+    src_address: &IpAddress,
+    dst_address: &IpAddress,
+    ip_protocol: IpProtocol,
+    l4_payload: &[u8],
+) -> bool {
+    inet_l4_checksum(
+        ip_version,
+        src_address,
+        dst_address,
+        ip_protocol,
+        l4_payload,
+    ) == [0u8; 2]
 }
 
 #[cfg(test)]
@@ -499,78 +497,49 @@ mod tests {
     }
 
     #[test]
-    fn test_checksum_empty() {
-        assert_eq!(inet_checksum(&[]), [0xffu8; 2]);
-    }
-
-    #[test]
-    fn test_checksum() {
-        for buf in TEST_DATA {
-            let mut v = Vec::new();
-            v.extend_from_slice(buf);
-            assert_eq!(inet_checksum(v.as_slice()), [0u8; 2]);
+    fn test_pseudo_header_checksum() {
+        for (ip_version, src_address, dst_address, ip_protocol, data) in L4_TEST_DATA {
+            assert_eq!(
+                inet_l4_checksum(*ip_version, src_address, dst_address, *ip_protocol, data),
+                [0u8; 2]
+            );
         }
     }
 
-    #[test]
-    fn test_checksum_order() {
-        for buf in TEST_DATA {
-            let mut v = Vec::new();
-            v.extend_from_slice(&buf[..buf.len() - 2]);
-            assert_eq!(inet_checksum(v.as_slice()), buf[buf.len() - 2..]);
-        }
-    }
-
-    #[test]
-    fn test_checksum_unaligned() {
-        for buf in TEST_DATA {
-            let mut v = Vec::new();
-            v.push(0);
-            v.extend_from_slice(buf);
-            assert_eq!(inet_checksum(&v[1..]), [0u8; 2]);
-        }
-    }
-
-    #[test]
-    fn test_checksum_order_unaligned() {
-        for buf in TEST_DATA {
-            let mut v = Vec::new();
-            v.push(0);
-            v.extend_from_slice(&buf[..buf.len() - 2]);
-            assert_eq!(inet_checksum(v.as_slice()), buf[buf.len() - 2..]);
-        }
-    }
-
-    #[test]
-    fn test_checksum_max_len() {
-        assert_eq!(inet_checksum(&[0xffu8; (1 << 17) + 2]), [0u8; 2]);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_checksum_over_max_len() {
-        let _ = inet_checksum(&[0xffu8; (1 << 17) + 3]);
-    }
-
-    // NOTE: because of how these sequences are stored in the object file,
-    // they are arbitrarily aligned.  In order to ensure a specific
-    // alignment, copy them into a Vec before using.  Memory allocated to a
-    // Vec is all-but-guaranteed to be aligned at least to the system word size.
-    const TEST_DATA: &[&[u8]] = &[
-        // IP headers from the wild
-        &[
-            0x45, 0x00, 0x00, 0x5b, 0xd7, 0xbe, 0x40, 0x00, 0x40, 0x06, 0x6a, 0x45, 0xc0, 0xa8,
-            0x58, 0x93, 0x8e, 0xfa, 0x50, 0x63,
-        ],
-        &[
-            0x45, 0x00, 0x04, 0x02, 0x03, 0xe5, 0x00, 0x00, 0x78, 0x06, 0x6a, 0x4c, 0x8e, 0xfb,
-            0x28, 0x8e, 0xc0, 0xa8, 0x58, 0x93,
-        ],
-        &[
-            0x45, 0x00, 0x01, 0x88, 0x03, 0xe6, 0x00, 0x00, 0x78, 0x06, 0x6c, 0xc5, 0x8e, 0xfb,
-            0x28, 0x8e, 0xc0, 0xa8, 0x58, 0x93,
-        ],
-        // odd length
-        &[0x01, 0x02, 0x03, 0x04, 0x05, 0xf9, 0xf6],
+    const L4_TEST_DATA: &[(IpVersion, IpAddress, IpAddress, IpProtocol, &[u8])] = &[
+        (
+            4,
+            IpAddress::new_from_v4([139, 255, 192, 233]),
+            IpAddress::new_from_v4([10, 132, 4, 55]),
+            ip_number::TCP,
+            &[
+                0x01, 0xbb, 0xc3, 0x74, 0x4b, 0xad, 0x33, 0x82, 0x10, 0xc5, 0x41, 0xfe, 0x80, 0x18,
+                0x03, 0x5f, 0x7b, 0x94, 0x00, 0x00, 0x01, 0x01, 0x08, 0x0a, 0x26, 0x09, 0x2c, 0x37,
+                0x55, 0x41, 0x13, 0xf5, 0x17, 0x03, 0x03, 0x00, 0x1a, 0xed, 0x93, 0xf6, 0x3d, 0xc0,
+                0xf6, 0x2f, 0xaa, 0x80, 0x03, 0xc7, 0xc8, 0x5b, 0x99, 0xba, 0xf1, 0xc5, 0xd0, 0x8a,
+                0xfe, 0x12, 0xb8, 0x6f, 0xee, 0x5c, 0xd5,
+            ],
+        ),
+        (
+            6,
+            IpAddress {
+                v6: [
+                    0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0xc, 0xbb, 0x7e, 0xa4, 0x55, 0xf1, 0x7, 0x9f,
+                ],
+            },
+            IpAddress {
+                v6: [
+                    0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0xc, 0xbb, 0x7e, 0xa4, 0x55, 0xf1, 0x7, 0x9f,
+                ],
+            },
+            ip_number::IPV6_ICMP,
+            &[
+                0x80, 0x00, 0x16, 0x20, 0x00, 0x05, 0x00, 0x01, 0xca, 0xd5, 0xb1, 0x69, 0x00, 0x00,
+                0x00, 0x00, 0x51, 0x6b, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x11, 0x12, 0x13,
+                0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21,
+                0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+                0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+            ],
+        ),
     ];
 }

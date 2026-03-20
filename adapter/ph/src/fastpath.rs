@@ -22,6 +22,7 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use classifier::{IPv4Header, IPv6Header};
+use internet_checksum;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -576,10 +577,16 @@ pub fn maybe_capture_batch<'a>(
 
 /// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
 pub fn encrypt_null(pkt: &mut Packet) {
-    // RFC 6.5 § 5.25.2
-    pkt.put(
-        net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice(),
-    );
+    let mut csum =
+        internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]);
+
+    if (pkt.body().len() - std::mem::size_of::<zdp::ZdpZpiHeader>()) % 2 != 0 {
+        // TODO: this is hack to allow misaligned checksum to still pass validation...
+        // I have an outstanding Q to Frank on how we actually want to deal with this
+        csum.swap(0, 1);
+    }
+
+    pkt.put(csum.as_slice());
 }
 
 /// Slap an HMAC onto the end of the packet.
@@ -639,7 +646,9 @@ impl From<DecryptError> for FastpathCounterType {
 /// "Decrypt" a packet using NULL encryption.
 fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
-    if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
+    if internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
+        != [0u8; 2]
+    {
         return Err(DecryptError::BadChecksum);
     }
 
@@ -920,6 +929,7 @@ mod test {
         let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
         let mut pkt = Packet::new(buf, 64);
 
+        // Note odd length! catches bugs
         pkt.put(&b"this is a test of encrypt zero"[..]);
 
         let orig_len = pkt.body().len();

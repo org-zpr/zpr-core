@@ -122,7 +122,7 @@ impl Visa {
     }
 
     pub fn get_tc(&self) -> tc::Ip5TupleTc {
-        tc::Ip5TupleTc::new_with_compression_mode(0, self.visa.get_five_tuple().into())
+        tc::Ip5TupleTc::new(self.visa.get_five_tuple().into())
     }
 
     pub fn unlink_forwarding_entry(&mut self, forwarding_entry: &ForwardingEntry) -> bool {
