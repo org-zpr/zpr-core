@@ -25,6 +25,7 @@ dashmap = { version = "6.0.1" }
 enum-map = { version = "2.7.3" }
 enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
+internet-checksum = { workspace = true }
 ip_network_table-deps-treebitmap = { version = "0.5.0" }
 ipnet = { workspace = true }
 itertools = "0.14"
