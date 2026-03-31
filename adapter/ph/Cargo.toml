@@ -5,42 +5,38 @@ edition = "2024"
 license = "Apache-2.0"
 
 [dependencies]
-aarc = { version = "0.4.0", optional = true }
 admin-api = { path = "../admin-api" }
-arc-swap = { version = "1.7", optional = true }
 arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
-bytes = { workspace = true }
+bytes = { version = "1.11.1" }
 capnp = { workspace = true }
 capnp-rpc = { workspace = true }
-cbpf-rs = { path = "../../cbpf-rs" }
+cbpf-rs = { workspace = true }
 chrono = "0.4.39"
 clap = { workspace = true, features = ["env"] }
 clap_complete = { workspace = true, optional = true }
-crossbeam-epoch = { version = "0.9.18", optional = true }
-cslab = { path = "../../cslab" }
+cslab = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "cslab-v0.1.2" }
 curve25519-dalek = "4.1.3"
 dashmap = { version = "6.0.1" }
 enum-map = { version = "2.7.3" }
 enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
 internet-checksum = { workspace = true }
-ip_network_table-deps-treebitmap = { version = "0.5.0" }
 ipnet = { workspace = true }
 itertools = "0.14"
-libc = { workspace = true }
+libc = { version = "0.2.183" }
 libnode = { package = "libnode2", path = "../../libnode2" }
-nix = { workspace = true, features = ["fs", "ioctl", "net", "poll", "uio"] }
+nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll", "uio"] }
 open-enum = { version = "0.5.1" }
 openssl = { workspace = true }
 openssl-sys = { version = "0.9.102" }
-range-set-blaze = { version = "0.5.0" }
+rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.1", default-features = false }
 reqwest = { version = "0.13.1", features = ["json", "query"] }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.140"
 snow = "0.10.0"
-socket2 = { workspace = true, features = ["all"] }
+socket2 = { version = "0.5.7", features = ["all"] }
 strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
@@ -49,10 +45,10 @@ toml = "0.9.11"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = "2.5.4"
-zerocopy = { workspace = true }
+zerocopy = { version = "0.8.3", features = ["derive", "std"] }
 zpr = { workspace = true }
-zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "zerocopy"] }
-zpr-utils = { path = "../../zpr-utils" }
+zpr-ext = { workspace = true, features = ["bytes", "tokio", "socket2", "zerocopy"] }
+zpr-utils = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-utils-v0.2.0"}
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7.4", optional = true }
@@ -67,11 +63,11 @@ tokio = { workspace = true, features = ["test-util"] }
 [features]
 default = ["io-uring", "rcu-crossbeam-epoch"]
 ci = []
-rcu-aarc = ["dep:aarc"]
-rcu-arc-swap = ["dep:arc-swap"]
-rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
-rcu-mutex-arc = []
-rcu-rwlock = []
+rcu-aarc = ["rcu/rcu-aarc", "zpr/rcu-aarc"]
+rcu-arc-swap = ["rcu/rcu-arc-swap", "zpr/rcu-arc-swap"]
+rcu-crossbeam-epoch = ["rcu/rcu-crossbeam-epoch", "zpr/rcu-crossbeam-epoch"]
+rcu-mutex-arc = ["rcu/rcu-mutex-arc", "zpr/rcu-mutex-arc"]
+rcu-rwlock = ["rcu/rcu-rwlock", "zpr/rcu-rwlock"]
 complete = ["clap_complete"]
 
 [[bin]]

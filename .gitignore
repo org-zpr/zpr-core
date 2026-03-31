@@ -5,3 +5,4 @@ integration-test/pregen/zplc
 integration-test/valkey-server
 target/
 completions/
+*.pcap

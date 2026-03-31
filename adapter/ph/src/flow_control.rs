@@ -1,8 +1,8 @@
 //! Controls whether a packet will be copied and captured in the packet
 //! capture framework
 
-use crate::rcu::RcuBox;
 use cbpf_rs::BpfProgram;
+use rcu::RcuBox;
 
 pub struct FlowControl {
     inner_control: RcuBox<InnerFlow>,

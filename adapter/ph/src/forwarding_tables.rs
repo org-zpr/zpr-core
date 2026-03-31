@@ -4,8 +4,8 @@
 
 #![allow(dead_code)]
 
-use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use cslab::{RcuCslab, RcuCslabReader};
+use rcu::{RcuBox, RcuCslabEntryGuard};
 use std::sync::{Mutex, MutexGuard};
 use zpr::packet_info::{ForwardingEntry, StreamId, VisaId};
 

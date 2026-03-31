@@ -11,9 +11,10 @@ use cbpf_rs;
 use clap::Parser;
 use cli::cmd_line_inter as svc;
 use pcap::{Capture, Linktype};
+use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 use std::borrow::Borrow;
 use std::fs::OpenOptions;
-use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -47,6 +48,8 @@ enum CliError {
     CaptureError(#[from] pcap::Error),
     #[error("Deserialization Error")]
     DeserializationError(#[from] std::array::TryFromSliceError),
+    #[error("ReadLineError")]
+    ReadLineError(#[from] ReadlineError),
 }
 
 // thiserror does not propagate From implementations up
@@ -70,7 +73,7 @@ async fn main() -> Result<(), CliError> {
     let cap_socket = args.cap_socket.clone();
 
     if let Some(command) = args.command {
-        process_command(command, &socket, cap_socket)
+        process_command(command, &socket, &cap_socket)
             .await
             .map(|_| {})
     } else {
@@ -78,34 +81,32 @@ async fn main() -> Result<(), CliError> {
     }
 }
 
-async fn run_cli(socket: PathBuf, cap_socket: Option<PathBuf>) -> Result<(), CliError> {
+async fn run_cli(socket: PathBuf, cap_socket: PathBuf) -> Result<(), CliError> {
+    let mut rl = DefaultEditor::new()?;
+
+    // Optionally load history from a file, allows for cross sessioin history
+    let history_path = dirs::home_dir().map(|p| p.join(".ph_cli_history"));
+    if let Some(ref path) = history_path {
+        let _ = rl.load_history(path); // ignore error if file doesn't exist yet
+    }
+
     loop {
-        print!("> ");
-        io::stdout().flush()?;
-        let mut line = String::new();
-        match io::stdin().read_line(&mut line) {
-            Ok(0) => {
-                println!("Goodbye!");
-                return Ok(());
-            }
-            Err(e) => {
-                println!("{}", e);
-                return Err(CliError::ParseError("Failed to read line".to_string()));
-            }
-            Ok(_) => {
+        match rl.readline("> ") {
+            Ok(line) => {
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
                 }
 
-                match parse_and_exec(line, &socket, cap_socket.clone()).await {
+                rl.add_history_entry(line)?;
+
+                match parse_and_exec(line, &socket, &cap_socket).await {
                     Ok(quit) => {
                         if quit {
-                            return Ok(());
+                            break;
                         }
                     }
                     Err(err) => match err {
-                        // Quits the program if the specified port is not open
                         CliError::OsError(err) => match err.kind() {
                             std::io::ErrorKind::NotFound => return Err(CliError::OsError(err)),
                             _ => println!("Failed to parse command \"{}\".  Error: {}", line, err),
@@ -114,14 +115,31 @@ async fn run_cli(socket: PathBuf, cap_socket: Option<PathBuf>) -> Result<(), Cli
                     },
                 }
             }
+            Err(ReadlineError::Interrupted) => {
+                continue;
+            }
+            Err(ReadlineError::Eof) => {
+                break;
+            }
+            Err(err) => {
+                println!("Error: {}", err);
+                return Err(CliError::ParseError(err.to_string()));
+            }
         }
     }
+
+    // Save history on exit
+    if let Some(ref path) = history_path {
+        let _ = rl.save_history(path);
+    }
+
+    Ok(())
 }
 
 async fn parse_and_exec(
     line: &str,
     socket: &PathBuf,
-    cap_socket: Option<PathBuf>,
+    cap_socket: &PathBuf,
 ) -> Result<bool, CliError> {
     let args = shlex::split(line).ok_or(Error::other("Invalid quoting"))?;
     let cli = CliCommand::try_parse_from(args).map_err(|e| Error::other(e.to_string()))?;
@@ -132,7 +150,7 @@ async fn parse_and_exec(
 async fn process_command(
     command: Commands,
     socket: &PathBuf,
-    cap_socket: Option<PathBuf>,
+    cap_socket: &PathBuf,
 ) -> Result<bool, CliError> {
     // Must quit immediately otherwise you get an error if the port is no longer open
     if matches!(command, Commands::Quit) {
@@ -303,49 +321,39 @@ async fn flush_capture_file_task(service: svc::Client) -> Result<(), CliError> {
 /// need to use the pcap library, and can just have knowledge of the serialized
 /// format and use exclusively cbpf-rs
 // TODO change parameters of set cap prog to take the actual bpf vals instead of string
-async fn set_capture_program_task(
-    service: svc::Client,
-    program: Option<String>,
-) -> Result<(), CliError> {
-    // Ensures that a program has properly been provided before sending message because
-    // there is no default program
-    match program {
-        Some(program) => {
-            let capture = Capture::dead(Linktype::USER0)?;
-            let program = capture.compile(&program, true)?;
-            let instructions: &[pcap::BpfInstruction] = program.get_instructions();
+async fn set_capture_program_task(service: svc::Client, program: String) -> Result<(), CliError> {
+    let capture = Capture::dead(Linktype::USER0)?;
+    let program = capture.compile(&program, true)?;
+    let instructions: &[pcap::BpfInstruction] = program.get_instructions();
 
-            let mut request = service.set_capture_program_request();
-            let mut program_request = request
-                .get()
-                .init_program()
-                .init_bpf_prog(instructions.len() as u32);
+    let mut request = service.set_capture_program_request();
+    let mut program_request = request
+        .get()
+        .init_program()
+        .init_bpf_prog(instructions.len() as u32);
 
-            for (i, instruction) in instructions.iter().enumerate() {
-                let insn: &cbpf_rs::BpfInsn = instruction.borrow();
-                let mut insn_builder = program_request.reborrow().get(i as u32);
-                insn_builder.set_code(insn.code);
-                insn_builder.set_jt(insn.jt);
-                insn_builder.set_jf(insn.jf);
-                insn_builder.set_k(insn.k);
-            }
-
-            let response = request.send().promise.await?;
-            let results = response.get()?;
-            match results.get_result()?.which()? {
-                cli::success_or_error::Which::Success(_) => {
-                    println!("Capture program set")
-                }
-                cli::success_or_error::Which::Error(e) => {
-                    let result = e.unwrap().get_txt()?.to_string()?;
-                    println!("{result}");
-                    return Err(CliError::RpcError(result));
-                }
-            };
-            Ok(())
-        }
-        None => Err(CliError::ParseError("No capture program set".to_string())),
+    for (i, instruction) in instructions.iter().enumerate() {
+        let insn: &cbpf_rs::BpfInsn = instruction.borrow();
+        let mut insn_builder = program_request.reborrow().get(i as u32);
+        insn_builder.set_code(insn.code);
+        insn_builder.set_jt(insn.jt);
+        insn_builder.set_jf(insn.jf);
+        insn_builder.set_k(insn.k);
     }
+
+    let response = request.send().promise.await?;
+    let results = response.get()?;
+    match results.get_result()?.which()? {
+        cli::success_or_error::Which::Success(_) => {
+            println!("Capture program set")
+        }
+        cli::success_or_error::Which::Error(e) => {
+            let result = e.unwrap().get_txt()?.to_string()?;
+            println!("{result}");
+            return Err(CliError::RpcError(result));
+        }
+    };
+    Ok(())
 }
 
 async fn delete_capture_program_task(service: svc::Client) -> Result<(), CliError> {
@@ -361,8 +369,8 @@ async fn capture_sequence_task(
     service: svc::Client,
     file_path: String,
     time: u64,
-    program: Option<String>,
-    cap_socket: Option<PathBuf>,
+    program: String,
+    cap_socket: &PathBuf,
 ) -> Result<(), CliError> {
     let sleep_time = Duration::new(time, 0);
     handle_set_capture_file(file_path, cap_socket)?;
@@ -595,13 +603,7 @@ async fn get_node_addr_task(service: svc::Client) -> Result<(), CliError> {
 /// the file descriptor, upon receiving correct response, sends the fd as
 /// ancillary data, and awaits response again.
 #[allow(dead_code)]
-fn handle_set_capture_file(file_path: String, cap_socket: Option<PathBuf>) -> Result<(), CliError> {
-    if cap_socket.is_none() {
-        return Err(CliError::ParseError("No capture file socket".to_string()));
-    }
-
-    let socket: PathBuf = cap_socket.unwrap();
-
+fn handle_set_capture_file(file_path: String, cap_socket: &PathBuf) -> Result<(), CliError> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -617,7 +619,7 @@ fn handle_set_capture_file(file_path: String, cap_socket: Option<PathBuf>) -> Re
     let bufs = &mut [IoSlice::new(&buf)];
 
     // Establish connection with RPC worker, send command
-    let stream = &mut UnixStream::connect(socket).unwrap();
+    let stream = &mut UnixStream::connect(cap_socket).unwrap();
     stream.write_all(format!("{}\n", RpcCommands::SetCaptureFile).as_bytes())?;
     stream.flush()?;
 

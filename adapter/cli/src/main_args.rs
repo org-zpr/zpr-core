@@ -14,8 +14,8 @@ pub struct CmdlineArgs {
     pub socket: PathBuf,
 
     /// Path to the Packet Handler's capture socket, only necessary when performing Capture commands
-    #[arg(long, short = 'c')]
-    pub cap_socket: Option<PathBuf>,
+    #[arg(long, short = 'c', default_value_os_t = get_data_home().join("capture.sock"))]
+    pub cap_socket: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -84,13 +84,18 @@ pub struct CaptureArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum CaptureCommands {
-    #[command(arg_required_else_help = true)]
     /// Set a capture file
-    SetFile { file_path: String },
+    SetFile {
+        #[arg(required = true)]
+        file_path: String,
+    },
     /// Close a capture file
     CloseFile,
     /// Set a BPF to filter captured packets
-    SetProgram { program: Option<String> },
+    SetProgram {
+        #[arg(required = true, default_value = "link[0] == 1 or link[0] == 0")]
+        program: String,
+    },
     /// Delete any set BPF
     DeleteProgram,
     /// Flush any outstanding packets to the capture file
@@ -99,8 +104,10 @@ pub enum CaptureCommands {
     /// Create a temporary packet capture
     Sequence {
         file_path: String,
+        /// Duration in seconds
         duration: u64,
-        program: Option<String>,
+        #[arg(default_value = "link[0] == 1 or link[0] == 0")]
+        program: String,
     },
 }
 

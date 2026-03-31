@@ -12,7 +12,8 @@ use tracing::{error, info, warn};
 use zpr::vsapi_types::{AuthBlob, CommFlag, ConnectRequest, DisconnectReason, PacketDesc, VisaOp};
 
 use crate::vsconn::{
-    VSConnHandle, VSConnLifecycleEvent, VSConnectRequest, VSDisconnectNotice, VSVisaRequest,
+    StateFlag, VSConnHandle, VSConnLifecycleEvent, VSConnectRequest, VSDisconnectNotice,
+    VSVisaRequest,
 };
 use crate::vss::{ListProcessingResponse, VSSMessage};
 
@@ -42,6 +43,7 @@ pub async fn run_handler(
 
     let request = VSConnectRequest {
         zpr_addr: node_zpr_addr,
+        state: StateFlag::NoState,
     };
 
     info!("requesting a connect");
@@ -67,8 +69,8 @@ pub async fn run_handler(
                             match event {
                                 VSConnLifecycleEvent::RunLoopStarts =>
                                     info!("lifecycle event: VSConn run loop starts"),
-                                VSConnLifecycleEvent::ConnectedToVsApi =>
-                                    info!("lifecycle event: connected to VS API"),
+                                VSConnLifecycleEvent::ConnectedToVsApi(state_flag) =>
+                                    info!("lifecycle event: connected to VS API ({state_flag:?})"),
                                 VSConnLifecycleEvent::RunLoopExits =>
                                     info!("lifecycle event: VSConn run loop exits"),
                             }
