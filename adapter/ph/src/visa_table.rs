@@ -307,6 +307,12 @@ impl VisaTable {
     /// should be split into a "remove entries for link" path followed by a
     /// lookup table rebuild, leaving the visa alive when it still has valid
     /// entries.
+    ///
+    /// Note this is potentially slow operation and is called while holding
+    /// exclusive lock on the table.
+    ///
+    /// TODO: https://github.com/org-zpr/zpr-core/issues/1281
+    ///
     pub fn revoke_for_link(&mut self, link_id: LinkId, peer_table: &peer_table::PeerTable) {
         let to_revoke: Vec<VisaId> = self
             .table
