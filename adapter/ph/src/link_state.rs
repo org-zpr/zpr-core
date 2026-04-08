@@ -609,7 +609,7 @@ impl LinkStateWrapper {
                 }
             };
 
-            if (require_ca_signature && is_verified) || !require_ca_signature {
+            if is_verified || !require_ca_signature {
                 // assign special-peer name if this peer is special
                 for name in
                     special_peers::special_peer_names_from_x509_subject_name(cert.subject_name())

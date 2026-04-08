@@ -179,7 +179,7 @@ impl Assembly {
     /// Disconnect all non-internal, non-vs adapters.
     /// Used in a node context when (for example) we loose all state with the visa service.
     ///
-    /// TODO: Does this remove visas related to the adapter/peer?
+    /// Does not remove visas related to the adapter/peer.
     pub async fn disconnect_adapters(self: &Arc<Self>) {
         if matches!(self.ph_mode, PhMode::Node) {
             let mut join_set = tokio::task::JoinSet::new();

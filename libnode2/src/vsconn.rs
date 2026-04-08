@@ -262,26 +262,18 @@ impl VSConn {
                     tokio::select! {
                         // If we get a command, handle it.
                         cmd = self.cmd_rx.recv() => {
-                            match cmd {
-                                Some(cmd) => {
-                                    let is_stop_cmd = matches!(cmd, VS2Command::Stop(_));
-                                    match self.handle_command(&mut cmd_state, cmd).await {
-                                        Ok(_) => {}
-                                        Err(e) => {
-                                            error!(target: VS_RPC, "VSConn: handle_command error: {:?}", e);
-                                            self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopExits);
-                                            return Err(e.into());
-                                        }
-                                    };
-                                    if is_stop_cmd {
-                                        break;
-                                    }
-                                }
-                                None => {
-                                    info!(target: VS_RPC, "VSConn: command channel closed, exiting run loop");
-                                    // TODO: What is the cause here? Is this an error or just an exit?
-                                    break;
-                                }
+                            let Some(cmd) = cmd else {
+                                info!(target: VS_RPC, "VSConn: command channel closed, exiting run loop");
+                                break;
+                            };
+                            let is_stop_cmd = matches!(cmd, VS2Command::Stop(_));
+                            if let Err(e) = self.handle_command(&mut cmd_state, cmd).await {
+                                error!(target: VS_RPC, "VSConn: handle_command error: {:?}", e);
+                                self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopExits);
+                                return Err(e.into());
+                            }
+                            if is_stop_cmd {
+                                break;
                             }
                         }
 
@@ -293,7 +285,9 @@ impl VSConn {
                                 ping_failures = 0;
                                 continue;
                             }
-                            match self.do_ping(cmd_state.vs_handle.as_ref().unwrap(), ping_failures).await {
+                            // Back off a bit if we experienced an error last time.
+                            let next_ping_timeout = PING_MIN_TIMEOUT + Duration::from_secs(ping_failures as u64);
+                            match self.do_ping(cmd_state.vs_handle.as_ref().unwrap(), next_ping_timeout).await {
                                 Ok(_) => {
                                     trace!(target: VS_RPC, "VSConn: ping successful");
                                     ping_failures = 0;
@@ -473,7 +467,8 @@ impl VSConn {
                         "not connected to VS-API".to_string(),
                     ))
                 } else {
-                    self.do_ping(cmd_state.vs_handle.as_ref().unwrap(), 0).await
+                    self.do_ping(cmd_state.vs_handle.as_ref().unwrap(), PING_MIN_TIMEOUT)
+                        .await
                 };
                 if let Err(e) = resp_tx.send(resp) {
                     error!(target: VS_RPC, "failed to send ping response: {:?}", e);
@@ -733,12 +728,11 @@ impl VSConn {
     async fn do_ping(
         &self,
         vs_h: &vsapi2::v_s_handle::Client,
-        ping_failures: u32,
+        with_timeout: Duration,
     ) -> Result<(), VSApiError> {
-        let dur = PING_MIN_TIMEOUT + Duration::from_secs(ping_failures as u64);
         trace!(target: VS_RPC, "VS-API -> ping");
         let ping_response_rdr =
-            rpc_with_timeout("ping", dur, vs_h.ping_request().send().promise).await?;
+            rpc_with_timeout("ping", with_timeout, vs_h.ping_request().send().promise).await?;
         match ping_response_rdr.get()?.get_res()?.which()? {
             vsapi2::ok_or_error::Which::Ok(_) => Ok(()),
             vsapi2::ok_or_error::Which::Error(err_rdr) => Err(new_coded_error(err_rdr?)),
