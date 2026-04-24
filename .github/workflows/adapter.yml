@@ -13,6 +13,8 @@ on:
       - 'integration-test/**'
       - 'zpr/**'
       - '.github/workflows/adapter.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   pull_request:
     paths:
       - 'adapter/ph/**'
@@ -24,6 +26,8 @@ on:
       - 'integration-test/**'
       - 'zpr/**'
       - '.github/workflows/adapter.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
