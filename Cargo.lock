@@ -5151,13 +5151,8 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-<<<<<<< Updated upstream
-version = "0.12.0"
-source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.12.0#ef53de44c3b2b336b0b4719f8c1b4ed3440f7bcd"
-=======
 version = "0.16.0"
 source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.16.0#05dd786c44382e8683ef8118fbe1f20e9676e6c4"
->>>>>>> Stashed changes
 dependencies = [
  "capnp",
  "capnpc",
