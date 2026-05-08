@@ -2059,11 +2059,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tui-input",
-<<<<<<< Updated upstream
- "zpr 0.12.0",
-=======
  "zpr 0.16.0",
->>>>>>> Stashed changes
 ]
 
 [[package]]
@@ -2621,11 +2617,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "zerocopy",
-<<<<<<< Updated upstream
- "zpr 0.12.0",
-=======
  "zpr 0.16.0",
->>>>>>> Stashed changes
  "zpr-ext",
  "zpr-utils",
 ]
