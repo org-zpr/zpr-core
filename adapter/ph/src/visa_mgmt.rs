@@ -179,7 +179,10 @@ pub fn insert_visa(
     asm: &Arc<Assembly>,
     visa: vsapi_types::Visa,
 ) -> Result<VisaId, visa_table::VisaTableError> {
-    let addr = visa.dest_addr.clone();
+    if visa.visa_type != vsapi_types::VisaType::Full {
+        panic!("Forward only visas not yet supported")
+    }
+    let addr = visa.dock_pep.clone().unwrap().dest_addr;
     if asm.find_egress_link(addr.into()).is_none() {
         asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         return Err(visa_table::VisaTableError::DestNotFound(addr.into()));

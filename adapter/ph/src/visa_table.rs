@@ -19,7 +19,7 @@ use zpr::addrs::{VISA_SERVICE_ADDR, VISA_SERVICE_PORT};
 use zpr::five_tuple_lookup_table::FiveTupleLookupTable;
 use zpr::packet_info::{ForwardingEntry, LinkId, VisaId};
 use zpr::vsapi_types;
-use zpr::vsapi_types::{DockPep, HasFiveTuple, VsapiFiveTuple};
+use zpr::vsapi_types::{HasFiveTuple, VsapiFiveTuple};
 use zpr_utils::net_defs::IpAddress;
 
 // TODO: Figure out correct value for this visa expiration
@@ -92,7 +92,10 @@ impl Eq for VisaTimeout {}
 
 impl Visa {
     pub fn new(visa: vsapi_types::Visa) -> Self {
-        let ftuple = visa.get_five_tuple();
+        if visa.visa_type != vsapi_types::VisaType::Full {
+            panic!("Forward only visas not yet supported")
+        }
+        let ftuple = visa.dock_pep.clone().unwrap().get_five_tuple();
         Self {
             visa: visa,
             streams: Vec::new(),
@@ -122,7 +125,10 @@ impl Visa {
     }
 
     pub fn get_tc(&self) -> tc::Ip5TupleTc {
-        tc::Ip5TupleTc::new(self.visa.get_five_tuple().into())
+        if self.visa.visa_type != vsapi_types::VisaType::Full {
+            panic!("Forward only visas not yet supported")
+        }
+        tc::Ip5TupleTc::new(self.visa.dock_pep.as_ref().unwrap().get_five_tuple().into())
     }
 
     pub fn unlink_forwarding_entry(&mut self, forwarding_entry: &ForwardingEntry) -> bool {
@@ -386,21 +392,27 @@ fn make_tcp_visa(
     configuration: i64,
     expiration_ms: i64,
 ) -> vsapi_types::Visa {
-    let pepargs = vsapi_types::TcpUdpPep {
+    let tcp_pepargs = vsapi_types::TcpUdpPep {
         source_port: source_port,
         dest_port: dest_port,
         endpoint: vsapi_types::EndpointT::Any,
     };
     let dur = Duration::from_millis(expiration_ms as u64);
 
+    let dock_pep = vsapi_types::DockPep {
+        source_addr: (*source).into(),
+        dest_addr: (*dest).into(),
+        session_key: vsapi_types::KeySet::default(),
+        pep: vsapi_types::DockPepType::TCP(tcp_pepargs),
+    };
+
     vsapi_types::Visa {
         issuer_id: visa_id as u64,
         config: configuration,
         expires: UNIX_EPOCH + dur,
-        source_addr: (*source).into(),
-        dest_addr: (*dest).into(),
-        dock_pep: DockPep::TCP(pepargs),
-        session_key: vsapi_types::KeySet::default(),
+        visa_type: vsapi_types::VisaType::Full,
+        dock_pep: Some(dock_pep),
+        fwd_pep: None,
         cons: None,
     }
 }
@@ -427,7 +439,7 @@ mod tests {
             expires,
             [0; 4].into(),
             [0; 4].into(),
-            vsapi_types::DockPep::TCP(vsapi_types::TcpUdpPep {
+            vsapi_types::DockPepType::TCP(vsapi_types::TcpUdpPep {
                 source_port: 0,
                 dest_port: 0,
                 endpoint: vsapi_types::EndpointT::Any,
