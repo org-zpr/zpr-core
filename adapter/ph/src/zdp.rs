@@ -40,6 +40,8 @@ pub enum ZdpPacketType {
     RevokeZprAddress = 140,
     InitAuthenticationRequest = 141, // TODO: add to RFC 6
 
+    Canceled = 252, // TODO: add to RFC 17
+    Cancel = 253,   // TODO: add to RFC 17
     Acknowledgement = 254,
     Reserved255 = 255,
 }

@@ -25,10 +25,15 @@ pub async fn launch(asm: Arc<Assembly>, link_id: LinkId) {
             _ = retry_interval.tick(), if retry_needed => {
                 let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
                 let mut count = 0;
+
+                // Resend any packets which must be resent.
                 let packets = zdpr_send.retry_packets();
                 let packets = packets.inspect(|_| count += 1);
                 mgmt::core::build_and_egress_packets(&asm, link_id, packets);
                 mgmt::core::count_events(&asm, counters::ManagementCounterType::ResentPacket, count);
+
+                // Resend any cancels which must be resent.
+                zdpr_send.retry_cancels().for_each(|sn| mgmt::core::send_cancel(&asm, link_id, sn));
             }
 
             () = peer_state.zdpr_retry_timer_reset.notified() => retry_interval.reset(),

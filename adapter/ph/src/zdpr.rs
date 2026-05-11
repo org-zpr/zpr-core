@@ -12,6 +12,7 @@
 //! timeouts live elsewhere.
 
 use enum_map::{Enum, EnumMap};
+use replace_with::*;
 use std::collections::VecDeque;
 use std::task::{Context, Poll, Waker, ready};
 use zpr::packet_info::SeqNum;
@@ -19,9 +20,127 @@ use zpr::packet_info::SeqNum;
 /// ID of a packet which was queued for sending (but maybe not yet sent).
 pub type QueuedPacketId = u64;
 
+/// State of a packet which was just enqueued.
 pub enum EnqueueResult<'a, Pkt> {
+    /// The packet is ready to be sent with the given sequence number.
     Sent(SeqNum, &'a mut Pkt),
+    /// The packet has been enqueued with the given packet ID.
     Queued(QueuedPacketId),
+}
+
+/// Sender statistic.
+///
+/// Note that statistics exist only for those things which are opaque
+/// to the caller.  Statistics such as "number of packets sent" or
+/// "number of ACKs received" are therefore not tracked.
+#[derive(Clone, Copy, Debug, Enum, strum::EnumIter)]
+pub enum SenderStat {
+    /// how many acknowledgement or cancel-acknowledgements were ignored
+    /// due to either being unrequested, or sent in conflict with a previous
+    /// acknowledgment (a peer error)
+    InvalidAck,
+    /// how many acknowledgements or cancel-acknowledgements were received
+    /// after the sequence number exited the window (benign, but indicative of
+    /// weird network behavior): such acks are _either_ invalid or duplicate,
+    /// but we don't know which
+    TooOldAck,
+    /// how many acknowledgements or cancel-acknowledgements were received
+    /// in duplicate (benign, but indicative of weird network behavior)
+    DuplicateAck,
+    /// how many acknowledgements or cancel-acknowledgements were received
+    /// before they were requested (a peer error)
+    TooNewAck,
+}
+
+impl SenderStat {
+    /// Is a non-zero value for this statistic indicative of a protocol error
+    /// perpetrated by the peer?
+    ///
+    /// The caller may wish to take corrective action such as resetting the link.
+    pub fn is_protocol_error(&self) -> bool {
+        matches!(self, Self::InvalidAck | Self::TooNewAck)
+    }
+}
+
+enum UnackedState<Pkt> {
+    Unacked { packet: Pkt, waker: Waker },
+    Canceled { waker: Waker, forgotten: bool },
+    Acked,
+    CancelAcked,
+}
+
+impl<Pkt> UnackedState<Pkt> {
+    /// Does this represent an acknowledgement or cancel-acknowledgement.
+    pub fn is_acked(&self) -> bool {
+        matches!(self, UnackedState::Acked | UnackedState::CancelAcked)
+    }
+
+    /// Attempt to transition from Unacked to Canceled.
+    /// Returns the canceled packet if successful.
+    pub fn cancel(&mut self) -> Option<Pkt> {
+        replace_with_or_abort_and_return(self, |s| match s {
+            Self::Unacked { packet, waker } => (
+                Some(packet),
+                Self::Canceled {
+                    waker,
+                    forgotten: false,
+                },
+            ),
+            s => (None, s),
+        })
+    }
+
+    /// Forget (or, preemptively forget) the cancellation status
+    /// of this packet.
+    pub fn forget(&mut self) {
+        match self {
+            Self::Canceled { forgotten, .. } => *forgotten = true,
+            Self::CancelAcked => *self = Self::Acked,
+            _ => (),
+        }
+    }
+
+    /// Wake any associated waker, and return any associated packet.
+    pub fn destruct(self) -> Option<Pkt> {
+        match self {
+            Self::Unacked { packet, waker } => {
+                waker.wake();
+                Some(packet)
+            }
+            Self::Canceled { waker, .. } => {
+                waker.wake();
+                None
+            }
+            Self::Acked | Self::CancelAcked => None,
+        }
+    }
+}
+
+enum BlockedState<Pkt> {
+    Blocked { packet: Pkt, waker: Waker },
+    Canceled,
+}
+
+impl<Pkt> BlockedState<Pkt> {
+    /// Attempt to transition from Blocked to Canceled.
+    /// Returns the canceled packet and associated waker if successful.
+    pub fn cancel(&mut self) -> Option<(Pkt, Waker)> {
+        replace_with_or_abort_and_return(self, |s| match s {
+            Self::Blocked { packet, waker } => (Some((packet, waker)), Self::Canceled),
+            s => (None, s),
+        })
+    }
+
+    /// Wake any associated waker, and return any associated packet.
+    pub fn destruct(self) -> Option<Pkt> {
+        match self {
+            Self::Blocked { packet, waker } => {
+                waker.wake();
+                Some(packet)
+            }
+            Self::Canceled => None,
+        }
+    }
 }
 
 /// State of the sending side of a reliable ZDP session.
@@ -37,11 +156,11 @@ pub struct Sender<Pkt> {
 
     /// A queue representing the window of outstanding packets, indexed by
     /// sequence number.  The rightmost entry (if any) is the most recent
-    /// packet sent (with sequence number `last_sent`).  Packets which have
-    /// been acknowledged are marked `None`.  The contiguous prefix of
-    /// oldest packets which have been acknowledged are removed entirely.
-    /// Thus the maximum length of this deque is exactly the window size.
-    unacked: VecDeque<Option<(Pkt, Waker)>>,
+    /// packet sent (with sequence number `last_sent`).  The contiguous
+    /// prefix of oldest packets which have been acknowledged are removed
+    /// entirely.  Thus the maximum length of this deque is exactly the
+    /// window size.
+    unacked: VecDeque<UnackedState<Pkt>>,
 
     /// The ID of the most recent packet queued waiting to be sent.
     last_enqueued: QueuedPacketId,
@@ -51,7 +170,7 @@ pub struct Sender<Pkt> {
     /// enqueued (with packet ID `last_enqueued`).  Packets which have been
     /// canceled are marked `None`.  Packets are moved to the `sent` queue
     /// upon being sent, as are any preceding packets which have been canceled.
-    blocked: VecDeque<Option<(Pkt, Waker)>>,
+    blocked: VecDeque<BlockedState<Pkt>>,
 
     /// A queue containing packets which had been queued but have now been
     /// sent, indexed by packet ID.  The rightmost entry (if any) is the
@@ -62,6 +181,9 @@ pub struct Sender<Pkt> {
     /// were canceled and never sent.  (However, any such prefix of canceled
     /// packets are always immediately removed.)
     sent: VecDeque<Option<SeqNum>>,
+
+    /// Sender statistics.
+    stats: EnumMap<SenderStat, u64>,
 }
 
 // Individual sent packets conceptually follow the following state machine.
@@ -70,13 +192,20 @@ pub struct Sender<Pkt> {
 //
 //   BLOCKED: This packet is waiting to be sent on the wire.
 //
-//   CANCELED: This packet was cancelled by the caller while blocked.
+//   CANCELED: This packet was canceled by the caller while in BLOCKED
+//     (and thus has not yet been assigned a sequence number).
 //
 //   UNACKED: This packet has been sent and we are waiting for the
 //     remote to acknowledge receipt.  The caller should periodically
 //     resend packets which are in this state.
 //
+//   CANCEL_REQUESTED: This packet was canceled by the caller while in
+//     UNACKED and we are waiting for the remote to acknowledge receipt.
+//     The caller should periodically resend packets which are in this state.
+//
 //   ACKED: This packet has been acknowledged by the remote.
+//
+//   CANCEL_ACKED: This packet has been cancelled by the remote.
 //
 //   FORGOTTEN: We no longer have any record of this packet.
 //
@@ -87,6 +216,8 @@ pub struct Sender<Pkt> {
 //   CANCEL: The caller requests to cancel a packet.
 //
 //   ACK: An acknowledgement is received for the packet.
+//
+//   CANCEL_ACK: A cancellation acknowledgement is received for the packet.
 //
 //   UNBLOCK: There is now room in the window for this packet.
 //
@@ -102,31 +233,41 @@ pub struct Sender<Pkt> {
 //
 //   BLOCKED -[UNBLOCK]> UNACKED
 //
+//   UNACKED -[CANCEL]> CANCEL_REQUESTED
+//
 //   UNACKED -[ACK]> ACKED
 //
+//   CANCEL_REQUESTED -[ACK]> ACKED
+//
+//   CANCEL_REQUESTED -[CANCEL_ACK]> CANCEL_ACKED
+//
 //   ACKED -[AGED]> FORGOTTEN
+//
+//   CANCEL_ACKED -[AGED]> FORGOTTEN
 //
 //   CANCELED -[AGED]> FORGOTTEN
 //
 //
-// It can be seen from the above that the number of packets in UNACKED or
-// ACKED is bounded by the window size.  However, the number of packets in
-// BLOCKED and CANCELED (and trivially, in FORGOTTEN) are not bounded.
+// It can be seen from the above that the number of packets in UNACKED,
+// CANCEL_REQUESTED, ACKED, or CANCEL_ACKED is bounded by the window size.
+// However, the number of packets in BLOCKED and CANCELED (and trivially, in
+// FORGOTTEN) are not bounded.
 //
 // `Waker` objects may be registered for notification when a packet leaves
-// the BLOCKED and UNACKED states.  By waiting on exit of the BLOCKED state,
-// the caller may implement basic flow control.  By waiting on exit of the
-// UNACKED state, the caller may track forward progress of the channel.
+// the BLOCKED, UNACKED, or CANCEL_REQUESTED states.  By waiting on exit of
+// the BLOCKED state, the caller may implement basic flow control.  By
+// waiting on exit of the UNACKED or CANCEL_REQUESTED states, the caller may
+// track forward progress of the channel.
 //
 // Packets which are initially BLOCKED are assigned a `QueuedPacketId` which
 // may be used to refer to this packet for the rest of its lifetime.
 // Packets which are initially UNACKED are likewise assigned a `SeqNum`.
 // (Packets which were BLOCKED and became UNACKED are also assigned a
 // `SeqNum` which the caller may look up based on the packet's
-// `QueuedPacketId` while the packet is UNACKED in order to register for
-// notification when the packet leaves UNACKED.  If the caller performs this
-// lookup in ACKED it is simply informed that the packet has already been
-// acknowledged.)
+// `QueuedPacketId` while the packet is UNACKED or CANCEL_REQUESTED in order
+// to register for notification when the packet leaves either of these
+// states.  If the caller performs this lookup in ACKED or CANCEL_ACKED it
+// is simply informed that the packet has already been acknowledged.)
 
 impl<Pkt> Sender<Pkt> {
     /// The maximum window size supported by the sender.
@@ -148,6 +289,7 @@ impl<Pkt> Sender<Pkt> {
             last_enqueued: QueuedPacketId::MAX,
             blocked: VecDeque::new(),
             sent: VecDeque::new(),
+            stats: Default::default(),
         }
     }
 
@@ -182,13 +324,14 @@ impl<Pkt> Sender<Pkt> {
 
     /// Returns whether the given non-cancelled queued packet has been sent.
     ///
-    /// Result is undefined if packet has been cancelled.
+    /// Result is undefined if packet has been cancelled while queued.
     pub fn is_sent(&self, id: QueuedPacketId) -> bool {
         let offset = id.wrapping_sub(self.last_enqueued) as i64;
         -offset >= self.blocked.len() as i64
     }
 
-    /// Returns whether the given sent packet has been acknowledged.
+    /// Returns whether the given sent packet has been acknowledged,
+    /// or acknowledged as canceled.
     pub fn is_acked(&self, sn: SeqNum) -> bool {
         let offset = sn.wrapping_sub(self.last_sent) as i64;
 
@@ -201,10 +344,42 @@ impl<Pkt> Sender<Pkt> {
         }
 
         let idx = (self.unacked.len() as i64 + offset - 1) as usize;
-        self.unacked[idx].is_none()
+        self.unacked[idx].is_acked()
+    }
+
+    /// Returns whether the given packet has been acknowledged as canceled.
+    ///
+    /// Panics if called on a sequence number which has not been requested
+    /// to be canceled, or which had, but has been forgotten.
+    pub fn is_cancel_acked(&self, sn: SeqNum) -> bool {
+        let offset = sn.wrapping_sub(self.last_sent) as i64;
+
+        if offset > 0 {
+            panic!("packet cancellation must have been requested");
+        }
+
+        if -offset >= self.unacked.len() as i64 {
+            panic!("packet cancellation must have been requested and not yet forgotten");
+        }
+
+        let idx = (self.unacked.len() as i64 + offset - 1) as usize;
+        match self.unacked[idx] {
+            UnackedState::Unacked { .. } | UnackedState::Acked => {
+                panic!("packet cancellation must have been requested")
+            }
+
+            UnackedState::CancelAcked => true,
+            UnackedState::Canceled { .. } => false,
+        }
     }
 
     /// Implementation of `Future::poll` to wait for send of a given packet.
+    ///
+    /// Panics if the indicated packet was canceled.
+    ///
+    /// Returns `None` if the packet has already been acknowledged; else returns
+    /// the sequence number assigned to the packet which is suitable for
+    /// passing to `poll_ack()`.
     pub fn poll_send(&mut self, cx: &mut Context<'_>, id: QueuedPacketId) -> Poll<Option<SeqNum>> {
         let offset = id.wrapping_sub(self.last_enqueued) as i64;
         assert!(
@@ -218,17 +393,17 @@ impl<Pkt> Sender<Pkt> {
 
         let idx = (self.blocked.len() as i64 + offset - 1) as usize;
         match self.blocked[idx] {
-            None => panic!("poll of cancelled packet"),
+            BlockedState::Canceled => panic!("poll of cancelled packet"),
 
-            Some((_, ref mut waker)) => {
+            BlockedState::Blocked { ref mut waker, .. } => {
                 waker.clone_from(cx.waker());
                 Poll::Pending
             }
         }
     }
 
-    /// Implementation of `Future::poll` to wait for acknowledgement
-    /// of a given packet.
+    /// Implementation of `Future::poll` to wait for acknowledgement of a given packet
+    /// (or of the cancellation thereof).
     pub fn poll_ack(&mut self, cx: &mut Context<'_>, sn: SeqNum) -> Poll<()> {
         let offset = sn.wrapping_sub(self.last_sent) as i64;
         assert!(offset <= 0, "poll of packet which has not yet been sent");
@@ -239,9 +414,9 @@ impl<Pkt> Sender<Pkt> {
 
         let idx = (self.unacked.len() as i64 + offset - 1) as usize;
         match self.unacked[idx] {
-            None => Poll::Ready(()),
-
-            Some((_, ref mut waker)) => {
+            UnackedState::Acked | UnackedState::CancelAcked => Poll::Ready(()),
+            UnackedState::Unacked { ref mut waker, .. }
+            | UnackedState::Canceled { ref mut waker, .. } => {
                 waker.clone_from(cx.waker());
                 Poll::Pending
             }
@@ -250,9 +425,11 @@ impl<Pkt> Sender<Pkt> {
 
     /// Implementation of `Future::poll` to wait for acknowledgement
     /// of a given packet which may not yet be sent.
+    ///
+    /// Panics if the indicated packet was canceled.
     pub fn poll_send_and_ack(&mut self, cx: &mut Context<'_>, id: QueuedPacketId) -> Poll<()> {
         match ready!(self.poll_send(cx, id)) {
-            Some(sn) => self.poll_ack(cx, sn),
+            Some(sn) => self.poll_ack(cx, sn).map(|_| ()),
             None => Poll::Ready(()),
         }
     }
@@ -277,28 +454,38 @@ impl<Pkt> Sender<Pkt> {
     pub fn enqueue_packet(&mut self, packet: Pkt) -> EnqueueResult<'_, Pkt> {
         if self.is_blocked() || self.has_blocked_packets() {
             self.last_enqueued = self.last_enqueued.wrapping_add(1);
-            self.blocked
-                .push_back(Some((packet, Waker::noop().clone())));
+            self.blocked.push_back(BlockedState::Blocked {
+                packet,
+                waker: Waker::noop().clone(),
+            });
             return EnqueueResult::Queued(self.last_enqueued);
         }
 
-        self.unacked
-            .push_back(Some((packet, Waker::noop().clone())));
+        let UnackedState::Unacked { packet, .. } =
+            self.unacked.push_back_mut(UnackedState::Unacked {
+                packet,
+                waker: Waker::noop().clone(),
+            })
+        else {
+            unreachable!()
+        };
+
         let sn = self.last_sent.wrapping_add(1);
         self.last_sent = sn;
 
-        EnqueueResult::Sent(
-            sn,
-            &mut self.unacked.back_mut().unwrap().as_mut().unwrap().0,
-        )
+        EnqueueResult::Sent(sn, packet)
     }
 
     /// Attempt to cancel the specified queued packet.
     ///
     /// If the packet has not yet been sent, it is returned as `Some(pkt)`.
+    /// The packet is now canceled.
     ///
-    /// Else, `None` is returned.
-    pub fn cancel_packet(&mut self, id: QueuedPacketId) -> Option<Pkt> {
+    /// Else, `None` is returned, indicating that the packet has already
+    /// been sent.  The caller may then lookup the sequence numer with
+    /// `lookup_seq_num()` and use `cancel_sent_packet()` to request
+    /// that the receiver cancel the packet.
+    pub fn cancel_queued_packet(&mut self, id: QueuedPacketId) -> Option<Pkt> {
         let offset = id.wrapping_sub(self.last_enqueued) as i64;
         assert!(
             offset <= 0,
@@ -312,7 +499,7 @@ impl<Pkt> Sender<Pkt> {
 
         let idx = (self.blocked.len() as i64 + offset - 1) as usize;
 
-        let (pkt, waker) = self.blocked[idx].take()?;
+        let (pkt, waker) = self.blocked[idx].cancel()?;
 
         if idx == 0 {
             self.clean_blocked_queue();
@@ -323,13 +510,75 @@ impl<Pkt> Sender<Pkt> {
         Some(pkt)
     }
 
+    /// Attempt to cancel the specified sent packet.
+    ///
+    /// This simply marks the packet to be sent as a cancellation request
+    /// on future retries.
+    ///
+    /// Returns `None` if the packet has already been acknowledged, or a
+    /// cancel requested.  Otherwise, returns `Some(pkt)`, and remote
+    /// cancellation will be attempted: future retries will send
+    /// cancellation requests.  Successful cancellation will then be
+    /// indicated to the caller via `poll_ack()`.
+    ///
+    /// If `Some(pkt)` is returned, the caller may optionally also
+    /// immediately send a cancellation request, rather than waiting for
+    /// the next retry.
+    ///
+    /// If a remote cancellation is attempted, the caller *must* at
+    /// some point call `forget_canceled_packet()` to indicate that
+    /// it is no longer interested in the status this packet.
+    pub fn cancel_sent_packet(&mut self, sn: SeqNum) -> Option<Pkt> {
+        let offset = sn.wrapping_sub(self.last_sent) as i64;
+
+        if offset > 0 || -offset >= self.unacked.len() as i64 {
+            // already acknowledged
+            return None;
+        }
+
+        let idx = (self.unacked.len() as i64 + offset - 1) as usize;
+
+        let pkt = self.unacked[idx].cancel();
+
+        self.clean_sent_queue();
+
+        pkt
+    }
+
+    /// After a sent packet is canceled, we track the status of
+    /// whether the cancellation was successful or not.
+    /// This method allows the caller to cease tracking this status
+    /// for the given packet.
+    ///
+    /// It is *required* to call this method at some point after a remote
+    /// cancellation is issued.  (It may be called before or after
+    /// the cancellation is acknowledged.)
+    pub fn forget_canceled_packet(&mut self, sn: SeqNum) {
+        let offset = sn.wrapping_sub(self.last_sent) as i64;
+
+        if offset > 0 || -offset >= self.unacked.len() as i64 {
+            return;
+        }
+
+        let idx = (self.unacked.len() as i64 + offset - 1) as usize;
+
+        self.unacked[idx].forget();
+
+        if idx == 0 {
+            self.clean_unacked_queue();
+        }
+        self.clean_sent_queue();
+    }
+
     /// Lookup the sequence number of a packet which had been queued
     /// and has now been sent.
     ///
     /// If the packet has already been acknowledged `None` is returned.
+    /// (However, packets which have been cancel-acknowledged and not
+    /// yet forgotten do still resolve to a sequence number.)
     ///
     /// Panics if the packet has not yet been sent (check `is_sent()` before calling).
-    /// Result is undefined if packet has been cancelled.
+    /// Result is undefined if packet has been cancelled prior to sending.
     pub fn lookup_seq_num(&self, id: QueuedPacketId) -> Option<SeqNum> {
         let offset = id.wrapping_sub(self.last_enqueued) as i64 + self.blocked.len() as i64;
         assert!(offset <= 0, "lookup of packet which has not yet been sent");
@@ -345,33 +594,111 @@ impl<Pkt> Sender<Pkt> {
     /// Process a received acknowledgement of the given sequence number.
     ///
     /// If this is the first acknowledgement received for that sequence
-    /// number, the corresponding packet is marked acknowledged and returned
-    /// for the caller to dispose of.  (In this case, it is possible also
-    /// the sender has become unblocked if it were blocked.) Else `None` is
-    /// returned.
+    /// number, the corresponding packet is marked acknowledged and, if a
+    /// cancel had not been requested, the packet is returned for the caller
+    /// to dispose of.  It is possible also the sender has
+    /// become unblocked if it were blocked.
+    ///
+    /// Else, `None` is returned.  (Note that this does _not_ necessarily
+    /// indicate the acknowledgment was not heeded!  This may also occur
+    /// if a cancel was requested but rejected, since the packet will have
+    /// been already returned to the caller earlier.)
     ///
     /// Upon return, callers should query `retry_needed()` to
     /// determine whether to cancel any oustanding retry timer,
     /// and `unblock_needed()` to determine whether to send
     /// blocked packets.
     pub fn process_ack(&mut self, sn: SeqNum) -> Option<Pkt> {
-        let offset = sn.wrapping_sub(self.last_sent) as i64;
+        let idx = self.lookup_ack_index(sn)?;
 
-        if offset > 0 || -offset >= self.unacked.len() as i64 {
-            return None;
-        }
+        let (pkt, waker) = replace_with_or_abort_and_return(&mut self.unacked[idx], |s| match s {
+            UnackedState::Unacked { packet, waker } => {
+                (Some((Some(packet), waker)), UnackedState::Acked)
+            }
 
-        let idx = (self.unacked.len() as i64 + offset - 1) as usize;
-        let (pkt, waker) = self.unacked[idx].take()?;
+            UnackedState::Canceled { waker, .. } => (Some((None, waker)), UnackedState::Acked),
+
+            UnackedState::Acked => {
+                self.stats[SenderStat::DuplicateAck] += 1;
+                (None, s)
+            }
+
+            UnackedState::CancelAcked => {
+                self.stats[SenderStat::InvalidAck] += 1;
+                (None, s)
+            }
+        })?;
 
         if idx == 0 {
             self.clean_unacked_queue();
-            self.clean_sent_queue();
         }
+        self.clean_sent_queue();
 
         // TODO: move wake up to caller? to minimize time under lock
         waker.wake();
-        Some(pkt)
+
+        pkt
+    }
+
+    /// Process a received cancellation acknowledgement of the given sequence number.
+    ///
+    /// Upon return, callers should query `retry_needed()` to
+    /// determine whether to cancel any oustanding retry timer,
+    /// and `unblock_needed()` to determine whether to send
+    /// blocked packets.
+    pub fn process_canceled(&mut self, sn: SeqNum) {
+        let Some(idx) = self.lookup_ack_index(sn) else {
+            return;
+        };
+
+        let Some(waker) = replace_with_or_abort_and_return(&mut self.unacked[idx], |s| match s {
+            UnackedState::Canceled { waker, forgotten } => {
+                if forgotten {
+                    (Some(waker), UnackedState::Acked)
+                } else {
+                    (Some(waker), UnackedState::CancelAcked)
+                }
+            }
+
+            UnackedState::Unacked { .. } | UnackedState::Acked => {
+                self.stats[SenderStat::InvalidAck] += 1;
+                (None, s)
+            }
+
+            UnackedState::CancelAcked => {
+                self.stats[SenderStat::DuplicateAck] += 1;
+                (None, s)
+            }
+        }) else {
+            return;
+        };
+
+        if idx == 0 {
+            // Note, this will only have an effect if the canceled packet was marked "forgotten".
+            self.clean_unacked_queue();
+        }
+        self.clean_sent_queue();
+
+        // TODO: move wake up to caller? to minimize time under lock
+        waker.wake();
+    }
+
+    /// Returns `Some(idx)` if the ack or cancel is valid, `None` otherwise,
+    /// where `idx` is the unacked index. Counts stats appropriately.
+    fn lookup_ack_index(&mut self, sn: SeqNum) -> Option<usize> {
+        let offset = sn.wrapping_sub(self.last_sent) as i64;
+
+        if offset > 0 {
+            self.stats[SenderStat::TooNewAck] += 1;
+            return None;
+        }
+
+        if -offset >= self.unacked.len() as i64 {
+            self.stats[SenderStat::TooOldAck] += 1;
+            return None;
+        }
+
+        Some((self.unacked.len() as i64 + offset - 1) as usize)
     }
 
     /// Returns true if there are queued unsent packets.
@@ -393,24 +720,28 @@ impl<Pkt> Sender<Pkt> {
     pub fn enqueue_next_blocked_packet(&mut self) -> (SeqNum, &mut Pkt) {
         assert!(!self.is_blocked(), "sender is blocked");
 
-        let (pkt, waker) = self
-            .blocked
-            .pop_front()
-            .expect("no blocked packets")
-            .unwrap();
+        let BlockedState::Blocked { packet, waker } =
+            self.blocked.pop_front().expect("no blocked packets")
+        else {
+            panic!("sender is blocked");
+        };
 
-        self.unacked.push_back(Some((pkt, Waker::noop().clone())));
+        self.unacked.push_back(UnackedState::Unacked {
+            packet,
+            waker: Waker::noop().clone(),
+        });
         let sn = self.last_sent.wrapping_add(1);
         self.last_sent = sn;
 
         self.sent.push_back(Some(sn));
         self.clean_blocked_queue();
 
+        let Some(UnackedState::Unacked { packet, .. }) = self.unacked.back_mut() else {
+            unreachable!()
+        };
+
         waker.wake(); // TODO: move this up to the caller outside of the lock?
-        (
-            sn,
-            &mut self.unacked.back_mut().unwrap().as_mut().unwrap().0,
-        )
+        (sn, packet)
     }
 
     /// Returns whether a retry timer should currently be scheduled.
@@ -420,8 +751,8 @@ impl<Pkt> Sender<Pkt> {
     ///
     /// On a false->true transition, a timer should be started.
     /// On a true->false transition, the timer should be cancelled.
-    /// Transitions only occur in response to `enqueue_packet()` and
-    /// `process_ack()`.
+    /// Transitions only occur in response to `enqueue_packet()`,
+    /// `process_ack()`, or `process_canceled()`.
     pub fn retry_needed(&self) -> bool {
         !self.unacked.is_empty()
     }
@@ -438,9 +769,29 @@ impl<Pkt> Sender<Pkt> {
         self.unacked
             .iter_mut()
             .enumerate()
-            .filter_map(move |(offset, pkt)| {
-                pkt.as_mut()
-                    .map(|(pkt, _waker)| (sn_base.wrapping_add(offset as u64), pkt))
+            .filter_map(move |(offset, pkt)| match pkt {
+                UnackedState::Unacked { packet, .. } => {
+                    Some((sn_base.wrapping_add(offset as u64), packet))
+                }
+                _ => None,
+            })
+    }
+
+    /// Retrieve the list of cancels which need to be retried.
+    ///
+    /// The caller should send a cancellation request for each
+    /// sequence number returned.
+    pub fn retry_cancels(&self) -> impl Iterator<Item = SeqNum> {
+        let sn_base = self
+            .last_sent
+            .wrapping_sub(self.unacked.len() as u64)
+            .wrapping_add(1);
+        self.unacked
+            .iter()
+            .enumerate()
+            .filter_map(move |(offset, pkt)| match pkt {
+                UnackedState::Canceled { .. } => Some(sn_base.wrapping_add(offset as u64)),
+                _ => None,
             })
     }
 
@@ -458,40 +809,34 @@ impl<Pkt> Sender<Pkt> {
 
         unacked
             .into_iter()
-            .filter_map(|pkt| {
-                pkt.map(|(pkt, waker)| {
-                    waker.wake();
-                    pkt
-                })
-            })
-            .chain(blocked.into_iter().filter_map(|pkt| {
-                pkt.map(|(pkt, waker)| {
-                    waker.wake();
-                    pkt
-                })
-            }))
+            .filter_map(|pkt| pkt.destruct())
+            .chain(blocked.into_iter().filter_map(|pkt| pkt.destruct()))
     }
 
-    /// Maintain the invariant that there are no `None` (cancelled) entries
+    /// Maintain the invariant that there are no canceled entries
     /// at the front of the `blocked` queue by moving them all to the end of
     /// the `sent` queue.
     fn clean_blocked_queue(&mut self) {
-        while let Some(None) = self.blocked.front() {
+        while let Some(BlockedState::Canceled) = self.blocked.front() {
             self.blocked.pop_front().unwrap();
             self.sent.push_back(None);
         }
     }
 
-    /// Maintain the invariant that there are no `None` (acknowledged)
-    /// entries at the front of the `unacked` queue by removing them.
+    /// Maintain the invariant that there are no `Acked` entries at the
+    /// front of the `unacked` queue by removing them.
+    ///
+    /// Note that `CancelAcked` entries stay put until they are explicitly
+    /// "purified" into `Acked` entries, since that is an operation
+    /// which loses information.
     fn clean_unacked_queue(&mut self) {
-        while let Some(None) = self.unacked.front() {
+        while let Some(UnackedState::Acked) = self.unacked.front() {
             self.unacked.pop_front();
         }
     }
 
     /// Maintain the invariant that there are no "stale"
-    /// (cancelled/acknowledged) entries at the front of the `sent` queue by
+    /// (acknowledged/canceled) entries at the front of the `sent` queue by
     /// removing them.
     fn clean_sent_queue(&mut self) {
         while let Some(sn) = self.sent.front() {
@@ -502,6 +847,11 @@ impl<Pkt> Sender<Pkt> {
                 }
             }
         }
+    }
+
+    /// Fetch & reset the specified statistic.
+    pub fn fetch_reset_stat(&mut self, stat: SenderStat) -> u64 {
+        std::mem::take(&mut self.stats[stat])
     }
 }
 
@@ -518,17 +868,28 @@ pub enum Disposition {
     AckAndProcess,
     /// Acknowledge, but do not process the packet.
     AckDoNotProcess,
+    /// Acknowledge cancellation, and do not process the packet.
+    AckCancelDoNotProcess,
     /// Do not acknowledge or process the packet.
     Ignore,
 }
 
 impl Disposition {
-    /// Does the disposition indicate that the packet should be acknowledged.
+    /// Does the disposition indicate that the packet should be acknowledged,
+    /// either as received, or as canceled.  (`self.ack_is_canceled()`
+    /// should be used to determine the acknowledgement type.)
     pub fn should_ack(&self) -> bool {
         matches!(
             self,
-            Disposition::AckAndProcess | Disposition::AckDoNotProcess
+            Disposition::AckAndProcess
+                | Disposition::AckDoNotProcess
+                | Disposition::AckCancelDoNotProcess
         )
+    }
+
+    /// Does the disposition indicate that the acknowledgement is of a packet cancellation.
+    pub fn ack_is_canceled(&self) -> bool {
+        matches!(self, Disposition::AckCancelDoNotProcess)
     }
 
     /// Does the disposition indicate that the packet should be processed.
@@ -557,6 +918,16 @@ pub enum ReceiverStat {
     OutOfOrder,
 }
 
+impl ReceiverStat {
+    /// Is a non-zero value for this statistic indicative of a protocol error
+    /// perpetrated by the peer?
+    ///
+    /// The caller may wish to take corrective action such as resetting the link.
+    pub fn is_protocol_error(&self) -> bool {
+        matches!(self, Self::TooNew)
+    }
+}
+
 // Just use a u64 for a bitset for now.
 // Why?  It's simple, large enough, and none of the common
 // "bitset" crates support efficient arbitrary shift operations.
@@ -577,6 +948,13 @@ pub struct Receiver {
     /// Note that bit 0 will always be 1 (since we only adjust `highest_seen`
     /// upon receiving a packet).  We represent it anyway to simplify the implementation.
     recvd: WindowBitset,
+
+    /// A bitset representing which acknowledged packets were canceled.
+    ///
+    /// Indexing matches that of `recvd`.
+    ///
+    /// We track canceled packets so we can provide idempotent responses.
+    canceled: WindowBitset,
 
     /// Receiver statistics.
     stats: EnumMap<ReceiverStat, u64>,
@@ -600,6 +978,7 @@ impl Receiver {
             window_size,
             highest_seen: SeqNum::MAX,
             recvd: WindowBitset::MAX,
+            canceled: WindowBitset::MAX,
             stats: Default::default(),
         }
     }
@@ -608,11 +987,24 @@ impl Receiver {
         -(WindowBitset::BITS as i64) + (self.recvd.leading_ones() as i64) + 1
     }
 
-    /// Process the full sequence number of a received packet.
+    /// Process a received packet.
     ///
     /// The return value indicates whether and how to process
     /// the associated packet.
     pub fn process_packet(&mut self, sn: SeqNum) -> Disposition {
+        self.process_packet_or_cancel(sn, false)
+    }
+
+    /// Process a received cancellation request.
+    ///
+    /// The return value indicates whether and how to process
+    /// the associated packet.  Note that `AckAndProcess` will
+    /// never be returned from this method.
+    pub fn process_cancel(&mut self, sn: SeqNum) -> Disposition {
+        self.process_packet_or_cancel(sn, true)
+    }
+
+    fn process_packet_or_cancel(&mut self, sn: SeqNum, is_cancel: bool) -> Disposition {
         let offset = sn.wrapping_sub(self.highest_seen) as i64;
 
         if offset <= -(self.window_size as i64) {
@@ -632,19 +1024,34 @@ impl Receiver {
             self.highest_seen = self.highest_seen.wrapping_add(offset as SeqNum);
             self.recvd <<= offset;
             self.recvd |= 1;
-            return Disposition::AckAndProcess;
+            self.canceled <<= offset;
+            if is_cancel {
+                self.canceled |= 1;
+                return Disposition::AckCancelDoNotProcess;
+            } else {
+                return Disposition::AckAndProcess;
+            }
         }
 
         if (self.recvd >> -offset) & 1 == 0 {
             // Old, but within our window.  Accept and mark.
             self.stats[ReceiverStat::OutOfOrder] += 1;
             self.recvd |= 1 << -offset;
-            return Disposition::AckAndProcess;
+            if is_cancel {
+                self.canceled |= 1 << -offset;
+                return Disposition::AckCancelDoNotProcess;
+            } else {
+                return Disposition::AckAndProcess;
+            }
         }
 
-        // Already seen.  Do not process, but still acknowledge.
+        // Already seen and within our window.  Do not process, but still acknowledge.
         self.stats[ReceiverStat::Duplicate] += 1;
-        return Disposition::AckDoNotProcess;
+        if (self.canceled >> -offset) & 1 == 0 {
+            return Disposition::AckDoNotProcess;
+        } else {
+            return Disposition::AckCancelDoNotProcess;
+        }
     }
 
     /// Fetch & reset the specified statistic.
@@ -652,6 +1059,7 @@ impl Receiver {
         std::mem::take(&mut self.stats[stat])
     }
 
+    /// Returns the configured window size.
     pub fn window_size(&self) -> usize {
         self.window_size
     }
@@ -983,7 +1391,7 @@ mod sender_tests {
         // cancel a packet
         assert_eq!(send.cancel_packet(id4), Some(104));
 
-        // unblock a non-cancelled packet
+        // unblock a non-canceled packet
         assert_eq!(send.process_ack(0), Some(100));
         assert!(send.unblock_needed());
         let (sn3, pkt3) = send.enqueue_next_blocked_packet();
@@ -997,7 +1405,7 @@ mod sender_tests {
         assert!(send.is_sent(id3));
         assert_eq!(send.lookup_seq_num(id3), Some(3));
 
-        // unblock the next packet, which is after a cancelled packet
+        // unblock the next packet, which is after a canceled packet
         assert_eq!(send.process_ack(1), Some(101));
         assert!(send.unblock_needed());
         let (sn5, pkt5) = send.enqueue_next_blocked_packet();

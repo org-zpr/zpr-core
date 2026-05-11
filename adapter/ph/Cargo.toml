@@ -32,6 +32,7 @@ open-enum = { version = "0.5.1" }
 openssl = { workspace = true }
 openssl-sys = { version = "0.9.102" }
 rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.1", default-features = false }
+replace_with = "0.1.8"
 reqwest = { version = "0.13.1", features = ["json", "query"] }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.140"

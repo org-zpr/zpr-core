@@ -82,6 +82,16 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             handle_acknowledgement(asm, pkt)
         }
 
+        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::Cancel => {
+            pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
+            handle_cancel(asm, pkt)
+        }
+
+        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::Canceled => {
+            pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
+            handle_canceled(asm, pkt)
+        }
+
         Ok((_base_hdr, rest)) => {
             let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::ref_from_prefix(rest).unwrap();
 
@@ -101,7 +111,11 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             drop(receiver);
 
             if disp.should_ack() {
-                core::send_acknowledgement(&asm, pkt.metadata().ingress_link_id, seq_num);
+                if disp.ack_is_canceled() {
+                    core::send_canceled(&asm, pkt.metadata().ingress_link_id, seq_num);
+                } else {
+                    core::send_acknowledgement(&asm, pkt.metadata().ingress_link_id, seq_num);
+                }
             }
 
             if disp.should_process() {
@@ -120,7 +134,47 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
     }
 }
 
+fn handle_cancel(asm: &Assembly, pkt: &mut Packet) {
+    let Ok(mgmt_hdr) = zdp::ZdpMgmtHeader::read_from_buf(pkt) else {
+        core::count_event(asm, ManagementCounterType::BadStructure);
+        return;
+    };
+
+    let seq_num = mgmt_hdr.sequence_number.get();
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+
+    let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
+        core::count_event(asm, ManagementCounterType::PeerRemoved);
+        return;
+    };
+
+    let mut receiver = peer_state.zdpr_recv.lock().unwrap();
+    let disp = receiver.process_cancel(seq_num);
+    count_zdpr_receiver_stats(&asm.counters.management, &mut receiver);
+
+    if disp.should_ack() {
+        if disp.ack_is_canceled() {
+            core::send_canceled(&asm, pkt.metadata().ingress_link_id, seq_num);
+        } else {
+            core::send_acknowledgement(&asm, pkt.metadata().ingress_link_id, seq_num);
+        }
+    }
+}
+
 fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
+    handle_acknowledgement_canceled_common(asm, pkt, false)
+}
+
+fn handle_canceled(asm: &Assembly, pkt: &mut Packet) {
+    handle_acknowledgement_canceled_common(asm, pkt, true)
+}
+
+fn handle_acknowledgement_canceled_common(asm: &Assembly, pkt: &mut Packet, is_canceled: bool) {
+    // From dispatch's point of view, acknowledgement and cancellation of a packet are
+    // identical; either way, we don't care about the referenced packet any more.
+    // The only difference is ultimately to the sender/canceller, who must learn whether
+    // the remote canceled or processed the packet.
+
     let Ok(mgmt_hdr) = zdp::ZdpMgmtHeader::read_from_buf(pkt) else {
         core::count_event(asm, ManagementCounterType::BadStructure);
         return;
@@ -135,7 +189,12 @@ fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
     };
     let mut sender = peer_state.zdpr_send.lock().unwrap();
 
-    sender.process_ack(seq_num);
+    if is_canceled {
+        sender.process_canceled(seq_num);
+    } else {
+        sender.process_ack(seq_num);
+    }
+    count_zdpr_sender_stats(&asm.counters.management, &mut sender);
 
     // If at this point (after processing the ACK) we should not have our
     // retry timer running (because all outstanding packets have been
@@ -203,6 +262,16 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
     return;
 }
 
+/// Maps a `zdpr::SenderStat` to a `CounterType`.
+fn zdpr_sender_stat_to_counter(sn_stat: zdpr::SenderStat) -> ManagementCounterType {
+    match sn_stat {
+        zdpr::SenderStat::InvalidAck => ManagementCounterType::BadMgmtResponse,
+        zdpr::SenderStat::TooOldAck => ManagementCounterType::DroppedTooOld,
+        zdpr::SenderStat::DuplicateAck => ManagementCounterType::DroppedDuplicate,
+        zdpr::SenderStat::TooNewAck => ManagementCounterType::DroppedTooNew,
+    }
+}
+
 /// Maps a `zdpr::ReceiverStat` to a `CounterType`.
 fn zdpr_receiver_stat_to_counter(sn_stat: zdpr::ReceiverStat) -> ManagementCounterType {
     match sn_stat {
@@ -210,6 +279,16 @@ fn zdpr_receiver_stat_to_counter(sn_stat: zdpr::ReceiverStat) -> ManagementCount
         zdpr::ReceiverStat::Duplicate => ManagementCounterType::DroppedDuplicate,
         zdpr::ReceiverStat::TooNew => ManagementCounterType::DroppedTooNew,
         zdpr::ReceiverStat::OutOfOrder => ManagementCounterType::OutOfOrderPacket,
+    }
+}
+
+/// Pulls stats delta from `zdpr::Sender` and feeds them into the global counters.
+fn count_zdpr_sender_stats<Pkt>(
+    mgmt_counters: &ManagementCounters,
+    sender: &mut zdpr::Sender<Pkt>,
+) {
+    for stat in zdpr::SenderStat::iter() {
+        mgmt_counters[zdpr_sender_stat_to_counter(stat)].increase_by(sender.fetch_reset_stat(stat));
     }
 }
 
