@@ -1,4 +1,5 @@
 use zpr::vsapi::v1 as vsapi2;
+use zpr::vsapi_types::ApiResponseError;
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -17,10 +18,11 @@ use tokio_rustls::TlsConnector;
 use tokio_util::compat::*;
 use tracing::*;
 
+// use crate::error::VSApiError;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, Connection, DenyCode, DisconnectReason, ErrorCode, PacketDesc, Visa, VisaOp,
+    ConnectRequest, Connection, DisconnectReason, VSVisaRequest, VisaOp, VSVisaDecision, VisaResponse
 };
 use zpr::write_to::WriteTo;
 
@@ -48,18 +50,6 @@ pub struct VSConnectRequest {
 }
 
 #[derive(Debug)]
-pub struct VSVisaRequest {
-    pub pdesc: PacketDesc,
-    pub previous_id: Option<u64>,
-}
-
-#[derive(Debug)]
-pub enum VSVisaDecision {
-    Allowed(Visa),
-    Denied(DenyCode),
-}
-
-#[derive(Debug)]
 pub struct VSDisconnectNotice {
     /// None = node itself, Some = specific adapter
     pub zpr_addr: Option<IpAddr>,
@@ -67,8 +57,8 @@ pub struct VSDisconnectNotice {
 }
 
 /// Returns no error if call to VSAPI authenticate was successful.
+pub type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
 type VSConnectResponse = Result<(), VSApiError>;
-type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
 type VSRegisterVssResponse = Result<Vec<VisaOp>, VSApiError>;
 type VSAuthorizeConnectResponse = Result<Connection, VSApiError>;
 type VSNotifyDisconnectResponse = Result<(), VSApiError>;
@@ -351,7 +341,7 @@ impl VSConn {
                         }
                         vsapi2::ok_or_error::Which::Error(err_obj) => {
                             let err_obj = err_obj?;
-                            let err = new_coded_error(err_obj);
+                            let err = ApiResponseError::try_from(err_obj);
 
                             // There is no back channel for the Stop command so we just log the error.
                             error!(
@@ -525,7 +515,7 @@ impl VSConn {
             vsapi2::result::Which::Ok(vs_gate_obj) => vs_gate_obj?,
             vsapi2::result::Which::Error(err_obj) => {
                 let err_obj = err_obj?;
-                return Err(new_coded_error(err_obj));
+                return Err(ApiResponseError::try_from(err_obj)?.into());
             }
         };
 
@@ -580,7 +570,7 @@ impl VSConn {
             vsapi2::result::Which::Ok(handle_obj) => handle_obj?,
             vsapi2::result::Which::Error(err_obj) => {
                 let err_obj = err_obj?;
-                return Err(new_coded_error(err_obj));
+                return Err(ApiResponseError::try_from(err_obj)?.into());
             }
         };
 
@@ -604,24 +594,10 @@ impl VSConn {
             vr_request.send().promise,
         )
         .await?;
-        let allow_deny_error = vr_response.get()?.get_resp()?;
 
-        match allow_deny_error.which()? {
-            vsapi2::visa_response::Which::Allow(v) => {
-                let cp_visa = v?;
-                let visa = Visa::try_from(cp_visa)?;
-                Ok(VSVisaDecision::Allowed(visa))
-            }
-            vsapi2::visa_response::Which::Deny(dcode) => {
-                let dcode = dcode?;
-                let deny_code = DenyCode::from(dcode);
-                Ok(VSVisaDecision::Denied(deny_code))
-            }
-            vsapi2::visa_response::Which::Error(err_obj) => {
-                let err_obj = err_obj?;
-                Err(new_coded_error(err_obj))
-            }
-        }
+        let allow_deny_error: vsapi2::visa_response::Reader<'_> = vr_response.get()?.get_resp()?;
+        let vr = VisaResponse::try_from(allow_deny_error)?;
+        Ok(VSVisaDecision::try_from(vr)?)
     }
 
     async fn do_authorize_connect(
@@ -650,7 +626,7 @@ impl VSConn {
             }
             vsapi2::result::Which::Error(err_obj) => {
                 let err_obj = err_obj?;
-                Err(new_coded_error(err_obj))
+                Err(ApiResponseError::try_from(err_obj)?.into())
             }
         }
     }
@@ -682,7 +658,7 @@ impl VSConn {
             vsapi2::ok_or_error::Which::Ok(_) => Ok(()),
             vsapi2::ok_or_error::Which::Error(err_obj) => {
                 let err_obj = err_obj?;
-                Err(new_coded_error(err_obj))
+                Err(ApiResponseError::try_from(err_obj)?.into())
             }
         }
     }
@@ -720,7 +696,7 @@ impl VSConn {
             }
             vsapi2::result::Which::Error(err_obj) => {
                 let err_obj = err_obj?;
-                Err(new_coded_error(err_obj))
+                Err(ApiResponseError::try_from(err_obj)?.into())
             }
         }
     }
@@ -735,7 +711,7 @@ impl VSConn {
             rpc_with_timeout("ping", with_timeout, vs_h.ping_request().send().promise).await?;
         match ping_response_rdr.get()?.get_res()?.which()? {
             vsapi2::ok_or_error::Which::Ok(_) => Ok(()),
-            vsapi2::ok_or_error::Which::Error(err_rdr) => Err(new_coded_error(err_rdr?)),
+            vsapi2::ok_or_error::Which::Error(err_rdr) => Err(ApiResponseError::try_from(err_rdr?)?.into()),
         }
     }
 }
@@ -840,20 +816,6 @@ where
         Ok(Err(capnp_err)) => Err(capnp_err.into()),
         Err(_elapsed) => Err(VSApiError::Timeout(name.to_string())),
     }
-}
-
-/// Create a VSApiError::CodedError from a capn proto vsapi2::error::Reader.
-fn new_coded_error(rdr: vsapi2::error::Reader) -> VSApiError {
-    let err_code: ErrorCode = match rdr.get_code() {
-        Ok(c) => c.into(),
-        Err(_) => ErrorCode::Internal,
-    };
-    let err_msg = match rdr.get_message() {
-        Ok(m) => m.to_string().unwrap(),
-        Err(_) => String::from("(no message)"),
-    };
-    let retry = rdr.get_retry_in();
-    VSApiError::CodedError(err_code, err_msg, retry)
 }
 
 #[derive(Debug)]

@@ -1,5 +1,5 @@
 use thiserror::Error;
-use zpr::vsapi_types::{ErrorCode, VsapiTypeError};
+use zpr::vsapi_types::{VsapiTypeError, ApiResponseError};
 
 #[derive(Debug, Error)]
 pub enum VSApiError {
@@ -15,8 +15,8 @@ pub enum VSApiError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("VS API error code {0:?}: {1} (retry in {2} seconds)")]
-    CodedError(ErrorCode, String, u32),
+    #[error("VS API error code {0}")]
+    CodedError(#[from] ApiResponseError),
 
     #[error("capn proto error: {0}")]
     Capnp(#[from] capnp::Error),
@@ -30,14 +30,14 @@ pub enum VSApiError {
     #[error("serialization error: {0}")]
     DTError(#[from] DTError),
 
-    #[error("vsapi type error: {0}")]
-    ApiTypeError(#[from] VsapiTypeError),
-
     #[error("TLS error: {0}")]
     TLSError(String),
 
     #[error("operation timed out: {0}")]
     Timeout(String),
+
+    #[error("Vsapi type error")]
+    VsapiTypeError(#[from] VsapiTypeError),
 }
 
 #[derive(Debug, Error)]

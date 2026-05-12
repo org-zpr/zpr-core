@@ -24,14 +24,13 @@ use crate::visa_mgmt;
 use crate::visa_table::VisaTableError;
 
 use dashmap::DashMap;
-use libnode::vsconn;
 use std::num::NonZero;
 use std::sync::Arc;
 use tracing::*;
 use zpr::packet_info::{
     DOCK_LINK_ID, ForwardingEntry, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, VisaId,
 };
-use zpr::vsapi_types::{CommFlag, PacketDesc, VsapiFiveTuple, vsapi_ip_number};
+use zpr::vsapi_types::{CommFlag, PacketDesc, VSVisaRequest, VsapiFiveTuple, vsapi_ip_number};
 
 /// State of an in-progress inbound bind request.
 enum BindRequestState {
@@ -210,7 +209,7 @@ pub fn bind_actor_address(
         }
         _ => CommFlag::BiDirectional,
     };
-    let visa_req = vsconn::VSVisaRequest {
+    let visa_req = VSVisaRequest {
         pdesc: PacketDesc {
             five_tuple: VsapiFiveTuple::new(
                 five_tuple.l3_type,
@@ -259,10 +258,10 @@ async fn visa_request_task(
     asm: Arc<Assembly>,
     ingress_link_id: NonZero<LinkId>,
     txn_id: TxnId,
-    visa_req: vsconn::VSVisaRequest,
+    visa_req: VSVisaRequest,
 ) {
     match asm.vsconn.as_ref().unwrap().visa_request(visa_req).await {
-        Ok(vsconn::VSVisaDecision::Allowed(visa)) => {
+        Ok(zpr::vsapi_types::VSVisaDecision::Allowed(visa)) => {
             let visa_id = match visa_mgmt::insert_visa(&asm, visa) {
                 Ok(vid) => vid,
 
@@ -280,7 +279,7 @@ async fn visa_request_task(
             requested_visa_granted(&asm, ingress_link_id, txn_id, visa_id);
         }
 
-        Ok(vsconn::VSVisaDecision::Denied(deny_code)) => {
+        Ok(zpr::vsapi_types::VSVisaDecision::Denied(deny_code)) => {
             asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
             debug!(target: FLOW_MGMT, "visa request denied: {deny_code:?}");
             requested_visa_denied(&asm, ingress_link_id, txn_id)
@@ -709,7 +708,7 @@ fn resolve_next_hop_bind_originator(
         );
         assert_eq!(
             expected_egress_txn, egress_txn,
-            "dock state consistency error"
+            "dock sE0432tate consistency error"
         );
     }
 

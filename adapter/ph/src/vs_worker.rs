@@ -44,7 +44,7 @@ pub async fn launch(
                             info!(target: STARTUP, "node access granted to visa service");
                             true
                         }
-                        Err(VSApiError::CodedError(code, _msg, _)) if matches!(code, ErrorCode::OutOfSync) => {
+                        Err(VSApiError::CodedError(err)) if matches!(err.code, ErrorCode::OutOfSync) => {
                             state = StateFlag::NoState;
                             info!(target: STARTUP, "visa service reports out-of-sync; clearing adapters and visas");
                             asm.disconnect_adapters().await; // drops visas too
