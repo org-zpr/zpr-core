@@ -9,8 +9,10 @@ use crate::logging::targets::STARTUP;
 use crate::vss_worker;
 
 use libnode::error::VSApiError;
-use libnode::vsconn::{StateFlag, VSConnHandle, VSConnLifecycleEvent, VSDisconnectNotice};
-use zpr::vsapi_types::{DisconnectReason, ErrorCode};
+use libnode::vsconn::{VSConnHandle, VSConnLifecycleEvent};
+use zpr::vsapi_types::{
+    DisconnectReason, ErrorCode, StateFlag, VSConnectRequest, VSDisconnectNotice,
+};
 
 pub async fn launch(
     asm: Arc<Assembly>,
@@ -28,7 +30,7 @@ pub async fn launch(
 
         loop {
             // Kick off a connect request to the VS, if it succeeds, notify the VS about our VSS endpoint.
-            let req = libnode::vsconn::VSConnectRequest {
+            let req = VSConnectRequest {
                 zpr_addr: node_zpr_addr,
                 state,
             };

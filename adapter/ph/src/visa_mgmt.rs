@@ -9,13 +9,12 @@ use crate::visa_table;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use libnode::claims;
-use libnode::vsconn::VSDisconnectNotice;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use tracing::*;
 use zpr::packet_info::{LinkId, VisaId};
-use zpr::vsapi_types::{self, DisconnectReason};
+use zpr::vsapi_types::{self, DisconnectReason, VSDisconnectNotice};
 use zpr_utils::net_defs::IpAddress;
 
 pub fn authorize_connect(

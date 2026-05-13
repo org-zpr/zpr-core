@@ -22,7 +22,7 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, Connection, DisconnectReason, VSVisaRequest, VisaOp, VSVisaDecision, VisaResponse
+    ConnectRequest, Connection, VSVisaRequest, VisaOp, VSVisaDecision, VisaResponse, StateFlag, VSConnectRequest, VSDisconnectNotice
 };
 use zpr::write_to::WriteTo;
 
@@ -42,21 +42,7 @@ const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout for connect/challenge/authenticate — longer due to crypto.
 const DEFAULT_CONNECT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug)]
-pub struct VSConnectRequest {
-    /// Connect will fail if this does not match policy.
-    pub zpr_addr: IpAddr,
-    pub state: StateFlag,
-}
-
-#[derive(Debug)]
-pub struct VSDisconnectNotice {
-    /// None = node itself, Some = specific adapter
-    pub zpr_addr: Option<IpAddr>,
-    pub reason: DisconnectReason,
-}
-
-/// Returns no error if call to VSAPI authenticate was successful.
+/// 4 no error if call to VSAPI authenticate was successful.
 pub type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
 type VSConnectResponse = Result<(), VSApiError>;
 type VSRegisterVssResponse = Result<Vec<VisaOp>, VSApiError>;
@@ -97,16 +83,6 @@ pub enum VSConnLifecycleEvent {
 
     /// When run loop has stopped.
     RunLoopExits,
-}
-
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateFlag {
-    /// Visa service / node has no state for this connection.
-    #[default]
-    NoState,
-
-    /// Visa service / node has existing state for this connection.
-    HasState,
 }
 
 pub struct VSConn {
