@@ -349,27 +349,30 @@ impl<Pkt> Sender<Pkt> {
 
     /// Returns whether the given packet has been acknowledged as canceled.
     ///
-    /// Panics if called on a sequence number which has not been requested
-    /// to be canceled, or which had, but has been forgotten.
+    /// Panics if called on a sequence number which has not been acknowledged
+    /// (i.e., for which [is_acked()] returns `false`).
+    ///
+    /// Returns `false` for any packet whose cancellation has been forgotten,
+    /// regardless of whether it was actually canceled.
     pub fn is_cancel_acked(&self, sn: SeqNum) -> bool {
         let offset = sn.wrapping_sub(self.last_sent) as i64;
 
         if offset > 0 {
-            panic!("packet cancellation must have been requested");
+            panic!("packet must have been acknowledged");
         }
 
         if -offset >= self.unacked.len() as i64 {
-            panic!("packet cancellation must have been requested and not yet forgotten");
+            return false;
         }
 
         let idx = (self.unacked.len() as i64 + offset - 1) as usize;
         match self.unacked[idx] {
-            UnackedState::Unacked { .. } | UnackedState::Acked => {
-                panic!("packet cancellation must have been requested")
+            UnackedState::Unacked { .. } | UnackedState::Canceled { .. } => {
+                panic!("packet must have been acknowledged")
             }
 
             UnackedState::CancelAcked => true,
-            UnackedState::Canceled { .. } => false,
+            UnackedState::Acked => false,
         }
     }
 
@@ -553,6 +556,8 @@ impl<Pkt> Sender<Pkt> {
     /// It is *required* to call this method at some point after a remote
     /// cancellation is issued.  (It may be called before or after
     /// the cancellation is acknowledged.)
+    ///
+    /// This method is a no-op if cancellation was not in fact requested.
     pub fn forget_canceled_packet(&mut self, sn: SeqNum) {
         let offset = sn.wrapping_sub(self.last_sent) as i64;
 

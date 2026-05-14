@@ -2,12 +2,13 @@ use crate::adapter_tables;
 use crate::assembly::{Assembly, PhMode};
 use crate::counters::ManagementCounterType;
 use crate::logging::targets::FLOW_MGMT;
-use crate::mgmt;
+use crate::mgmt::{self, core::MgmtSendError};
 use crate::packet::{Packet, PacketBuffer};
 use crate::queues::AdapterManagerMessage;
 use crate::two_way_queue;
 use std::num::NonZero;
 use std::sync::Arc;
+use tokio;
 use tracing::*;
 use zpr::packet_info::{DOCK_LINK_ID, LOCAL_ACTOR_LINK_ID};
 
@@ -83,14 +84,23 @@ fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
     match asm.ph_mode {
-        PhMode::Adapter => mgmt::requests::send_bind_actor_address_request(
-            asm,
-            dock_link_id,
-            txn_id,
-            five_tuple.l3_type,
-            &packet_body,
-        )
-        .enqueue(),
+        PhMode::Adapter => {
+            let task_asm = asm.clone();
+            tokio::task::spawn_local(async move {
+                match mgmt::requests::send_bind_actor_address_request(
+                    &task_asm,
+                    dock_link_id,
+                    txn_id,
+                    five_tuple.l3_type,
+                    &packet_body,
+                )
+                .await
+                {
+                    Ok(_acked) => (),
+                    Err(MgmtSendError::LinkClosed) => (),
+                }
+            });
+        }
 
         PhMode::Node => mgmt::dock::bind_actor_address(
             asm,

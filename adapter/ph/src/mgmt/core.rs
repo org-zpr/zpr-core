@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Core management packet functions.
 //!
 //! These are low-level primitives; most code should use the higher-level
@@ -9,7 +10,7 @@ use crate::counters::ManagementCounterType;
 use crate::packet::Packet;
 use crate::zdp;
 use crate::zdpr;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, ready};
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr::packet_info::{LINK_ID_UNKNOWN, LinkId, SeqNum, StreamId};
@@ -60,7 +61,6 @@ pub fn send_non_flow_mgmt(
 
 /// Send a unidirectional per-flow management message on the given link.
 /// The packet should contain only the message body.
-#[allow(dead_code)]
 pub fn send_per_flow_mgmt(
     asm: &Assembly,
     link_id: LinkId,
@@ -133,10 +133,12 @@ pub enum MgmtSendError {
     LinkClosed,
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Copy)]
 enum PacketId {
-    Sent(SeqNum),
     Queued(zdpr::QueuedPacketId),
+    Sent(SeqNum),
+    Acked,
+    Canceled,
 }
 
 /// Future which represents a packet waiting to be sent on the link.
@@ -173,46 +175,125 @@ impl<'a> Sent<'a> {
         std::mem::forget(self)
     }
 
-    /// Explicitly try to cancel the packet, returning the packet if successful,
-    /// or an `Acked` future if unsuccessful (meaning the packet was already sent).
-    #[allow(dead_code)]
-    pub fn try_cancel(mut self) -> Result<Packet, Acked<'a>> {
-        self.try_cancel_internal()
+    /// Has the packet been dequeued and sent?
+    ///
+    /// Once true, [try_cancel()] can no longer succeed, dropping will no
+    /// longer cancel the packet, and this future will be ready immediately.
+    pub fn is_sent(&self) -> bool {
+        let PacketId::Queued(packet_id) = self.packet_id else {
+            return true;
+        };
+
+        let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
+            // We don't know whether the packet got sent before the link was dropped,
+            // but `true` is compatible with the packet having been sent then dropped.
+            return true;
+        };
+        let zdpr_send = peer_state.zdpr_send.lock().unwrap();
+        zdpr_send.is_sent(packet_id)
     }
 
-    fn try_cancel_internal(&mut self) -> Result<Packet, Acked<'a>> {
-        match self.packet_id {
-            PacketId::Sent(seq_num) => Err(Acked {
-                asm: self.asm,
-                link_id: self.link_id,
-                seq_num: Some(seq_num),
-            }),
+    /// Explicitly try to cancel sending the packet, returning the packet if
+    /// successful, or an error if unsuccessful (meaning the packet was
+    /// already sent).
+    pub fn try_cancel(mut self) -> Result<Packet, Acked<'a>> {
+        match self.try_cancel_internal() {
+            Ok(packet) => Ok(packet),
+            Err(()) => Err(Acked(self)),
+        }
+    }
 
-            PacketId::Queued(packet_id) => {
-                let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-                    return Err(Acked {
-                        asm: self.asm,
-                        link_id: LINK_ID_UNKNOWN,
-                        seq_num: None,
-                    });
-                };
-                let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-                if let Some(pkt) = zdpr_send.cancel_sent_packet(packet_id) {
-                    Ok(pkt)
-                } else {
-                    Err(Acked {
-                        asm: self.asm,
-                        link_id: self.link_id,
-                        seq_num: zdpr_send.lookup_seq_num(packet_id),
-                    })
-                }
-            }
+    pub fn try_cancel_internal(&mut self) -> Result<Packet, ()> {
+        let PacketId::Queued(packet_id) = self.packet_id else {
+            return Err(());
+        };
+
+        let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
+            return Err(());
+        };
+
+        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
+
+        if let Some(pkt) = zdpr_send.cancel_queued_packet(packet_id) {
+            Ok(pkt)
+        } else {
+            self.update_sent_packet_id(zdpr_send.lookup_seq_num(packet_id));
+            Err(())
         }
     }
 
     /// Returns a future which waits for this packet to be acked (after it is sent).
-    pub fn acked(self) -> SentAndAcked<'a> {
-        SentAndAcked(self)
+    pub fn acked(self) -> Acked<'a> {
+        Acked(self)
+    }
+
+    /// Request that the peer cancel this packet.
+    ///
+    /// This is only useful if the caller has reason to suspect that the
+    /// packet is manifestly undeliverable after having been sent (e.g. due
+    /// to MTU issues or deep-packet inspection).  Requesting cancellation
+    /// ensures forward progress of the peer.
+    ///
+    /// Returns a future which resolves to an indication of whether the
+    /// packet was indeed canceled.
+    pub fn request_cancel(mut self) -> AckedOrCanceled<'a> {
+        self.request_cancel_internal();
+        AckedOrCanceled(self)
+    }
+
+    fn request_cancel_internal(&mut self) {
+        if matches!(self.packet_id, PacketId::Acked | PacketId::Canceled) {
+            // already acked or canceled
+            return;
+        }
+
+        let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
+            // no more link
+            return;
+        };
+
+        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
+
+        if matches!(self.packet_id, PacketId::Queued(_)) {
+            if self.try_cancel_internal().is_ok() {
+                // immediately canceled
+                self.packet_id = PacketId::Canceled;
+                return;
+            }
+            // else, packet_id is now mutated to Sent
+        }
+
+        let PacketId::Sent(seq_num) = self.packet_id else {
+            // handled above
+            unreachable!();
+        };
+
+        let Some(_pkt) = zdpr_send.cancel_sent_packet(seq_num) else {
+            // already acked or cancel-requested
+            return;
+        };
+
+        // note, we drop the user's packet here; we could return it to them
+
+        // send an immediate cancellation request
+        // (future cancellation requests will be sent via the retry mechanism)
+        send_cancel(self.asm, self.link_id, seq_num);
+    }
+
+    pub fn limit_retries(mut self, limit: u8) -> AckedOrCanceled<'a> {
+        self.limit_retries_internal(limit);
+        AckedOrCanceled(self)
+    }
+
+    fn limit_retries_internal(&mut self, _limit: u8) {
+        unimplemented!("TODO")
+    }
+
+    fn update_sent_packet_id(&mut self, seq_num: Option<SeqNum>) {
+        match seq_num {
+            Some(seq_num) => self.packet_id = PacketId::Sent(seq_num),
+            None => self.packet_id = PacketId::Acked,
+        }
     }
 }
 
@@ -225,28 +306,28 @@ impl<'a> Drop for Sent<'a> {
 impl<'a> std::future::Future for Sent<'a> {
     type Output = Result<Acked<'a>, MgmtSendError>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.packet_id {
-            PacketId::Sent(seq_num) => Poll::Ready(Ok(Acked {
-                asm: self.asm,
-                link_id: self.link_id,
-                seq_num: Some(seq_num),
-            })),
-
             PacketId::Queued(packet_id) => {
                 let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
                     return Poll::Ready(Err(MgmtSendError::LinkClosed));
                 };
 
                 let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-                zdpr_send.poll_send(cx, packet_id).map(|seq_num| {
-                    Ok(Acked {
-                        asm: self.asm,
-                        link_id: self.link_id,
-                        seq_num,
-                    })
-                })
+                let seq_num = ready!(zdpr_send.poll_send(cx, packet_id));
+                self.update_sent_packet_id(seq_num);
+                Poll::Ready(Ok(Acked(Sent {
+                    asm: self.asm,
+                    link_id: self.link_id,
+                    packet_id: self.packet_id,
+                })))
             }
+
+            packet_id => Poll::Ready(Ok(Acked(Sent {
+                asm: self.asm,
+                link_id: self.link_id,
+                packet_id,
+            }))),
         }
     }
 }
@@ -258,82 +339,47 @@ impl<'a> std::future::Future for Sent<'a> {
 ///
 /// Resolves to an error if the link was terminated (and therefore
 /// it is unknown whether the peer ever received the packet).
-///
-/// Unlike `Sent`, dropping `Acked` has no impact on delivery of the packet.
-pub struct Acked<'a> {
-    asm: &'a Assembly,
-    link_id: LinkId,
-    seq_num: Option<SeqNum>, // None indicates acked before we knew the sequenece number
-}
+#[must_use = "dropping a sent packet may cancel it"]
+pub struct Acked<'a>(Sent<'a>);
 
 impl<'a> Acked<'a> {
-    /// Request that the peer cancel this packet.
-    ///
-    /// This is only useful if the caller has reason to suspect that the
-    /// packet is manifestly undeliverable after having been sent (e.g. due
-    /// to MTU issues or deep-packet inspection).  Requesting cancellation
-    /// ensures forward progress of the peer.
-    ///
-    /// Returns a future which resolves to an indication of whether the
-    /// packet was indeed canceled.
-    #[allow(dead_code)]
-    pub fn request_cancel(self) -> AckedOrCanceled<'a> {
-        let Some(seq_num) = self.seq_num else {
-            // was acked before we even knew the sequence number
-            return AckedOrCanceled(self);
-        };
-
-        let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-            // no more link
-            return AckedOrCanceled(self);
-        };
-
-        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-        let Some(_pkt) = zdpr_send.cancel_sent_packet(seq_num) else {
-            // already acked
-            return AckedOrCanceled(self);
-        };
-
-        // note, we drop the user's packet here; we could return it to them
-
-        // send an immediate cancellation request
-        // (future cancellation requests will be sent via the retry mechanism)
-        send_cancel(self.asm, self.link_id, seq_num);
-
-        AckedOrCanceled(self)
+    pub fn is_sent(&self) -> bool {
+        self.0.is_sent()
     }
 
-    // TODO: request_cancel_after aka limit_retries
+    pub fn request_cancel(self) -> AckedOrCanceled<'a> {
+        self.0.request_cancel()
+    }
+
+    pub fn limit_retries(self, limit: u8) -> AckedOrCanceled<'a> {
+        self.0.limit_retries(limit)
+    }
 }
 
 impl<'a> std::future::Future for Acked<'a> {
     type Output = Result<(), MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let Some(seq_num) = self.seq_num else {
+        if matches!(self.0.packet_id, PacketId::Acked) {
             return Poll::Ready(Ok(()));
-        };
+        }
 
-        let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
+        let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
             return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-        zdpr_send.poll_ack(cx, seq_num).map(|()| Ok(()))
+
+        match self.0.packet_id {
+            PacketId::Queued(packet_id) => {
+                zdpr_send.poll_send_and_ack(cx, packet_id).map(|()| Ok(()))
+            }
+            PacketId::Sent(seq_num) => zdpr_send.poll_ack(cx, seq_num).map(|()| Ok(())),
+            PacketId::Acked => unreachable!(),    // handled above
+            PacketId::Canceled => unreachable!(), // not possible in this state
+        }
     }
 }
-
-/// Future which represents the acknowledgement or cancellation of a packet
-/// by the link peer.  (Does _not_ indicate that the peer has necessarily
-/// done anything useful with the packet!  Just that we've made forward
-/// progress in communicating the packet or cancellation thereof.)
-///
-/// Resolves to an error if the link was terminated (and therefore
-/// it is unknown whether the peer ever received the packet).
-///
-/// Unlike `Sent`, dropping `AckedOrCanceled` has no impact on delivery
-/// or cancellation of the packet.
-pub struct AckedOrCanceled<'a>(Acked<'a>);
 
 pub enum PacketStatus {
     /// The packet was acknowledged by the peer.  It will (should) act
@@ -344,32 +390,82 @@ pub enum PacketStatus {
     Canceled,
 }
 
+/// Future which represents the acknowledgement or cancellation of a packet
+/// by the link peer.  (Does _not_ indicate that the peer has necessarily
+/// done anything useful with the packet!  Just that we've made forward
+/// progress in communicating the packet or cancellation thereof.)
+///
+/// Resolves to an error if the link was terminated (and therefore
+/// it is unknown whether the peer ever received the packet).
+#[must_use = "dropping a sent packet may cancel it"]
+pub struct AckedOrCanceled<'a>(Sent<'a>);
+
+impl<'a> AckedOrCanceled<'a> {
+    pub fn is_sent(&self) -> bool {
+        self.0.is_sent()
+    }
+
+    /// Although this packet is already scheduled for cancellation,
+    /// the cancellation may be in the form of a retry limit;
+    /// if so, this may still be used to immediately request cancellation.
+    pub fn request_cancel(mut self) -> AckedOrCanceled<'a> {
+        self.0.request_cancel_internal();
+        self
+    }
+
+    /// Although this packet is already scheduled for cancellation,
+    /// the cancellation may be in the form of a retry limit;
+    /// this may still be used to reduce (but not increase) the limit.
+    pub fn limit_retries(mut self, limit: u8) -> AckedOrCanceled<'a> {
+        self.0.limit_retries_internal(limit);
+        self
+    }
+}
+
 impl<'a> std::future::Future for AckedOrCanceled<'a> {
     type Output = Result<PacketStatus, MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let Some(seq_num) = self.0.seq_num else {
-            return Poll::Ready(Ok(PacketStatus::Acked));
-        };
+        match self.0.packet_id {
+            PacketId::Acked => {
+                return Poll::Ready(Ok(PacketStatus::Acked));
+            }
+            PacketId::Canceled => {
+                return Poll::Ready(Ok(PacketStatus::Canceled));
+            }
+            _ => (),
+        }
 
         let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
             return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-        zdpr_send.poll_ack(cx, seq_num).map(|()| {
-            if zdpr_send.is_cancel_acked(seq_num) {
-                Ok(PacketStatus::Canceled)
-            } else {
-                Ok(PacketStatus::Acked)
+
+        match self.0.packet_id {
+            PacketId::Queued(packet_id) => {
+                ready!(zdpr_send.poll_send_and_ack(cx, packet_id));
+                Poll::Ready(Ok(PacketStatus::Acked))
             }
-        })
+
+            PacketId::Sent(seq_num) => {
+                ready!(zdpr_send.poll_ack(cx, seq_num));
+                if zdpr_send.is_cancel_acked(seq_num) {
+                    Poll::Ready(Ok(PacketStatus::Canceled))
+                } else {
+                    Poll::Ready(Ok(PacketStatus::Acked))
+                }
+            }
+
+            PacketId::Acked => unreachable!(),    // handled above
+            PacketId::Canceled => unreachable!(), // not possible in this state
+        }
     }
 }
 
 impl<'a> Drop for AckedOrCanceled<'a> {
     fn drop(&mut self) {
-        let Some(seq_num) = self.0.seq_num else {
+        let PacketId::Sent(seq_num) = self.0.packet_id else {
             return;
         };
 
@@ -382,53 +478,9 @@ impl<'a> Drop for AckedOrCanceled<'a> {
     }
 }
 
-/// Future which waits for a packet to be both sent and acknowledged.
-///
-/// Dropping this future cancels delivery of the packet if
-/// it has not already been sent.
-///
-/// Resolves to an error if the link was terminated (and therefore
-/// it is unknown whether the peer ever received the packet).
-#[must_use = "dropping a sent packet may cancel it"]
-pub struct SentAndAcked<'a>(Sent<'a>);
-
-#[allow(dead_code)]
-impl<'a> SentAndAcked<'a> {
-    /// Returns a future which waits for this packet to be sent only.
-    pub fn sent(self) -> Sent<'a> {
-        self.0
-    }
-
-    /// If sending would block, queue this packet instead.
-    pub fn enqueue(self) {
-        self.0.enqueue()
-    }
-
-    /// Explicitly try to cancel the packet, returning the packet if successful,
-    /// or an `Acked` future if unsuccessful (meaning the packet was already sent).
-    pub fn try_cancel(self) -> Result<Packet, Acked<'a>> {
-        self.0.try_cancel()
-    }
-
-    // TODO: request_cancel_after
-}
-
-impl<'a> std::future::Future for SentAndAcked<'a> {
-    type Output = Result<(), MgmtSendError>;
-
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
-            return Poll::Ready(Err(MgmtSendError::LinkClosed));
-        };
-
-        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-
-        match self.0.packet_id {
-            PacketId::Sent(seq_num) => zdpr_send.poll_ack(cx, seq_num).map(|()| Ok(())),
-            PacketId::Queued(packet_id) => {
-                zdpr_send.poll_send_and_ack(cx, packet_id).map(|()| Ok(()))
-            }
-        }
+impl<'a> From<Acked<'a>> for AckedOrCanceled<'a> {
+    fn from(value: Acked<'a>) -> Self {
+        Self(value.0)
     }
 }
 
