@@ -42,6 +42,10 @@ pub const DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE: usize = 32;
 
 pub const DEFAULT_ZDPR_RETRY_TIMER: std::time::Duration = std::time::Duration::from_millis(600);
 
+/// Used for specific messages to limit the number of ZDPR retries before giving up.
+/// (Not a global default!)
+pub const DEFAULT_ZDPR_RETRY_LIMIT: u8 = 3;
+
 pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
