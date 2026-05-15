@@ -22,7 +22,8 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, Connection, VSVisaRequest, VisaOp, VSVisaDecision, VisaResponse, StateFlag, VSConnectRequest, VSDisconnectNotice
+    ConnectRequest, Connection, StateFlag, VSConnectRequest, VSDisconnectNotice, VSVisaDecision,
+    VSVisaRequest, VisaOp, VisaResponse,
 };
 use zpr::write_to::WriteTo;
 
@@ -43,12 +44,13 @@ const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_CONNECT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 4 no error if call to VSAPI authenticate was successful.
-pub type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
+type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
 type VSConnectResponse = Result<(), VSApiError>;
 type VSRegisterVssResponse = Result<Vec<VisaOp>, VSApiError>;
 type VSAuthorizeConnectResponse = Result<Connection, VSApiError>;
 type VSNotifyDisconnectResponse = Result<(), VSApiError>;
 type VSPingResponse = Result<(), VSApiError>;
+type VSVisaIdsResponse = Result<Vec<u64>, VSApiError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -71,6 +73,8 @@ enum VS2Command {
     ),
 
     Ping(oneshot::Sender<VSPingResponse>),
+
+    VisaIdsRequest(oneshot::Sender<VSVisaIdsResponse>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -441,6 +445,21 @@ impl VSConn {
                 }
                 Ok(())
             }
+            VS2Command::VisaIdsRequest(resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: visa_ids_request");
+                let resp = if !cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "not connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_visa_ids_request(cmd_state.vs_handle.as_ref().unwrap())
+                        .await
+                };
+                if let Err(e) = resp_tx.send(resp) {
+                    error!(target: VS_RPC, "failed to send visa_ids_request response: {:?}", e);
+                }
+                Ok(())
+            }
         }
     }
 
@@ -687,7 +706,33 @@ impl VSConn {
             rpc_with_timeout("ping", with_timeout, vs_h.ping_request().send().promise).await?;
         match ping_response_rdr.get()?.get_res()?.which()? {
             vsapi2::ok_or_error::Which::Ok(_) => Ok(()),
-            vsapi2::ok_or_error::Which::Error(err_rdr) => Err(ApiResponseError::try_from(err_rdr?)?.into()),
+            vsapi2::ok_or_error::Which::Error(err_rdr) => {
+                Err(ApiResponseError::try_from(err_rdr?)?.into())
+            }
+        }
+    }
+
+    async fn do_visa_ids_request(
+        &self,
+        vs_h: &vsapi2::v_s_handle::Client,
+    ) -> Result<Vec<u64>, VSApiError> {
+        debug!(target: VS_RPC, "VS-API -> visa_ids_request");
+        let visa_ids_reqponse_rdr = rpc_with_timeout(
+            "visa_ids_request",
+            DEFAULT_RPC_TIMEOUT,
+            vs_h.visa_ids_request_request().send().promise,
+        )
+        .await?;
+        let ok_or_error = visa_ids_reqponse_rdr.get()?.get_res()?;
+        match ok_or_error.which()? {
+            vsapi2::result::Which::Ok(ids_list_rdr) => {
+                let ids: Vec<u64> = ids_list_rdr?.iter().collect();
+                Ok(ids)
+            }
+            vsapi2::result::Which::Error(err_obj) => {
+                let err_obj = err_obj?;
+                Err(ApiResponseError::try_from(err_obj)?.into())
+            }
         }
     }
 }
@@ -749,6 +794,13 @@ impl VSConnHandle {
     pub async fn ping(&self) -> Result<(), VSApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::Ping(resp_tx);
+        self.send_command(cmd).await?;
+        resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
+    }
+
+    pub async fn visa_id_request(&self) -> Result<Vec<u64>, VSApiError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = VS2Command::VisaIdsRequest(resp_tx);
         self.send_command(cmd).await?;
         resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
     }

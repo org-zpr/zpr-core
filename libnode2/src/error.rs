@@ -1,5 +1,5 @@
 use thiserror::Error;
-use zpr::vsapi_types::{VsapiTypeError, ApiResponseError};
+use zpr::vsapi_types::{ApiResponseError, VsapiTypeError};
 
 #[derive(Debug, Error)]
 pub enum VSApiError {
