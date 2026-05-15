@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+
 //! Core management packet functions.
 //!
 //! These are low-level primitives; most code should use the higher-level
@@ -203,7 +204,7 @@ impl<'a> Sent<'a> {
         }
     }
 
-    pub fn try_cancel_internal(&mut self) -> Result<Packet, ()> {
+    fn try_cancel_internal(&mut self) -> Result<Packet, ()> {
         let PacketId::Queued(packet_id) = self.packet_id else {
             return Err(());
         };
@@ -226,6 +227,11 @@ impl<'a> Sent<'a> {
     pub fn acked(self) -> Acked<'a> {
         Acked(self)
     }
+
+    // Design note: Why does request_cancel() transition to AckedOrCanceled
+    // and not a hypothetical SentCancellable?  This is because it's not in
+    // fact possible/meaningful to wait for a canceled packet to be sent: if
+    // the packet is not yet sent, it will be canceled immediately!
 
     /// Request that the peer cancel this packet.
     ///
@@ -280,13 +286,38 @@ impl<'a> Sent<'a> {
         send_cancel(self.asm, self.link_id, seq_num);
     }
 
-    pub fn limit_retries(mut self, limit: u8) -> AckedOrCanceled<'a> {
-        self.limit_retries_internal(limit);
+    // Design note: Why does limit_retries() transition to AckedOrCanceled?
+    // This is a deliberate philosophical choice, under the belief that
+    // waiting for a packet to be sent, but then not caring whether it gets
+    // delivered, is inadvisable at the application layer.  It would require
+    // adding an extra state "SentCancelable" to represent this scenario,
+    // which is simply not worth it.  If the user really wants to do this,
+    // they can explicitly wait for the packet to be sent, and then add a
+    // retry limit.
+
+    pub fn limit_retries(mut self, retry_limit: u8) -> AckedOrCanceled<'a> {
+        self.limit_retries_internal(retry_limit);
         AckedOrCanceled(self)
     }
 
-    fn limit_retries_internal(&mut self, _limit: u8) {
-        unimplemented!("TODO")
+    fn limit_retries_internal(&mut self, retry_limit: u8) {
+        if matches!(self.packet_id, PacketId::Acked | PacketId::Canceled) {
+            // already acked or canceled
+            return;
+        }
+
+        let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
+            // no more link
+            return;
+        };
+
+        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
+
+        match self.packet_id {
+            PacketId::Queued(packet_id) => zdpr_send.limit_retries_by_id(packet_id, retry_limit),
+            PacketId::Sent(seq_num) => zdpr_send.limit_retries_by_seq_num(seq_num, retry_limit),
+            PacketId::Acked | PacketId::Canceled => unreachable!(), // handled above
+        }
     }
 
     fn update_sent_packet_id(&mut self, seq_num: Option<SeqNum>) {
@@ -343,6 +374,10 @@ impl<'a> std::future::Future for Sent<'a> {
 pub struct Acked<'a>(Sent<'a>);
 
 impl<'a> Acked<'a> {
+    pub fn enqueue(self) {
+        self.0.enqueue()
+    }
+
     pub fn is_sent(&self) -> bool {
         self.0.is_sent()
     }
@@ -351,8 +386,8 @@ impl<'a> Acked<'a> {
         self.0.request_cancel()
     }
 
-    pub fn limit_retries(self, limit: u8) -> AckedOrCanceled<'a> {
-        self.0.limit_retries(limit)
+    pub fn limit_retries(self, retry_limit: u8) -> AckedOrCanceled<'a> {
+        self.0.limit_retries(retry_limit)
     }
 }
 
@@ -401,6 +436,12 @@ pub enum PacketStatus {
 pub struct AckedOrCanceled<'a>(Sent<'a>);
 
 impl<'a> AckedOrCanceled<'a> {
+    pub fn enqueue(mut self) {
+        // skip Sent destructor, but not our destructor
+        self.forget_internal();
+        std::mem::forget(self);
+    }
+
     pub fn is_sent(&self) -> bool {
         self.0.is_sent()
     }
@@ -408,17 +449,27 @@ impl<'a> AckedOrCanceled<'a> {
     /// Although this packet is already scheduled for cancellation,
     /// the cancellation may be in the form of a retry limit;
     /// if so, this may still be used to immediately request cancellation.
-    pub fn request_cancel(mut self) -> AckedOrCanceled<'a> {
+    pub fn request_cancel(mut self) -> Self {
         self.0.request_cancel_internal();
         self
     }
 
-    /// Although this packet is already scheduled for cancellation,
-    /// the cancellation may be in the form of a retry limit;
-    /// this may still be used to reduce (but not increase) the limit.
-    pub fn limit_retries(mut self, limit: u8) -> AckedOrCanceled<'a> {
-        self.0.limit_retries_internal(limit);
+    pub fn limit_retries(mut self, retry_limit: u8) -> Self {
+        self.0.limit_retries_internal(retry_limit);
         self
+    }
+
+    fn forget_internal(&mut self) {
+        let PacketId::Sent(seq_num) = self.0.packet_id else {
+            return;
+        };
+
+        let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
+            return;
+        };
+
+        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
+        zdpr_send.forget_canceled_packet(seq_num);
     }
 }
 
@@ -457,30 +508,20 @@ impl<'a> std::future::Future for AckedOrCanceled<'a> {
                 }
             }
 
-            PacketId::Acked => unreachable!(),    // handled above
-            PacketId::Canceled => unreachable!(), // not possible in this state
+            PacketId::Acked | PacketId::Canceled => unreachable!(), // handled above
         }
-    }
-}
-
-impl<'a> Drop for AckedOrCanceled<'a> {
-    fn drop(&mut self) {
-        let PacketId::Sent(seq_num) = self.0.packet_id else {
-            return;
-        };
-
-        let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
-            return;
-        };
-
-        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-        zdpr_send.forget_canceled_packet(seq_num);
     }
 }
 
 impl<'a> From<Acked<'a>> for AckedOrCanceled<'a> {
     fn from(value: Acked<'a>) -> Self {
         Self(value.0)
+    }
+}
+
+impl<'a> Drop for AckedOrCanceled<'a> {
+    fn drop(&mut self) {
+        self.forget_internal()
     }
 }
 

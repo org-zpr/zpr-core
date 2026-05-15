@@ -27,6 +27,7 @@ pub async fn launch(asm: Arc<Assembly>, link_id: LinkId) {
                 let mut count = 0;
 
                 // Resend any packets which must be resent.
+                zdpr_send.age_retries().for_each(drop);
                 let packets = zdpr_send.retry_packets();
                 let packets = packets.inspect(|_| count += 1);
                 mgmt::core::build_and_egress_packets(&asm, link_id, packets);

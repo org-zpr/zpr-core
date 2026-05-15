@@ -63,8 +63,20 @@ impl SenderStat {
 }
 
 enum UnackedState<Pkt> {
-    Unacked { packet: Pkt, waker: Waker },
-    Canceled { waker: Waker, forgotten: bool },
+    // Note that `retries_remaining` can be 0 after a packet is sent,
+    // but before retries are aged.  (This is needed so the sender can
+    // still reference the packet body.)
+    Unacked {
+        packet: Pkt,
+        waker: Waker,
+        retry_limit: Option<u8>,
+        retry_count: u8,
+        forgotten: bool,
+    },
+    Canceled {
+        waker: Waker,
+        forgotten: bool,
+    },
     Acked,
     CancelAcked,
 }
@@ -75,35 +87,74 @@ impl<Pkt> UnackedState<Pkt> {
         matches!(self, UnackedState::Acked | UnackedState::CancelAcked)
     }
 
-    /// Attempt to transition from Unacked to Canceled.
+    /// Attempt to transition from `Unacked` to `Canceled`.
     /// Returns the canceled packet if successful.
     pub fn cancel(&mut self) -> Option<Pkt> {
         replace_with_or_abort_and_return(self, |s| match s {
-            Self::Unacked { packet, waker } => (
-                Some(packet),
-                Self::Canceled {
-                    waker,
-                    forgotten: false,
-                },
-            ),
+            Self::Unacked {
+                packet,
+                waker,
+                forgotten,
+                ..
+            } => (Some(packet), Self::Canceled { waker, forgotten }),
             s => (None, s),
         })
     }
 
+    /// Set, or reduce, a retry limit.
+    ///
+    /// Does not enforce the limit: [age_retries()] must be called
+    /// to do that.
+    pub fn limit_retries(&mut self, limit: u8) {
+        let Self::Unacked { retry_limit, .. } = self else {
+            return;
+        };
+        *retry_limit = Some(std::cmp::min(limit, retry_limit.unwrap_or(u8::MAX)));
+    }
+
     /// Forget (or, preemptively forget) the cancellation status
-    /// of this packet.
+    /// of this packet.  Can also be used on packets which have retry limits,
+    /// but not on packets which are neither cancelled nor have retry limits.
     pub fn forget(&mut self) {
         match self {
-            Self::Canceled { forgotten, .. } => *forgotten = true,
+            Self::Unacked {
+                retry_limit: Some(_),
+                forgotten,
+                ..
+            }
+            | Self::Canceled { forgotten, .. } => *forgotten = true,
             Self::CancelAcked => *self = Self::Acked,
             _ => (),
+        }
+    }
+
+    /// Increment the retry count for an `Unacked` packet.
+    /// If this goes below zero, transition the packet to `Canceled` and
+    /// returns the canceled packet.
+    pub fn age_retries(&mut self) -> Option<Pkt> {
+        let UnackedState::Unacked {
+            retry_limit,
+            retry_count,
+            ..
+        } = self
+        else {
+            return None;
+        };
+
+        if let Some(limit) = retry_limit
+            && retry_count >= limit
+        {
+            self.cancel()
+        } else {
+            *retry_count = retry_count.saturating_add(1);
+            None
         }
     }
 
     /// Wake any associated waker, and return any associated packet.
     pub fn destruct(self) -> Option<Pkt> {
         match self {
-            Self::Unacked { packet, waker } => {
+            Self::Unacked { packet, waker, .. } => {
                 waker.wake();
                 Some(packet)
             }
@@ -117,7 +168,11 @@ impl<Pkt> UnackedState<Pkt> {
 }
 
 enum BlockedState<Pkt> {
-    Blocked { packet: Pkt, waker: Waker },
+    Blocked {
+        packet: Pkt,
+        waker: Waker,
+        retry_limit: Option<u8>,
+    },
     Canceled,
 }
 
@@ -126,15 +181,23 @@ impl<Pkt> BlockedState<Pkt> {
     /// Returns the canceled packet and associated waker if successful.
     pub fn cancel(&mut self) -> Option<(Pkt, Waker)> {
         replace_with_or_abort_and_return(self, |s| match s {
-            Self::Blocked { packet, waker } => (Some((packet, waker)), Self::Canceled),
+            Self::Blocked { packet, waker, .. } => (Some((packet, waker)), Self::Canceled),
             s => (None, s),
         })
+    }
+
+    /// Set, or reduce, a retry limit.
+    pub fn limit_retries(&mut self, limit: u8) {
+        let Self::Blocked { retry_limit, .. } = self else {
+            return;
+        };
+        *retry_limit = Some(std::cmp::min(limit, retry_limit.unwrap_or(u8::MAX)));
     }
 
     /// Wake any associated waker, and return any associated packet.
     pub fn destruct(self) -> Option<Pkt> {
         match self {
-            Self::Blocked { packet, waker } => {
+            Self::Blocked { packet, waker, .. } => {
                 waker.wake();
                 Some(packet)
             }
@@ -213,7 +276,7 @@ pub struct Sender<Pkt> {
 //
 //   ENQUEUE: The caller requests to enqueue a packet.
 //
-//   CANCEL: The caller requests to cancel a packet.
+//   CANCEL: The caller requests to cancel a packet, or the packet's retry count is exceeded.
 //
 //   ACK: An acknowledgement is received for the packet.
 //
@@ -460,6 +523,7 @@ impl<Pkt> Sender<Pkt> {
             self.blocked.push_back(BlockedState::Blocked {
                 packet,
                 waker: Waker::noop().clone(),
+                retry_limit: None,
             });
             return EnqueueResult::Queued(self.last_enqueued);
         }
@@ -468,6 +532,9 @@ impl<Pkt> Sender<Pkt> {
             self.unacked.push_back_mut(UnackedState::Unacked {
                 packet,
                 waker: Waker::noop().clone(),
+                retry_limit: None,
+                retry_count: 0,
+                forgotten: false,
             })
         else {
             unreachable!()
@@ -540,12 +607,53 @@ impl<Pkt> Sender<Pkt> {
         }
 
         let idx = (self.unacked.len() as i64 + offset - 1) as usize;
+        self.unacked[idx].cancel()
+    }
 
-        let pkt = self.unacked[idx].cancel();
+    /// Limit the number of times this packet will be retried.
+    ///
+    /// May be called multiple times; the lowest limit specified
+    /// remains in effect.
+    ///
+    /// Each time a packet is retried _after_ the initial attempt counts
+    /// toward this limit.  This count is relative to the initial attempt,
+    /// even if retries have already been attempted.
+    ///
+    /// When the specified number of retries have been reached, no further
+    /// retries are attempted, and instead cancellation attempts will be made.
+    ///
+    /// If the packet is already canceled, this has no effect.
+    pub fn limit_retries_by_id(&mut self, id: QueuedPacketId, retry_limit: u8) {
+        let offset = id.wrapping_sub(self.last_enqueued) as i64;
+        assert!(
+            offset <= 0,
+            "retry-limiting of packet which has not yet been enqueued"
+        );
 
-        self.clean_sent_queue();
+        if -offset >= self.blocked.len() as i64 {
+            if let Some(sn) = self.lookup_seq_num(id) {
+                self.limit_retries_by_seq_num(sn, retry_limit);
+            }
+            return;
+        }
 
-        pkt
+        let idx = (self.blocked.len() as i64 + offset - 1) as usize;
+        self.blocked[idx].limit_retries(retry_limit);
+    }
+
+    /// Limit the number of times this packet will be retried.
+    ///
+    /// Same as [limit_retries_by_id()], but by sequence number.
+    pub fn limit_retries_by_seq_num(&mut self, sn: QueuedPacketId, retry_limit: u8) {
+        let offset = sn.wrapping_sub(self.last_sent) as i64;
+
+        if offset > 0 || -offset >= self.unacked.len() as i64 {
+            // already acknowledged
+            return;
+        }
+
+        let idx = (self.unacked.len() as i64 + offset - 1) as usize;
+        self.unacked[idx].limit_retries(retry_limit);
     }
 
     /// After a sent packet is canceled, we track the status of
@@ -617,7 +725,7 @@ impl<Pkt> Sender<Pkt> {
         let idx = self.lookup_ack_index(sn)?;
 
         let (pkt, waker) = replace_with_or_abort_and_return(&mut self.unacked[idx], |s| match s {
-            UnackedState::Unacked { packet, waker } => {
+            UnackedState::Unacked { packet, waker, .. } => {
                 (Some((Some(packet), waker)), UnackedState::Acked)
             }
 
@@ -725,8 +833,11 @@ impl<Pkt> Sender<Pkt> {
     pub fn enqueue_next_blocked_packet(&mut self) -> (SeqNum, &mut Pkt) {
         assert!(!self.is_blocked(), "sender is blocked");
 
-        let BlockedState::Blocked { packet, waker } =
-            self.blocked.pop_front().expect("no blocked packets")
+        let BlockedState::Blocked {
+            packet,
+            waker,
+            retry_limit,
+        } = self.blocked.pop_front().expect("no blocked packets")
         else {
             panic!("sender is blocked");
         };
@@ -734,6 +845,9 @@ impl<Pkt> Sender<Pkt> {
         self.unacked.push_back(UnackedState::Unacked {
             packet,
             waker: Waker::noop().clone(),
+            retry_limit,
+            retry_count: 0,
+            forgotten: false,
         });
         let sn = self.last_sent.wrapping_add(1);
         self.last_sent = sn;
@@ -760,6 +874,15 @@ impl<Pkt> Sender<Pkt> {
     /// `process_ack()`, or `process_canceled()`.
     pub fn retry_needed(&self) -> bool {
         !self.unacked.is_empty()
+    }
+
+    /// Ages packet retry counts, and transitions expired packets to `Canceled`.
+    ///
+    /// Should be called first before querying [retry_packets()] and [retry_cancels()].
+    ///
+    /// Returns a list of cancel packets to be dropped.
+    pub fn age_retries(&mut self) -> impl Iterator<Item = Pkt> {
+        self.unacked.iter_mut().filter_map(|pkt| pkt.age_retries())
     }
 
     /// Retrieve the list of packets which need to be retried.
