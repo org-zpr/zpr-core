@@ -22,8 +22,8 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, Connection, StateFlag, VSConnectRequest, VSDisconnectNotice, VSVisaDecision,
-    VSVisaRequest, Visa, VisaOp, VisaResponse,
+    ConnectRequest, Connection, StateFlag, NodeConnect, DisconnectNotice, VisaDecision,
+    VisaRequest, Visa, VisaOp, VisaResponse,
 };
 use zpr::write_to::WriteTo;
 
@@ -44,7 +44,7 @@ const DEFAULT_RPC_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_CONNECT_RPC_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// 4 no error if call to VSAPI authenticate was successful.
-type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
+type VSVisaResponse = Result<VisaDecision, VSApiError>;
 type VSConnectResponse = Result<(), VSApiError>;
 type VSRegisterVssResponse = Result<Vec<VisaOp>, VSApiError>;
 type VSAuthorizeConnectResponse = Result<Connection, VSApiError>;
@@ -60,16 +60,16 @@ enum VS2Command {
     Stop(bool),
 
     /// Run through the connect sequence. If connect succeeds the VSHandle is kept internally.
-    Connect(VSConnectRequest, oneshot::Sender<VSConnectResponse>),
+    Connect(NodeConnect, oneshot::Sender<VSConnectResponse>),
 
-    VisaRequest(VSVisaRequest, oneshot::Sender<VSVisaResponse>),
+    VisaRequest(VisaRequest, oneshot::Sender<VSVisaResponse>),
 
     RegisterVss(SocketAddr, oneshot::Sender<VSRegisterVssResponse>),
 
     AuthorizeConnect(ConnectRequest, oneshot::Sender<VSAuthorizeConnectResponse>),
 
     NotifyDisconnect(
-        VSDisconnectNotice,
+        DisconnectNotice,
         oneshot::Sender<VSNotifyDisconnectResponse>,
     ),
 
@@ -484,7 +484,7 @@ impl VSConn {
     async fn do_connect(
         &self,
         vs_service: &vsapi2::visa_service::Client,
-        req: VSConnectRequest,
+        req: NodeConnect,
     ) -> Result<vsapi2::v_s_handle::Client, VSApiError> {
         let mut vs_request = vs_service.connect_request();
 
@@ -594,8 +594,8 @@ impl VSConn {
     async fn do_visa_request(
         &self,
         vs_h: &vsapi2::v_s_handle::Client,
-        req: VSVisaRequest, // TODO: VSVisaRequest should use a PacketDesc from vs-dt, then implement write_to on it.
-    ) -> Result<VSVisaDecision, VSApiError> {
+        req: VisaRequest, // TODO: VisaRequest should use a PacketDesc from vs-dt, then implement write_to on it.
+    ) -> Result<VisaDecision, VSApiError> {
         let mut vr_request = vs_h.visa_request_request();
         let mut vrr_bldr = vr_request.get().init_req();
         vrr_bldr.set_previous_id(0);
@@ -610,7 +610,7 @@ impl VSConn {
 
         let allow_deny_error: vsapi2::visa_response::Reader<'_> = vr_response.get()?.get_resp()?;
         let vr = VisaResponse::try_from(allow_deny_error)?;
-        Ok(VSVisaDecision::try_from(vr)?)
+        Ok(VisaDecision::try_from(vr)?)
     }
 
     async fn do_authorize_connect(
@@ -647,7 +647,7 @@ impl VSConn {
     async fn do_notify_disconnect(
         &self,
         vs_h: &vsapi2::v_s_handle::Client,
-        req: VSDisconnectNotice,
+        req: DisconnectNotice,
     ) -> Result<(), VSApiError> {
         let mut nd_request = vs_h.notify_disconnect_request();
         let mut dn_bldr = nd_request.get().init_req();
@@ -800,7 +800,7 @@ impl VSConnHandle {
             .map_err(|_| VSApiError::ConnClosed)
     }
 
-    pub async fn connect(&self, req: VSConnectRequest) -> Result<(), VSApiError> {
+    pub async fn connect(&self, req: NodeConnect) -> Result<(), VSApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::Connect(req, resp_tx);
         self.send_command(cmd).await?;
@@ -812,7 +812,7 @@ impl VSConnHandle {
         self.send_command(cmd).await
     }
 
-    pub async fn visa_request(&self, req: VSVisaRequest) -> Result<VSVisaDecision, VSApiError> {
+    pub async fn visa_request(&self, req: VisaRequest) -> Result<VisaDecision, VSApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::VisaRequest(req, resp_tx);
         self.send_command(cmd).await?;
@@ -838,7 +838,7 @@ impl VSConnHandle {
         resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
     }
 
-    pub async fn notify_disconnect(&self, req: VSDisconnectNotice) -> Result<(), VSApiError> {
+    pub async fn notify_disconnect(&self, req: DisconnectNotice) -> Result<(), VSApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::NotifyDisconnect(req, resp_tx);
         self.send_command(cmd).await?;

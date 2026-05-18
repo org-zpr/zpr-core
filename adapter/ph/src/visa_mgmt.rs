@@ -14,7 +14,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use tracing::*;
 use zpr::packet_info::{LinkId, VisaId};
-use zpr::vsapi_types::{self, DisconnectReason, VSDisconnectNotice};
+use zpr::vsapi_types::{self, DisconnectReason, DisconnectNotice};
 use zpr_utils::net_defs::IpAddress;
 
 pub fn authorize_connect(
@@ -161,7 +161,7 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
 
 /// This uses "RemoteDisconnect" as the reason passed to the visa service.
 pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
-    let notice = VSDisconnectNotice {
+    let notice = DisconnectNotice {
         zpr_addr: Some(addr.into()),
         reason: DisconnectReason::RemoteDisconnect,
     };

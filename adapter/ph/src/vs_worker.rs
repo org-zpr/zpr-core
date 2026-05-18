@@ -11,7 +11,7 @@ use crate::vss_worker;
 use libnode::error::VSApiError;
 use libnode::vsconn::{VSConnHandle, VSConnLifecycleEvent};
 use zpr::vsapi_types::{
-    DisconnectReason, ErrorCode, StateFlag, VSConnectRequest, VSDisconnectNotice,
+    DisconnectReason, ErrorCode, StateFlag, NodeConnect, DisconnectNotice,
 };
 
 pub async fn launch(
@@ -30,7 +30,7 @@ pub async fn launch(
 
         loop {
             // Kick off a connect request to the VS, if it succeeds, notify the VS about our VSS endpoint.
-            let req = VSConnectRequest {
+            let req = NodeConnect {
                 zpr_addr: node_zpr_addr,
                 state,
             };
@@ -103,7 +103,7 @@ pub async fn launch(
                     Err(e) => {
                         error!(target: STARTUP, "failed to register VSS: {e:?}");
 
-                        let dreq = VSDisconnectNotice {
+                        let dreq = DisconnectNotice {
                             zpr_addr: None,
                             reason: DisconnectReason::LinkError,
                         };

@@ -30,7 +30,7 @@ use tracing::*;
 use zpr::packet_info::{
     DOCK_LINK_ID, ForwardingEntry, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, VisaId,
 };
-use zpr::vsapi_types::{CommFlag, PacketDesc, VSVisaRequest, VsapiFiveTuple, vsapi_ip_number};
+use zpr::vsapi_types::{CommFlag, PacketDesc, VisaRequest, VsapiFiveTuple, vsapi_ip_number};
 
 /// State of an in-progress inbound bind request.
 enum BindRequestState {
@@ -209,7 +209,7 @@ pub fn bind_actor_address(
         }
         _ => CommFlag::BiDirectional,
     };
-    let visa_req = VSVisaRequest {
+    let visa_req = VisaRequest {
         pdesc: PacketDesc {
             five_tuple: VsapiFiveTuple::new(
                 five_tuple.l3_type,
@@ -258,10 +258,10 @@ async fn visa_request_task(
     asm: Arc<Assembly>,
     ingress_link_id: NonZero<LinkId>,
     txn_id: TxnId,
-    visa_req: VSVisaRequest,
+    visa_req: VisaRequest,
 ) {
     match asm.vsconn.as_ref().unwrap().visa_request(visa_req).await {
-        Ok(zpr::vsapi_types::VSVisaDecision::Allowed(visa)) => {
+        Ok(zpr::vsapi_types::VisaDecision::Allowed(visa)) => {
             let visa_id = match visa_mgmt::insert_visa(&asm, visa) {
                 Ok(vid) => vid,
 
@@ -279,7 +279,7 @@ async fn visa_request_task(
             requested_visa_granted(&asm, ingress_link_id, txn_id, visa_id);
         }
 
-        Ok(zpr::vsapi_types::VSVisaDecision::Denied(deny_code)) => {
+        Ok(zpr::vsapi_types::VisaDecision::Denied(deny_code)) => {
             asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
             debug!(target: FLOW_MGMT, "visa request denied: {deny_code:?}");
             requested_visa_denied(&asm, ingress_link_id, txn_id)
