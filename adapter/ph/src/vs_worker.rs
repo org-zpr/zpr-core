@@ -10,9 +10,7 @@ use crate::vss_worker;
 
 use libnode::error::VSApiError;
 use libnode::vsconn::{VSConnHandle, VSConnLifecycleEvent};
-use zpr::vsapi_types::{
-    DisconnectReason, ErrorCode, StateFlag, NodeConnect, DisconnectNotice,
-};
+use zpr::vsapi_types::{DisconnectNotice, DisconnectReason, ErrorCode, NodeConnect, StateFlag};
 
 pub async fn launch(
     asm: Arc<Assembly>,

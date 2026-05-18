@@ -22,8 +22,8 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, Connection, StateFlag, NodeConnect, DisconnectNotice, VisaDecision,
-    VisaRequest, Visa, VisaOp, VisaResponse,
+    ConnectRequest, Connection, DisconnectNotice, NodeConnect, StateFlag, Visa, VisaDecision,
+    VisaOp, VisaRequest, VisaResponse,
 };
 use zpr::write_to::WriteTo;
 

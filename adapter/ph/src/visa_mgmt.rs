@@ -14,7 +14,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use tracing::*;
 use zpr::packet_info::{LinkId, VisaId};
-use zpr::vsapi_types::{self, DisconnectReason, DisconnectNotice};
+use zpr::vsapi_types::{self, DisconnectNotice, DisconnectReason};
 use zpr_utils::net_defs::IpAddress;
 
 pub fn authorize_connect(
