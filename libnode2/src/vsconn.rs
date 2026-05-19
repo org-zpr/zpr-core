@@ -18,7 +18,6 @@ use tokio_rustls::TlsConnector;
 use tokio_util::compat::*;
 use tracing::*;
 
-// use crate::error::VSApiError;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{

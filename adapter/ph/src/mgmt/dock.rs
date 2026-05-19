@@ -708,7 +708,7 @@ fn resolve_next_hop_bind_originator(
         );
         assert_eq!(
             expected_egress_txn, egress_txn,
-            "dock sE0432tate consistency error"
+            "dock state consistency error"
         );
     }
 
