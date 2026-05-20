@@ -1642,14 +1642,19 @@ impl LinkStateWrapper {
 
                 match self.link_type {
                     LinkType::AdapterToNode => asm.tun_ctl.set_carrier(false).unwrap(),
-                    LinkType::NodeToAdapter => join_set = self.deregister_actor_addresses(asm),
+                    LinkType::NodeToAdapter => {
+                        info!(target: LINK_STATE, "clean_up_link_state({link_id}): spawning deregister_actor_addresses");
+                        join_set = self.deregister_actor_addresses(asm);
+                    }
                     _ => {}
                 }
 
                 let task_asm = asm.clone();
                 join_set.spawn_local(async move {
                     // NOTE: Any mgmt messages MUST have been sent before this is called
+                    info!(target: LINK_STATE, "clean_up_link_state({link_id}): calling drop_link");
                     km_multiplexor::drop_link(&task_asm, link_id).await;
+                    info!(target: LINK_STATE, "clean_up_link_state({link_id}): drop_link done");
 
                     if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::CloseDone)
                     {
@@ -1733,7 +1738,9 @@ impl LinkStateWrapper {
             TerminateReason::Reset,
         )
         .enqueue();
+        info!(target: LINK_STATE, "reset({link_id}): calling clean_up_link_state");
         let _ = self.clean_up_link_state(asm).join_all().await;
+        info!(target: LINK_STATE, "reset({link_id}): clean_up_link_state done");
     }
 
     /// Handle a terminate link acknowledgement.

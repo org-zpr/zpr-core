@@ -69,7 +69,9 @@ fn emit_counts(counters: &Counters, uptime: std::time::Duration) {
 }
 
 async fn do_clean_shutdown(asm: Arc<Assembly>) -> ! {
+    info!(target: STARTUP, "do_clean_shutdown: calling asm.shutdown()");
     asm.shutdown().await;
+    info!(target: STARTUP, "do_clean_shutdown: asm.shutdown() returned");
     emit_counts(&asm.counters, asm.get_uptime());
     std::process::exit(0);
 }

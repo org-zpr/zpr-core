@@ -125,6 +125,8 @@ impl Assembly {
                 .peer_table
                 .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
 
+            info!(target: PEER_MGMT, "shutdown_node: starting, peer_table len = {}", self.peer_table.len());
+
             self.peer_table.for_each(|(peer_id, peer)| {
                 if Some(peer_id) != vs_peer && !peer.is_internal() {
                     // This should be a short block and must be blocked on,
@@ -134,10 +136,14 @@ impl Assembly {
                 }
             });
 
+            info!(target: PEER_MGMT, "shutdown_node: waiting for non-VS peer resets");
             join_set.join_all().await;
+            info!(target: PEER_MGMT, "shutdown_node: non-VS peer resets done");
 
             if let Some(vs_peer) = vs_peer {
+                info!(target: PEER_MGMT, "shutdown_node: resetting VS peer {:?}", vs_peer);
                 self.reset_peer(vs_peer.get()).await;
+                info!(target: PEER_MGMT, "shutdown_node: VS peer reset done");
             }
         }
     }
@@ -310,21 +316,27 @@ impl Assembly {
     /// Calls down to `LinkStateWrapper::reset` which will ultimately end up calling back
     /// here to [Assembly::drop_peer].
     pub async fn reset_peer(self: &Arc<Self>, link_id: LinkId) {
+        info!(target: PEER_MGMT, "reset_peer({link_id}): entry");
         let vs_link_id = self
             .peer_table
             .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
         if vs_link_id.is_some() && link_id == vs_link_id.unwrap().get() {
             if let Some(vsconn) = self.vsconn.as_ref() {
+                info!(target: PEER_MGMT, "reset_peer({link_id}): calling vsconn.stop()");
                 if let Err(e) = vsconn.stop(true).await {
                     error!(target: PEER_MGMT, "stop command to VSConn failed: {e}");
                 } else {
                     // Let VSConn runloop process/send the command.
+                    info!(target: PEER_MGMT, "reset_peer({link_id}): vsconn.stop() done, sleeping 500ms");
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    info!(target: PEER_MGMT, "reset_peer({link_id}): sleep done");
                 }
             }
         }
         if let Some(peer) = self.peer_table.get(link_id) {
+            info!(target: PEER_MGMT, "reset_peer({link_id}): calling link_state_machine.reset()");
             peer.link_state_machine.reset(self).await;
+            info!(target: PEER_MGMT, "reset_peer({link_id}): link_state_machine.reset() done");
         }
     }
 

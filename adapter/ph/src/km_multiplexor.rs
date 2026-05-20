@@ -250,18 +250,21 @@ pub fn add_node_link(
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
 pub async fn drop_link(asm: &Arc<Assembly>, link_id: LinkId) {
+    info!(target: KEY_MGMT, "drop_link({link_id}): entry");
     // If present in state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 
     // remove the SA and handle from our km state, stop the KM state machine
     if let Some(kmh) = asm.peer_table.remove_km_state(link_id) {
         kmh.ctok.cancel(); // stop the KM
+        info!(target: KEY_MGMT, "drop_link({link_id}): ctok cancelled, awaiting join_handle");
         match kmh.join_handle.await {
             Ok(_) => (),
             Err(e) => {
                 error!(target: KEY_MGMT, "statemachine shutdown join failed on link {link_id}: {e:?}");
             }
         }
+        info!(target: KEY_MGMT, "drop_link({link_id}): join_handle done");
     }
 }
 

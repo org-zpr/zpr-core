@@ -165,12 +165,14 @@ pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
         zpr_addr: Some(addr.into()),
         reason: DisconnectReason::RemoteDisconnect,
     };
+    info!(target: VISA_MGMT, "actor_disconnect({addr}): calling notify_disconnect");
     match asm.vsconn.as_ref().unwrap().notify_disconnect(notice).await {
         Err(e) => {
             warn!(target: VISA_MGMT, "Failed to disconnect actor {addr} with error {e:?}")
         }
         Ok(()) => debug!(target: VISA_MGMT, "Successfully disconnected actor {addr}"),
     }
+    info!(target: VISA_MGMT, "actor_disconnect({addr}): notify_disconnect returned");
 }
 
 /// Insert visa into table.
