@@ -324,14 +324,7 @@ impl Assembly {
             }
         }
         if let Some(peer) = self.peer_table.get(link_id) {
-            if let Err(_elapsed) = tokio::time::timeout(
-                config::DEFAULT_STATE_MACHINE_RESET_WAIT,
-                peer.link_state_machine.reset(self),
-            )
-            .await
-            {
-                warn!(target: PEER_MGMT, "link {link_id}: link state machine reset timed out, forcing shutdown");
-            }
+            peer.link_state_machine.reset(self).await;
         }
     }
 

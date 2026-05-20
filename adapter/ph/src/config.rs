@@ -45,10 +45,6 @@ pub const DEFAULT_ZDPR_RETRY_TIMER: std::time::Duration = std::time::Duration::f
 pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Used during shutdown. We give enough time for a clean exit, but will not wait forever.
-pub const DEFAULT_STATE_MACHINE_RESET_WAIT: std::time::Duration =
-    std::time::Duration::from_secs(10);
-
 pub const DEFAULT_VSS_PORT: u16 = 8183;
 
 /// Visa service minimum visa ID value. Values below this are reserved.
