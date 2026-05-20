@@ -4,6 +4,7 @@ use zpr::vsapi_types::ApiResponseError;
 use std::future::Future;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -25,6 +26,12 @@ use zpr::vsapi_types::{
     VisaOp, VisaRequest, VisaResponse,
 };
 use zpr::write_to::WriteTo;
+
+/// Boxed async connect factory: given a SocketAddr, returns a future that resolves to a TcpStream.
+/// The default implementation calls `tokio::net::TcpStream::connect`; tests may inject a stub.
+type ConnectFn = Box<
+    dyn Fn(SocketAddr) -> Pin<Box<dyn Future<Output = std::io::Result<tokio::net::TcpStream>>>>,
+>;
 
 const PARAM_ZPR_ADDR: &str = "zpr_addr";
 
@@ -98,6 +105,7 @@ pub struct VSConn {
     node_cn: String,
     node_private_key: PKey<Private>,
     life_tx: broadcast::Sender<VSConnLifecycleEvent>,
+    connect_fn: ConnectFn,
 }
 
 #[derive(Clone)]
@@ -148,6 +156,7 @@ impl VSConn {
             node_cn,
             node_private_key,
             life_tx,
+            connect_fn: Box::new(|addr| Box::pin(tokio::net::TcpStream::connect(addr))),
         }
     }
 
@@ -185,7 +194,16 @@ impl VSConn {
                 Err(e) => {
                     error!(target: VS_RPC, "VSConn: run loop exited with error: {:?}", e);
                     info!(target: VS_RPC, "VSConn: reconnecting in {} seconds...", reconnect_after.as_secs());
-                    tokio::time::sleep(reconnect_after).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(reconnect_after) => {}
+                        cmd = self.cmd_rx.recv() => match cmd {
+                            Some(VS2Command::Stop(_)) | None => {
+                                info!(target: VS_RPC, "VSConn: stop received during reconnect delay, exiting");
+                                return Ok(());
+                            }
+                            Some(other) => drop(other),
+                        }
+                    }
                 }
             }
         }
@@ -196,7 +214,27 @@ impl VSConn {
         // First spin up a connection to the Capn Proto service on the VS.
         info!(target: VS_RPC, "VS RPC service connecting to {} (capnp)", self.vs_addr);
 
-        let sock = tokio::net::TcpStream::connect(self.vs_addr).await?;
+        // Interruptible TCP connect: poll cmd_rx alongside the connect future so that a Stop
+        // command received while blocked in connect (e.g. during a 2-minute TCP ETIMEDOUT) causes
+        // a clean exit rather than an indefinite hang.
+        let sock = {
+            let mut connect_fut = (self.connect_fn)(self.vs_addr);
+            loop {
+                tokio::select! {
+                    result = &mut connect_fut => break result?,
+                    cmd = self.cmd_rx.recv() => match cmd {
+                        Some(VS2Command::Stop(_)) | None => {
+                            info!(target: VS_RPC, "VSConn: stop received during TCP connect, exiting cleanly");
+                            self.send_lifecycle_event(VSConnLifecycleEvent::RunLoopExits);
+                            return Ok(());
+                        }
+                        // Any other command arrived before connection is established; drop it so
+                        // its oneshot sender is closed and the caller receives ConnClosed.
+                        Some(other) => drop(other),
+                    }
+                }
+            }
+        };
         sock.set_nodelay(true)?;
 
         let connector = tls_connect();
@@ -972,4 +1010,124 @@ fn tls_connect() -> TlsConnector {
         .with_no_client_auth();
 
     TlsConnector::from(Arc::new(cfg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl VSConn {
+        /// Construct a VSConn with a custom connect function.
+        /// Intended only for unit tests that need to inject a stub TCP connector (e.g. a pending
+        /// future that never resolves, to simulate a hung connection attempt).
+        fn new_for_test(
+            vs_addr: SocketAddr,
+            node_cn: String,
+            node_private_key: PKey<Private>,
+            connect_fn: ConnectFn,
+        ) -> Self {
+            let (cmd_tx, cmd_rx) = mpsc::channel(16);
+            let (life_tx, _) = broadcast::channel(LIFECYCLE_EVENT_BUFFER_SIZE);
+            VSConn {
+                cmd_tx,
+                cmd_rx,
+                vs_addr,
+                node_cn,
+                node_private_key,
+                life_tx,
+                connect_fn,
+            }
+        }
+    }
+
+    fn test_key() -> PKey<Private> {
+        let rsa = openssl::rsa::Rsa::generate(1024).unwrap();
+        PKey::from_rsa(rsa).unwrap()
+    }
+
+    /// Connect function that always fails immediately with ConnectionRefused.
+    /// Used to drive run_with_reconnect into the sleep/retry branch.
+    fn refusing_connect_fn() -> ConnectFn {
+        Box::new(|_addr| {
+            Box::pin(async {
+                Err::<tokio::net::TcpStream, _>(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    "test stub",
+                ))
+            })
+        })
+    }
+
+    /// Connect function that never resolves — simulates a TCP connect blocked waiting for a
+    /// SYN-ACK that will never arrive (e.g. firewall drop / ETIMEDOUT scenario).
+    fn pending_connect_fn() -> ConnectFn {
+        Box::new(|_addr| Box::pin(std::future::pending::<std::io::Result<tokio::net::TcpStream>>()))
+    }
+
+    fn test_vsconn(connect_fn: ConnectFn) -> VSConn {
+        VSConn::new_for_test(
+            "127.0.0.1:1".parse().unwrap(),
+            "test-node".to_string(),
+            test_key(),
+            connect_fn,
+        )
+    }
+
+    /// Before fix: run_with_reconnect blocks in tokio::time::sleep(reconnect_after) even when a
+    /// Stop command is already in the channel, causing a full 30-second delay.
+    /// After fix: the select! between the sleep and cmd_rx delivers Stop immediately.
+    #[tokio::test]
+    async fn stop_during_reconnect_delay_exits_promptly() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut vsconn = test_vsconn(refusing_connect_fn());
+                let handle = vsconn.handle();
+
+                let task = tokio::task::spawn_local(async move {
+                    vsconn.run_with_reconnect(Duration::from_secs(30)).await
+                });
+
+                // Wait for the first failed connect and entry into the reconnect sleep.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+
+                handle.stop(false).await.unwrap();
+
+                tokio::time::timeout(Duration::from_secs(2), task)
+                    .await
+                    .expect(
+                        "run_with_reconnect hung past 2s — was sleeping for 30s without the fix",
+                    )
+                    .expect("task panicked")
+                    .expect("run_with_reconnect returned an error");
+            })
+            .await;
+    }
+
+    /// Before fix: run_with_reconnect → run() blocks in (connect_fn)() with no cmd_rx polling,
+    /// so the Stop command is never processed until the connect times out.
+    /// After fix: run() selects between the connect future and cmd_rx; Stop causes a clean exit.
+    #[tokio::test]
+    async fn stop_during_tcp_connect_exits_promptly() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let mut vsconn = test_vsconn(pending_connect_fn());
+                let handle = vsconn.handle();
+
+                let task = tokio::task::spawn_local(async move {
+                    vsconn.run_with_reconnect(Duration::from_secs(30)).await
+                });
+
+                // Give the connect a moment to start.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+
+                handle.stop(false).await.unwrap();
+
+                tokio::time::timeout(Duration::from_secs(2), task)
+                    .await
+                    .expect("run_with_reconnect hung past 2s — was blocked in connect() without the fix")
+                    .expect("task panicked")
+                    .expect("run_with_reconnect returned an error");
+            })
+            .await;
+    }
 }
