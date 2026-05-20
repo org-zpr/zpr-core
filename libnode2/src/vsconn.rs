@@ -108,6 +108,15 @@ pub struct VSConn {
     connect_fn: ConnectFn,
 }
 
+/// Handle for sending commands to a running [VSConn].
+///
+/// All async methods return [`VSApiError::ConnClosed`] in two situations:
+/// - The run loop has exited (the underlying command channel is closed).
+/// - A command was sent while the run loop was busy establishing a TCP
+///   connection or waiting out a reconnect delay; in those windows the
+///   command is discarded immediately rather than queued. Callers should
+///   treat `ConnClosed` as a transient error and retry once a new
+///   [`VSConnLifecycleEvent::RunLoopStarts`] event is observed.
 #[derive(Clone)]
 pub struct VSConnHandle {
     cmd_tx: mpsc::Sender<VS2Command>,
