@@ -336,6 +336,8 @@ impl<Pkt> std::fmt::Display for Sender<Pkt> {
 //
 //   UNBLOCK: There is now room in the window for this packet.
 //
+//   FORGET: The caller requests to forget the cancellation status of a packet.
+//
 //   AGED: This packet is now the oldest packet which is not FORGOTTEN.
 //
 // Transitions:
@@ -358,7 +360,7 @@ impl<Pkt> std::fmt::Display for Sender<Pkt> {
 //
 //   ACKED -[AGED]> FORGOTTEN
 //
-//   CANCEL_ACKED -[AGED]> FORGOTTEN
+//   CANCEL_ACKED -[FORGET]> FORGOTTEN
 //
 //   CANCELED -[AGED]> FORGOTTEN
 //
@@ -383,6 +385,10 @@ impl<Pkt> std::fmt::Display for Sender<Pkt> {
 // to register for notification when the packet leaves either of these
 // states.  If the caller performs this lookup in ACKED or CANCEL_ACKED it
 // is simply informed that the packet has already been acknowledged.)
+//
+// CANCEL_ACKED packets are not automatically aged and must be explicitly
+// FORGOTten by the caller: this prevents the caller racing with the network
+// to try to retrieve cancellation status.
 
 impl<Pkt> Sender<Pkt> {
     /// The maximum window size supported by the sender.
