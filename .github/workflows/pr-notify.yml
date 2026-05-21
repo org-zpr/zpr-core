@@ -7,7 +7,7 @@ on:
 
 jobs:
   notify:
-    uses: org-zpr/.github/.github/workflows/pr-review-notify.yml@main
+    uses: org-zpr/zpr-dev-tools/.github/workflows/pr-review-notify.yml@main
     secrets:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_ALERT_WEBHOOK_URL }}
 
