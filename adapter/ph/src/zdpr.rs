@@ -249,6 +249,58 @@ pub struct Sender<Pkt> {
     stats: EnumMap<SenderStat, u64>,
 }
 
+impl<Pkt> std::fmt::Display for Sender<Pkt> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "window size: {}", self.window_size)?;
+
+        let oldest_sent = self
+            .last_sent
+            .wrapping_add(1)
+            .wrapping_sub(self.unacked.len() as u64);
+        write!(f, "Unacked: {oldest_sent} ")?;
+        for st in &self.unacked {
+            match st {
+                UnackedState::Unacked {
+                    retry_limit: None, ..
+                } => write!(f, "u")?,
+                UnackedState::Unacked {
+                    retry_limit: Some(limit),
+                    retry_count,
+                    ..
+                } => write!(f, "{}", limit - retry_count)?,
+                UnackedState::Canceled {
+                    forgotten: true, ..
+                } => write!(f, "f")?,
+                UnackedState::Canceled {
+                    forgotten: false, ..
+                } => write!(f, "c")?,
+                UnackedState::Acked => write!(f, "A")?,
+                UnackedState::CancelAcked => write!(f, "C")?,
+            }
+        }
+        writeln!(f, " {}", self.last_sent)?;
+
+        let oldest_enqueued = self
+            .last_enqueued
+            .wrapping_add(1)
+            .wrapping_sub(self.blocked.len() as u64);
+        write!(f, "Blocked: {oldest_enqueued} ")?;
+        for st in &self.blocked {
+            match st {
+                BlockedState::Blocked {
+                    retry_limit: None, ..
+                } => write!(f, "b")?,
+                BlockedState::Blocked {
+                    retry_limit: Some(limit),
+                    ..
+                } => write!(f, "{limit}")?,
+                BlockedState::Canceled => write!(f, "C")?,
+            }
+        }
+        writeln!(f, " {}", self.last_enqueued)
+    }
+}
+
 // Individual sent packets conceptually follow the following state machine.
 //
 // States:
@@ -873,14 +925,14 @@ impl<Pkt> Sender<Pkt> {
     /// Transitions only occur in response to `enqueue_packet()`,
     /// `process_ack()`, or `process_canceled()`.
     pub fn retry_needed(&self) -> bool {
-        !self.unacked.is_empty()
+        self.unacked.iter().any(|pkt| !pkt.is_acked())
     }
 
     /// Ages packet retry counts, and transitions expired packets to `Canceled`.
     ///
     /// Should be called first before querying [retry_packets()] and [retry_cancels()].
     ///
-    /// Returns a list of cancel packets to be dropped.
+    /// Returns a list of canceled packets to be dropped.
     pub fn age_retries(&mut self) -> impl Iterator<Item = Pkt> {
         self.unacked.iter_mut().filter_map(|pkt| pkt.age_retries())
     }
@@ -1195,7 +1247,7 @@ impl Receiver {
 
 #[cfg(test)]
 mod sender_tests {
-    use super::{EnqueueResult::*, QueuedPacketId, Sender, SeqNum};
+    use super::{EnqueueResult::*, QueuedPacketId, Sender, SenderStat, SeqNum};
     use std::sync::{Arc, atomic};
     use std::task::{Context, Wake};
 
@@ -1238,6 +1290,12 @@ mod sender_tests {
         retry_packets
     }
 
+    fn retry_cancels_cloned_sorted<Pkt: Clone>(send: &Sender<Pkt>) -> Vec<SeqNum> {
+        let mut retry_cancels: Vec<_> = send.retry_cancels().collect();
+        retry_cancels.sort();
+        retry_cancels
+    }
+
     fn enqueue_packet_expect_sent<Pkt>(send: &mut Sender<Pkt>, body: Pkt) -> (SeqNum, &mut Pkt) {
         let Sent(sn, pkt) = send.enqueue_packet(body) else {
             panic!("packet blocked");
@@ -1267,6 +1325,7 @@ mod sender_tests {
         let mut send: Sender<()> = Sender::new();
         assert_quiesced(&send);
         assert_eq!(send.retry_packets().count(), 0);
+        assert_eq!(send.retry_cancels().count(), 0);
         assert_eq!(send.destruct().count(), 0);
     }
 
@@ -1498,7 +1557,7 @@ mod sender_tests {
     }
 
     #[test]
-    fn test_cancel_and_lookup() {
+    fn test_queued_cancel_and_lookup() {
         let mut send: Sender<_> = Sender::new();
         send.adjust_window_size(3);
 
@@ -1517,7 +1576,7 @@ mod sender_tests {
         assert!(!send.is_sent(id6));
 
         // cancel a packet
-        assert_eq!(send.cancel_packet(id4), Some(104));
+        assert_eq!(send.cancel_queued_packet(id4), Some(104));
 
         // unblock a non-canceled packet
         assert_eq!(send.process_ack(0), Some(100));
@@ -1529,7 +1588,7 @@ mod sender_tests {
         assert_eq!(send.lookup_seq_num(id3), Some(3));
 
         // try to cancel a now-sent packet
-        assert_eq!(send.cancel_packet(id3), None);
+        assert_eq!(send.cancel_queued_packet(id3), None);
         assert!(send.is_sent(id3));
         assert_eq!(send.lookup_seq_num(id3), Some(3));
 
@@ -1547,7 +1606,7 @@ mod sender_tests {
         // cancel the last packet, which is currently blocked
         assert!(send.has_blocked_packets());
         assert!(send.unblock_needed());
-        assert_eq!(send.cancel_packet(id6), Some(106));
+        assert_eq!(send.cancel_queued_packet(id6), Some(106));
         assert!(!send.has_blocked_packets());
         assert!(!send.unblock_needed());
 
@@ -1558,6 +1617,235 @@ mod sender_tests {
         assert_eq!(send.lookup_seq_num(id3), None);
         assert_eq!(send.lookup_seq_num(id5), None);
 
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_sent_cancel() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(3);
+
+        for i in 0..=2 {
+            enqueue_packet_expect_sent_with_sn(&mut send, 100 + i, i);
+        }
+
+        // ack a later packet
+        assert_eq!(send.process_ack(2), Some(102));
+
+        // cancel the first two packets
+        assert_eq!(send.cancel_sent_packet(0), Some(100));
+        assert_eq!(send.cancel_sent_packet(1), Some(101));
+
+        assert!(!send.is_acked(0));
+        assert!(!send.is_acked(1));
+        assert!(send.is_acked(2));
+        assert!(!send.is_cancel_acked(2));
+
+        // ack one canceled packet, and cancel-ack the other
+        assert_eq!(send.process_ack(0), None);
+        assert!(!send.is_blocked()); // should no longer be blocked
+        send.process_canceled(1);
+
+        assert!(send.is_acked(0));
+        assert!(send.is_acked(1));
+        assert!(!send.retry_needed()); // acked cancel means no more retry
+
+        assert!(!send.is_cancel_acked(0));
+        assert!(send.is_cancel_acked(1));
+
+        // send another packet, should be blocked again
+        enqueue_packet_expect_sent_with_sn(&mut send, 103, 3);
+        assert!(send.is_blocked());
+
+        // forget our canceled packets
+        send.forget_canceled_packet(0);
+        send.forget_canceled_packet(1);
+
+        assert!(!send.is_blocked()); // now, should no longer be blocked
+
+        // queue should be empty now
+        // (save the one packet we sent earlier)
+        for i in 4..=5 {
+            enqueue_packet_expect_sent_with_sn(&mut send, 100 + i, i);
+        }
+
+        for i in 3..=5 {
+            assert_eq!(send.process_ack(i), Some(100 + i));
+            assert!(send.is_acked(i));
+            assert!(!send.is_cancel_acked(i));
+        }
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_sent_cancel_retries() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(4);
+
+        for i in 0..=2 {
+            enqueue_packet_expect_sent_with_sn(&mut send, 100 + i, i);
+        }
+
+        // cancel the first two packets
+        assert_eq!(send.cancel_sent_packet(0), Some(100));
+        assert_eq!(send.cancel_sent_packet(1), Some(101));
+        // test no packets acked
+
+        assert!(send.retry_needed());
+        assert_eq!(&retry_packets_cloned_sorted(&mut send), &[(2, 102)]);
+
+        assert_eq!(&retry_cancels_cloned_sorted(&send), &[0, 1]);
+
+        // test one packet cancel-acked
+        send.process_canceled(1);
+        assert!(send.retry_needed());
+        assert_eq!(&retry_cancels_cloned_sorted(&send), &[0]);
+
+        // test all acked
+        send.process_ack(0);
+        send.process_ack(2);
+        assert!(!send.retry_needed());
+        assert!(retry_packets_cloned_sorted(&mut send).is_empty());
+        assert!(retry_cancels_cloned_sorted(&mut send).is_empty());
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_limit_retries() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(4);
+
+        // immediately send four packets
+        for i in 0..=3 {
+            enqueue_packet_expect_sent_with_sn(&mut send, 100 + i, i);
+        }
+
+        // immediately limit retries of packets 0, 2, and 3
+        send.limit_retries_by_seq_num(0, 3);
+        send.limit_retries_by_seq_num(2, 3);
+        send.limit_retries_by_seq_num(3, 3);
+
+        // queue a fifth packet & limit its retries
+        let id4 = enqueue_packet_expect_queued(&mut send, 104);
+        send.limit_retries_by_id(id4, 3);
+
+        // first retry (initial send for packet 4); packets 1-4 should still be active
+        send.age_retries().for_each(drop);
+
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(0, 100), (1, 101), (2, 102), (3, 103)]
+        );
+
+        assert!(retry_cancels_cloned_sorted(&send).is_empty());
+
+        // acknowledge packet 0 to let packet 4 through
+        send.process_ack(0);
+        assert!(send.unblock_needed());
+        let (sn4, _) = send.enqueue_next_blocked_packet();
+        assert_eq!(sn4, 4);
+
+        // retroactively limit retries of packet 1
+        send.limit_retries_by_seq_num(1, 3);
+
+        // further limit retries of packet 2 to only 2
+        send.limit_retries_by_seq_num(2, 2);
+
+        // immediately cancel packet 3
+        send.cancel_sent_packet(3);
+
+        // second retry (first for packet 4); packet 3 should now be in cancel
+        send.age_retries().for_each(drop);
+
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(1, 101), (2, 102), (4, 104)]
+        );
+
+        assert_eq!(&retry_cancels_cloned_sorted(&send), &[3]);
+
+        // try to raise retry limit of packet 1 (should have no effect)
+        send.limit_retries_by_seq_num(1, 10);
+
+        // third retry (second for packet 4); packets 2 and 3 should now be in cancel
+        send.age_retries().for_each(drop);
+
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(1, 101), (4, 104)]
+        );
+
+        assert_eq!(&retry_cancels_cloned_sorted(&send), &[2, 3]);
+
+        // fourth retry (third for packet 4); only packet 4 should still be active
+        send.age_retries().for_each(drop);
+
+        assert_eq!(&retry_packets_cloned_sorted(&mut send), &[(4, 104)]);
+
+        assert_eq!(&retry_cancels_cloned_sorted(&send), &[1, 2, 3]);
+
+        // fourth retry for packet 4; all should now be in cancel
+        send.age_retries().for_each(drop);
+
+        assert!(retry_packets_cloned_sorted(&mut send).is_empty());
+
+        assert_eq!(&retry_cancels_cloned_sorted(&send), &[1, 2, 3, 4]);
+
+        // cancel all
+        for sn in 1..=4 {
+            send.process_canceled(sn);
+            send.forget_canceled_packet(sn);
+        }
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_sent_stats() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(4);
+
+        // immediately send four packets
+        for i in 0..=3 {
+            enqueue_packet_expect_sent_with_sn(&mut send, 100 + i, i);
+        }
+
+        // ack the first packet
+        send.process_ack(0);
+
+        // cancel packets 1 and 2
+        send.cancel_sent_packet(1);
+        send.cancel_sent_packet(2);
+
+        // 1 gets canceled, 2 gets acked
+        send.process_ack(2);
+        send.process_canceled(1);
+
+        // this ack is too new
+        send.process_ack(4);
+        assert_eq!(send.fetch_reset_stat(SenderStat::TooNewAck), 1);
+
+        // this ack is too old
+        send.process_ack(0);
+        assert_eq!(send.fetch_reset_stat(SenderStat::TooOldAck), 1);
+
+        // this ack and cancel are duplicate
+        send.process_ack(2);
+        send.process_canceled(1);
+        assert_eq!(send.fetch_reset_stat(SenderStat::DuplicateAck), 2);
+
+        // this ack and both cancels are erroneous (for two different reasons)
+        send.process_ack(1);
+        send.process_canceled(2);
+        send.process_canceled(3);
+        assert_eq!(send.fetch_reset_stat(SenderStat::InvalidAck), 3);
+
+        // clean up
+        send.process_ack(3);
+        send.forget_canceled_packet(1);
+        send.forget_canceled_packet(2);
         assert_quiesced(&send);
     }
 
@@ -1659,7 +1947,7 @@ mod sender_tests {
 
 #[cfg(test)]
 mod receiver_tests {
-    use super::{Disposition::*, Receiver};
+    use super::{Disposition::*, Receiver, ReceiverStat};
 
     #[test]
     fn test_in_order() {
@@ -1679,6 +1967,7 @@ mod receiver_tests {
         assert!(matches!(recv.process_packet(3), AckAndProcess));
         assert!(matches!(recv.process_packet(1), AckAndProcess));
         assert!(matches!(recv.process_packet(6), AckAndProcess));
+        assert_eq!(recv.fetch_reset_stat(ReceiverStat::OutOfOrder), 2);
     }
 
     #[test]
@@ -1689,10 +1978,12 @@ mod receiver_tests {
         assert!(matches!(recv.process_packet(0), AckAndProcess));
         assert!(matches!(recv.process_packet(3), AckAndProcess));
         assert!(matches!(recv.process_packet(4), Ignore));
+        assert!(matches!(recv.process_cancel(4), Ignore));
+        assert_eq!(recv.fetch_reset_stat(ReceiverStat::TooNew), 4);
     }
 
     #[test]
-    fn duplicate_within_window() {
+    fn test_duplicate_within_window() {
         let mut recv = Receiver::new(3);
         assert!(matches!(recv.process_packet(0), AckAndProcess));
         assert!(matches!(recv.process_packet(2), AckAndProcess));
@@ -1700,10 +1991,11 @@ mod receiver_tests {
         assert!(matches!(recv.process_packet(2), AckDoNotProcess));
         assert!(matches!(recv.process_packet(1), AckAndProcess));
         assert!(matches!(recv.process_packet(1), AckDoNotProcess));
+        assert_eq!(recv.fetch_reset_stat(ReceiverStat::Duplicate), 3);
     }
 
     #[test]
-    fn duplicate_behind_window() {
+    fn test_duplicate_behind_window() {
         let mut recv = Receiver::new(1);
         assert!(matches!(recv.process_packet(0), AckAndProcess));
         assert!(matches!(recv.process_packet(1), AckAndProcess));
@@ -1712,5 +2004,19 @@ mod receiver_tests {
         assert!(matches!(recv.process_packet(0), Ignore));
         assert!(matches!(recv.process_packet(4), AckAndProcess));
         assert!(matches!(recv.process_packet(1), Ignore));
+        assert!(matches!(recv.process_cancel(1), Ignore));
+        assert_eq!(recv.fetch_reset_stat(ReceiverStat::TooOld), 3);
+    }
+
+    #[test]
+    fn test_cancel() {
+        let mut recv = Receiver::new(3);
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        assert!(matches!(recv.process_cancel(0), AckDoNotProcess));
+        assert!(matches!(recv.process_cancel(1), AckCancelDoNotProcess));
+        assert!(matches!(recv.process_packet(1), AckCancelDoNotProcess));
+        assert!(matches!(recv.process_packet(2), AckAndProcess));
+        assert!(matches!(recv.process_cancel(0), AckDoNotProcess));
+        assert!(matches!(recv.process_packet(1), AckCancelDoNotProcess));
     }
 }
