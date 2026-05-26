@@ -192,6 +192,7 @@ pub mod flags {
     /// Packets marked `PRIORITY` are not dropped on egress queue backpressure.
     pub const PRIORITY: PacketFlags = 1; // 1b
 
+    #[allow(dead_code)]
     pub const CONFIRM: PacketFlags = 2; // 10b
 }
 
