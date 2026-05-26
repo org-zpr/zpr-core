@@ -203,14 +203,22 @@ impl VSConn {
                 Err(e) => {
                     error!(target: VS_RPC, "VSConn: run loop exited with error: {:?}", e);
                     info!(target: VS_RPC, "VSConn: reconnecting in {} seconds...", reconnect_after.as_secs());
-                    tokio::select! {
-                        _ = tokio::time::sleep(reconnect_after) => {}
-                        cmd = self.cmd_rx.recv() => match cmd {
-                            Some(VS2Command::Stop(_)) | None => {
-                                info!(target: VS_RPC, "VSConn: stop received during reconnect delay, exiting");
-                                return Ok(());
-                            }
-                            Some(other) => drop(other),
+                    let timeout = tokio::time::sleep(reconnect_after);
+                    tokio::pin!(timeout);
+                    // loop in case we get woken by the command channel
+                    loop {
+                        tokio::select! {
+                            biased; // in case of tie this bias here means we prioritize Stop (first branch) if we get it.
+
+                            cmd = self.cmd_rx.recv() => match cmd {
+                                Some(VS2Command::Stop(_)) | None => {
+                                    info!(target: VS_RPC, "VSConn: stop received during reconnect delay, exiting");
+                                    return Ok(());
+                                }
+                                Some(other) => drop(other),
+                            },
+
+                            _ = &mut timeout => break,
                         }
                     }
                 }
