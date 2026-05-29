@@ -3,12 +3,12 @@ use crate::assembly::Assembly;
 use crate::logging::targets::{VISA_MGMT, VSS_RPC};
 use crate::{visa_mgmt, visa_table};
 
-use libnode::vss::{ConfigureResponse, ListProcessingResponse, VSSMessage};
+use libnode::vss::{ConfigureResponse, ListProcessingResponse, SetTopologyResponse, VSSMessage};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::*;
 use zpr::packet_info::VisaId;
-use zpr::vsapi_types::{ApiResponseError, ErrorCode, Param, ParamValue, VisaOp, pname};
+use zpr::vsapi_types::{ApiResponseError, ErrorCode, Link, Param, ParamValue, VisaOp, pname};
 
 pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMessage>) {
     while let Some(msg) = queue.recv().await {
@@ -56,6 +56,12 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMessage>) {
             VSSMessage::Configure(params, resp_tx) => {
                 debug!(target: VSS_RPC, "received VSS configuration update with {} entries", params.len());
                 let resp = process_configuration(&asm, params);
+                let _ = resp_tx.send(resp);
+            }
+
+            VSSMessage::SetTopology(links, resp_tx) => {
+                debug!(target: VSS_RPC, "received topology update with {} links", links.len());
+                let resp = process_topology(&asm, links);
                 let _ = resp_tx.send(resp);
             }
         }
@@ -137,5 +143,14 @@ fn process_configuration(asm: &Arc<Assembly>, params: Vec<Param>) -> ConfigureRe
         }
     }
 
+    Ok(())
+}
+
+/// Placeholder. Links not yet acted on.
+fn process_topology(asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyResponse {
+    info!(target: VSS_RPC, "received topology update with {} links (not yet implemented)", links.len());
+    for (i, link) in links.iter().enumerate() {
+        debug!(target: VSS_RPC, "link {i}: -> {:?}", link.peer);
+    }
     Ok(())
 }
