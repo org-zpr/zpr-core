@@ -203,6 +203,47 @@ impl VSSHandleImpl {
         let mut err_builder = ack_builder.reborrow().init_error();
         api_error.write_to(&mut err_builder);
     }
+
+    /// Send a message and await a `Result<(), ApiResponseError>` response.
+    /// Logs and returns an Internal error if sending or receiving fails.
+    async fn dispatch_and_recv_result(
+        &self,
+        msg: VSSMessage,
+        resp_rx: oneshot::Receiver<Result<(), ApiResponseError>>,
+        op_name: &str,
+    ) -> Result<(), ApiResponseError> {
+        if let Err(e) = self.send_message(msg).await {
+            error!(target: VSS_RPC, "failed to send {op_name} message to handler: {e}");
+            return Err(ApiResponseError::new_code_msg(
+                ErrorCode::Internal,
+                "message processing failed",
+            ));
+        }
+        match resp_rx.await {
+            Ok(r) => r,
+            Err(e) => {
+                error!(target: VSS_RPC, "failed to receive {op_name} response from handler: {e}");
+                Err(ApiResponseError::new_code_msg(
+                    ErrorCode::Internal,
+                    "failed to receive response from VSS handler",
+                ))
+            }
+        }
+    }
+}
+
+/// Helper to write our channel result into a Capn Proto result.
+fn write_api_result(
+    result: Result<(), ApiResponseError>,
+    mut res_builder: v1::ok_or_error::Builder<'_>,
+) {
+    match result {
+        Ok(()) => res_builder.set_ok(()),
+        Err(api_err) => {
+            let mut err_builder = res_builder.init_error();
+            api_err.write_to(&mut err_builder);
+        }
+    }
 }
 
 impl v1::visa_support_service::Server for VisaSupportServiceImpl {
@@ -390,42 +431,14 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
         }
 
         let (resp_tx, resp_rx) = oneshot::channel();
-        if let Err(e) = self
-            .send_message(VSSMessage::SetServices(services, resp_tx))
-            .await
-        {
-            // Probably our handler has gone away.
-            // TODO: Shut down this VSS service connection. How?
-            error!("failed to send SetServices message to handler: {}", e);
-            let res_builder = results.get().init_res();
-            let mut err_builder = res_builder.init_error();
-            ApiResponseError::new_code_msg(ErrorCode::Internal, "message processing failed")
-                .write_to(&mut err_builder);
-            return Ok(()); // Exit early with error
-        }
-
-        match resp_rx.await {
-            Ok(Ok(())) => {
-                let mut res_builder = results.get().init_res();
-                res_builder.set_ok(());
-            }
-            Ok(Err(api_err)) => {
-                let res_builder = results.get().init_res();
-                let mut err_builder = res_builder.init_error();
-                api_err.write_to(&mut err_builder);
-            }
-            Err(e) => {
-                error!("failed to receive SetServices response from handler: {}", e);
-                let res_builder = results.get().init_res();
-                let mut err_builder = res_builder.init_error();
-                ApiResponseError::new_code_msg(
-                    ErrorCode::Internal,
-                    "failed to receive response from VSS handler",
-                )
-                .write_to(&mut err_builder);
-            }
-        }
-
+        let result = self
+            .dispatch_and_recv_result(
+                VSSMessage::SetServices(services, resp_tx),
+                resp_rx,
+                "SetServices",
+            )
+            .await;
+        write_api_result(result, results.get().init_res());
         Ok(())
     }
 
@@ -458,41 +471,14 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
         }
 
         let (resp_tx, resp_rx) = oneshot::channel();
-        if let Err(e) = self
-            .send_message(VSSMessage::Configure(cfg_params, resp_tx))
-            .await
-        {
-            // Probably our handler has gone away.
-            error!("failed to send Configure message to handler: {}", e);
-            let res_builder = results.get().init_res();
-            let mut err_builder = res_builder.init_error();
-            ApiResponseError::new_code_msg(ErrorCode::Internal, "message processing failed")
-                .write_to(&mut err_builder);
-            return Ok(()); // Exit early with error
-        }
-
-        match resp_rx.await {
-            Ok(Ok(())) => {
-                let mut res_builder = results.get().init_res();
-                res_builder.set_ok(());
-            }
-            Ok(Err(api_err)) => {
-                let res_builder = results.get().init_res();
-                let mut err_builder = res_builder.init_error();
-                api_err.write_to(&mut err_builder);
-            }
-            Err(e) => {
-                error!("failed to receive Configure response from handler: {}", e);
-                let res_builder = results.get().init_res();
-                let mut err_builder = res_builder.init_error();
-                ApiResponseError::new_code_msg(
-                    ErrorCode::Internal,
-                    "failed to receive response from VSS handler",
-                )
-                .write_to(&mut err_builder);
-            }
-        }
-
+        let result = self
+            .dispatch_and_recv_result(
+                VSSMessage::Configure(cfg_params, resp_tx),
+                resp_rx,
+                "Configure",
+            )
+            .await;
+        write_api_result(result, results.get().init_res());
         Ok(())
     }
 
@@ -534,41 +520,14 @@ impl v1::v_s_s_handle::Server for VSSHandleImpl {
         }
 
         let (resp_tx, resp_rx) = oneshot::channel();
-        if let Err(e) = self
-            .send_message(VSSMessage::SetTopology(links, resp_tx))
-            .await
-        {
-            // Probably our handler has gone away.
-            error!("failed to send SetTopology message to handler: {}", e);
-            let res_builder = results.get().init_res();
-            let mut err_builder = res_builder.init_error();
-            ApiResponseError::new_code_msg(ErrorCode::Internal, "message processing failed")
-                .write_to(&mut err_builder);
-            return Ok(()); // Exit early with error
-        }
-
-        match resp_rx.await {
-            Ok(Ok(())) => {
-                let mut res_builder = results.get().init_res();
-                res_builder.set_ok(());
-            }
-            Ok(Err(api_err)) => {
-                let res_builder = results.get().init_res();
-                let mut err_builder = res_builder.init_error();
-                api_err.write_to(&mut err_builder);
-            }
-            Err(e) => {
-                error!("failed to receive SetTopology response from handler: {}", e);
-                let res_builder = results.get().init_res();
-                let mut err_builder = res_builder.init_error();
-                ApiResponseError::new_code_msg(
-                    ErrorCode::Internal,
-                    "failed to receive response from VSS handler",
-                )
-                .write_to(&mut err_builder);
-            }
-        }
-
+        let result = self
+            .dispatch_and_recv_result(
+                VSSMessage::SetTopology(links, resp_tx),
+                resp_rx,
+                "SetTopology",
+            )
+            .await;
+        write_api_result(result, results.get().init_res());
         Ok(())
     }
 }

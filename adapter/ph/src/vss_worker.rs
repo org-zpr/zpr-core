@@ -147,10 +147,10 @@ fn process_configuration(asm: &Arc<Assembly>, params: Vec<Param>) -> ConfigureRe
 }
 
 /// Placeholder. Links not yet acted on.
-fn process_topology(asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyResponse {
+fn process_topology(_asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyResponse {
     info!(target: VSS_RPC, "received topology update with {} links (not yet implemented)", links.len());
     for (i, link) in links.iter().enumerate() {
-        debug!(target: VSS_RPC, "link {i}: -> {:?}", link.peer);
+        info!(target: VSS_RPC, "[link {i}]-> {:?}", link.peer);
     }
     Ok(())
 }
