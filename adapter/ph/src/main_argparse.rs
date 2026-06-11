@@ -927,8 +927,8 @@ mod test {
     #[test]
     #[parallel(env)]
     fn test_adapter_cli_name_bootstrap_cn_ordering() {
-        let bootstrap_key_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/data/rsa-key.pem");
+        let bootstrap_key_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/rsa-key.pem");
 
         let mut tomltxt = r#"
         [global]

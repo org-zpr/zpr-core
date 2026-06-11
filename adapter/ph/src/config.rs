@@ -365,9 +365,7 @@ impl Config {
                     )?;
                 }
                 if self.certificate_file.is_none() && self.name.is_empty() {
-                    return Err(
-                        "name (required when certificate_file is absent)".arg_missing(),
-                    );
+                    return Err("name (required when certificate_file is absent)".arg_missing());
                 }
                 if self.private_key_file.is_none()
                     && self.private_key_data.is_none()
