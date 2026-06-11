@@ -581,11 +581,6 @@ impl OAuthRsa {
             ));
         }
     }
-
-    #[cfg(test)]
-    pub fn client_id(&self) -> &str {
-        &self.client_id
-    }
 }
 
 #[cfg(test)]
