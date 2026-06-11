@@ -134,9 +134,9 @@ Sample configuration, place in a file named `node-conf.toml`.
 
 ```toml
 [global]
-# ca_file is optional:
-#   ca_file = "auth-ca.crt"
-name = "node.zpr.org"
+# ca_file is needed for the node to verify adapter certificates and recognize
+# the visa-service adapter as special.  Without it, VS routing will not work.
+ca_file = "auth-ca.crt"
 certificate_file = "node-noise.crt"
 private_key_file = "node-noise.key"
 self_addr = "129.6.7.1:5000"
@@ -148,21 +148,42 @@ auth_private_key = "node-private-key.pem"
 ```
 
 
+### Create a signed noise certificate for the visa service adapter
+
+The visa service adapter must present a CA-signed certificate so the node can
+recognize it as the special visa-service peer.  The certificate CN **must** be
+`vs.zpr` — that is the hard-coded visa-service distinguished name the node
+matches against.  Generate and sign one:
+
+```sh
+./integration-test/lib/zpr-pki genkey >vs-noise.key
+./integration-test/lib/zpr-pki pubkey <vs-noise.key >vs-noise-pub.pem
+./integration-test/lib/zpr-pki gensignedcert authority/auth-ca.crt authority/auth-ca.key \
+  /CN=vs.zpr 365 < vs-noise-pub.pem >vs-noise.crt
+```
+
+
 ### Create a configuration file for the visa service adapter
 
 ```toml
 [global]
-# ca_file is required.
+# ca_file is optional for link establishment, but the VS adapter must present
+# a CA-signed certificate_file so the node can recognize it as the visa service.
 ca_file = "auth-ca.crt"
+certificate_file = "vs-noise.crt"   # CN must be "vs.zpr"
+private_key_file = "vs-noise.key"
 zpr_addr = [ "fd5a:5052::1" ]
 tun_if = "tun9"
 
 [adapter]
-node = "vs.zpr"
 node_addr = "129.6.7.1:5000"
 node_public_key_file = "node-noise-pub.pem"
 bootstrap_key = "vs-private-key.pem"
 ```
+
+`name` is not set here because `certificate_file` is present — the CN is read
+from the certificate, not from `name`.  `name` is only required for adapters
+that have no `certificate_file` (self-signed cert path).
 
 
 ### Configure the visa service (optional)
@@ -299,8 +320,56 @@ On the visa service host, in another terminal start the adapter:
 Now you can attach additional adapters and start up the "WebService".
 
 
+## Certificate and peer verification reference
+
+### Local certificate (`certificate_file` / `name`)
+
+| Role | `certificate_file` | `name` | Behavior |
+|------|-------------------|--------|-----------|
+| node | required | ignored | Provided cert is used; node name comes from the cert CN |
+| adapter | present | optional | Provided cert is used; CN comes from the cert where needed |
+| adapter | absent | required | Self-signed cert is generated with CN from `name` |
+| adapter | absent | absent | Config validation fails |
+
+For adapters, CLI `--name` overrides `[adapter].name` in the config file.
+
+### Peer certificate verification (`ca_file`)
+
+| `ca_file` | Behavior |
+|-----------|-----------|
+| present | Peer cert signatures are verified against the CA; unverified peers are handled by link-type rules (see below) |
+| absent | Peer cert signatures are not CA-verified; a warning is logged at startup and unverified peers are accepted |
+
+Link-type rules when `ca_file` is configured:
+
+| Link direction | Unverified peer cert | Action |
+|---------------|---------------------|--------|
+| Adapter → Node | Node cert unverified | Link rejected |
+| Node → Node | Peer node cert unverified | Link rejected |
+| Node → Adapter | Adapter cert unverified | Link accepted with a warning |
+
+### Special peers (visa service adapter)
+
+The visa service adapter is recognized as "special" by the node **only** when
+the adapter presents a CA-verified certificate claiming the visa-service DN.
+This means:
+
+- The **node** must configure `ca_file` (to verify the VS adapter's cert).
+- The **VS adapter** must present a CA-signed `certificate_file` (not a self-signed cert).
+
+Without both conditions, the VS adapter connects as an ordinary adapter and
+visa-service traffic is not routed to it.
+
+
 ## Updates
 
++ June 11, 2026
+  + `ca_file` is now optional for adapters (was previously required at startup).
+  + Adapter `certificate_file` is optional; a self-signed cert is generated from `name` when absent.
+  + Special-peer names (visa service) are now only assigned from CA-verified certs — both the node and the VS adapter must use a CA for VS routing to work.
+  + Fixed `--name` CLI ordering bug: the CN embedded in bootstrap/BAS auth objects now correctly reflects the CLI `--name` value.
+  + Removed the silently-ignored `name` key from the node config example.
+  + Added "Certificate and peer verification reference" section.
 + March 13, 2026
   + Rewrote the setup steps for latest code.
 + Aug 20, 2025

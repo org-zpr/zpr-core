@@ -10,7 +10,6 @@ use std::io::Read;
 use std::path::Path;
 
 use crate::assembly::PhMode;
-use crate::auth;
 use crate::main_args::{ArgsError, Command, Control};
 
 use crate::config::{AdapterConfig, Config, NodeConfig};
@@ -89,10 +88,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                         )))
                     })?;
                 }
-                config.bootstrap = Some(auth::RsaBootstrapAuth::new(
-                    &config.get_noise_cn()?,
-                    &bootstrap_key,
-                )?);
+                config.bootstrap_key_path = Some(bootstrap_key);
             }
         }
 
@@ -117,6 +113,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             config = Config::new_for_node(config_file, auth_private_key, &common)?;
         }
     }
+    config.finalize()?;
     if let Err(e) = config.check_valid(ph_mode) {
         return Err(e);
     }
@@ -785,5 +782,188 @@ mod test {
             config.noise_private_key_source(),
             format!("key://{}", noise_key)
         )
+    }
+
+    // Adapter without ca_file passes config validation.
+    #[test]
+    #[parallel(env)]
+    fn test_adapter_no_ca_file_passes_validation() {
+        let mut tomltxt = r#"
+        [global]
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
+        capture_path = "/tmp/capture.sock"
+
+        [adapter]
+        node_addr = "192.168.0.2:5000"
+        node_public_key_file = "$NPKFILE"
+        "#;
+
+        let cert_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+        let args = vec!["ph", "adapter", "-c", tmpfile.get_path().to_str().unwrap()];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+        assert_eq!(pmode, PhMode::Adapter);
+        assert!(config.ca_file.is_none());
+    }
+
+    // Adapter without certificate_file but with name passes config validation.
+    #[test]
+    #[parallel(env)]
+    fn test_adapter_no_cert_with_name_passes_validation() {
+        let mut tomltxt = r#"
+        [global]
+        private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
+        capture_path = "/tmp/capture.sock"
+
+        [adapter]
+        name = "my-adapter"
+        node_addr = "192.168.0.2:5000"
+        node_public_key_file = "$NPKFILE"
+        "#;
+
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+        let args = vec!["ph", "adapter", "-c", tmpfile.get_path().to_str().unwrap()];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+        assert_eq!(pmode, PhMode::Adapter);
+        assert!(config.certificate_file.is_none());
+        assert_eq!(config.name, "my-adapter");
+    }
+
+    // Adapter without certificate_file and without name fails config validation, even with private key.
+    #[test]
+    #[parallel(env)]
+    fn test_adapter_no_cert_no_name_fails_validation() {
+        let mut tomltxt = r#"
+        [global]
+        private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
+        capture_path = "/tmp/capture.sock"
+
+        [adapter]
+        node_addr = "192.168.0.2:5000"
+        node_public_key_file = "$NPKFILE"
+        "#;
+
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+        let args = vec!["ph", "adapter", "-c", tmpfile.get_path().to_str().unwrap()];
+
+        match argparse(Some(args)) {
+            Err(ArgsError::Missing(msg)) => {
+                assert!(msg.contains("name"), "expected 'name' in error, got: {msg}");
+            }
+            other => panic!("expected Missing error, got: {:?}", other),
+        }
+    }
+
+    // CLI --name overrides config [adapter].name.
+    #[test]
+    #[parallel(env)]
+    fn test_adapter_cli_name_overrides_config_name() {
+        let mut tomltxt = r#"
+        [global]
+        private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
+        capture_path = "/tmp/capture.sock"
+
+        [adapter]
+        name = "config-name"
+        node_addr = "192.168.0.2:5000"
+        node_public_key_file = "$NPKFILE"
+        "#;
+
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+        let args = vec![
+            "ph",
+            "adapter",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "--name",
+            "cli-name",
+        ];
+
+        let (_, config) = argparse(Some(args)).unwrap();
+        assert_eq!(config.name, "cli-name");
+    }
+
+    // CLI --name with config-file bootstrap_key and no certificate_file: bootstrap CN equals CLI name.
+    #[test]
+    #[parallel(env)]
+    fn test_adapter_cli_name_bootstrap_cn_ordering() {
+        let bootstrap_key_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/data/rsa-key.pem");
+
+        let mut tomltxt = r#"
+        [global]
+        private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
+        capture_path = "/tmp/capture.sock"
+
+        [adapter]
+        node_addr = "192.168.0.2:5000"
+        node_public_key_file = "$NPKFILE"
+        bootstrap_key = "$BSKEY"
+        "#;
+
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
+            .replace("$BSKEY", bootstrap_key_path.to_str().unwrap());
+        tomltxt = &tmp;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+        let args = vec![
+            "ph",
+            "adapter",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "--name",
+            "cli-adapter-name",
+        ];
+
+        let (_, config) = argparse(Some(args)).unwrap();
+        assert_eq!(config.name, "cli-adapter-name");
+        let bootstrap = config.bootstrap.as_ref().expect("bootstrap should be set");
+        assert_eq!(bootstrap.cn(), "cli-adapter-name");
     }
 }

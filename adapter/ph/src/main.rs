@@ -219,10 +219,11 @@ fn main() -> ExitCode {
     } else {
         None
     };
-    // Adapters still need a ca_cert to verify a nodes cert.
-    if ph_mode == PhMode::Adapter && opt_ca_cert.is_none() {
-        error!(target: STARTUP, "adapters require a CA certificate (set ca_cert in config)");
-        return ExitCode::FAILURE;
+    if opt_ca_cert.is_none() {
+        warn!(
+            target: STARTUP,
+            "no ca_file configured; peer certificates will not be verified"
+        );
     }
     certx = KmCertExchange::new(self_cert, opt_ca_cert);
 
@@ -495,8 +496,9 @@ fn main() -> ExitCode {
     let mut vsconn;
 
     if ph_mode == PhMode::Node {
-        // Note that config parsing code ensures that IF node THEN certificate_file is set.
-        let node_name = config::get_noise_cn(config.certificate_file.as_ref().unwrap())
+        // config parsing ensures that IF node THEN certificate_file is set.
+        let node_name = config
+            .get_noise_cn()
             .expect("unable to determine node name: cannot parse CN");
         info!(target: STARTUP, "node CN is \"{node_name}\"");
 

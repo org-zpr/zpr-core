@@ -109,8 +109,7 @@ impl ArgError for str {
 /// use [crate::main_argparse::argparse].
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Name of this node or adapter. If no signed certificate is available this is used as the CN.
-    /// This has no meaning for nodes.
+    /// Adapter CN fallback when no signed certificate is configured. Ignored by nodes.
     pub name: String,
 
     /// Path to the unix domain socket for the control interface.
@@ -162,6 +161,12 @@ pub struct Config {
 
     /// If present this has key material for use during a zpr-oauthrsa authentication.
     pub rsaoauth: Option<OAuthRsa>,
+
+    /// Resolved path to the bootstrap RSA key file; used by finalize() to construct `bootstrap`.
+    pub bootstrap_key_path: Option<PathBuf>,
+
+    /// Resolved path to the BAS RSA key file; used by finalize() to construct `rsaoauth`.
+    pub bas_key_path: Option<PathBuf>,
 
     /// The batch I/O engine to use.
     pub batch_io_engine: String,
@@ -254,12 +259,46 @@ impl Config {
     }
 
     /// If we have a `certificate_file` use that to figure out our CN.
-    /// Otherwise we return the `global.name` value.
+    /// Otherwise we return the `global.name` value. Returns an error if both are absent.
     pub fn get_noise_cn(&self) -> Result<String, ArgsError> {
         match self.certificate_file.as_ref() {
-            None => Ok(self.name.clone()),
+            None => {
+                if self.name.is_empty() {
+                    Err("certificate_file or name (required for CN derivation)".arg_missing())
+                } else {
+                    Ok(self.name.clone())
+                }
+            }
             Some(f) => get_noise_cn(&f),
         }
+    }
+
+    /// Construct auth objects from stored key paths, using the resolved CN.
+    /// Must be called after all name sources (config file and CLI) have been merged.
+    pub fn finalize(&mut self) -> Result<(), ArgsError> {
+        if let Some(path) = self.bootstrap_key_path.clone() {
+            let cn = self.get_noise_cn()?;
+            self.bootstrap = Some(RsaBootstrapAuth::new(&cn, &path)?);
+        }
+        if let Some(path) = self.bas_key_path.clone() {
+            let cn = self.get_noise_cn()?;
+            let pemdata = fs::read_to_string(&path).map_err(|e| {
+                ArgsError::PathError(format!(
+                    "failed to read bas_key file {}: {:?}",
+                    path.display(),
+                    e
+                ))
+            })?;
+            let priv_key = PKey::private_key_from_pem(pemdata.as_bytes()).map_err(|e| {
+                ArgsError::ParseError(format!(
+                    "failed to parse bas_key file {}: {:?}",
+                    path.display(),
+                    e
+                ))
+            })?;
+            self.rsaoauth = Some(OAuthRsa::new(&cn, priv_key));
+        }
+        Ok(())
     }
 
     // Check that the required bits are present based on mode.
@@ -324,6 +363,11 @@ impl Config {
                         "node public key file",
                         &self.node_public_key_file.as_ref().unwrap(),
                     )?;
+                }
+                if self.certificate_file.is_none() && self.name.is_empty() {
+                    return Err(
+                        "name (required when certificate_file is absent)".arg_missing(),
+                    );
                 }
                 if self.private_key_file.is_none()
                     && self.private_key_data.is_none()
@@ -420,18 +464,10 @@ impl Config {
         }
 
         if let Some(bootstrap_key_file) = &config.bootstrap_key {
-            // In order to set the bootstrap object, we need to know the CN which means we need
-            // the certificate_file arg to be valid.
-
-            let cn = self.get_noise_cn()?;
-
             if bootstrap_key_file.is_relative() {
-                self.bootstrap = Some(RsaBootstrapAuth::new(
-                    &cn,
-                    &base_dir.join(bootstrap_key_file),
-                )?);
+                self.bootstrap_key_path = Some(base_dir.join(bootstrap_key_file));
             } else {
-                self.bootstrap = Some(RsaBootstrapAuth::new(&cn, bootstrap_key_file)?);
+                self.bootstrap_key_path = Some(bootstrap_key_file.clone());
             }
         }
         Ok(())
@@ -444,26 +480,11 @@ impl Config {
     ) -> Result<(), ArgsError> {
         if let Some(config) = config {
             if let Some(bas_key) = &config.bas_key {
-                let keyfile = if bas_key.is_relative() {
-                    base_dir.join(bas_key)
+                if bas_key.is_relative() {
+                    self.bas_key_path = Some(base_dir.join(bas_key));
                 } else {
-                    bas_key.clone()
-                };
-                let pemdata = fs::read_to_string(&keyfile).map_err(|e| {
-                    ArgsError::PathError(format!(
-                        "failed to read bas_key file {}: {:?}",
-                        keyfile.display(),
-                        e
-                    ))
-                })?;
-                let priv_key = PKey::private_key_from_pem(&pemdata.as_bytes()).map_err(|e| {
-                    ArgsError::ParseError(format!(
-                        "failed to parse bas_key file {}: {:?}",
-                        keyfile.display(),
-                        e
-                    ))
-                })?;
-                self.rsaoauth = Some(OAuthRsa::new(&self.get_noise_cn()?, priv_key));
+                    self.bas_key_path = Some(bas_key.clone());
+                }
             }
             if let Some(auth_private_key) = &config.auth_private_key {
                 let keyfile = if auth_private_key.is_relative() {
@@ -603,6 +624,8 @@ impl Default for Config {
             node_public_key_file: None,
             bootstrap: None,
             rsaoauth: None,
+            bootstrap_key_path: None,
+            bas_key_path: None,
             batch_io_engine: batch_io::AUTO_ENGINE_NAME.to_owned(),
             km_impl: KM_ID_NOISE,
         }

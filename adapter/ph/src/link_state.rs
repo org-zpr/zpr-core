@@ -609,14 +609,23 @@ impl LinkStateWrapper {
                 }
             };
 
-            if is_verified || !require_ca_signature {
+            if !is_verified {
+                for name in
+                    special_peers::special_peer_names_from_x509_subject_name(cert.subject_name())
+                {
+                    warn!(
+                        target: LINK_STATE,
+                        "Link {link_id} presented unverified certificate claiming special peer name {name:?}; ignoring"
+                    );
+                }
+            } else {
                 // assign special-peer name if this peer is special
                 for name in
                     special_peers::special_peer_names_from_x509_subject_name(cert.subject_name())
                 {
                     match asm.peer_table.assign_special_name(name, link_id) {
                         Ok(()) => {
-                            info!(target: LINK_STATE, "Link {link_id} assigned special name {name:?} (secure = {is_verified})")
+                            info!(target: LINK_STATE, "Link {link_id} assigned special name {name:?}")
                         }
                         Err(_) => {
                             warn!(target: LINK_STATE, "Unable to assign link {link_id} special name {name:?}")

@@ -394,6 +394,11 @@ impl RsaBootstrapAuth {
         };
         Ok(blob.encode())
     }
+
+    #[cfg(test)]
+    pub fn cn(&self) -> &str {
+        &self.cn
+    }
 }
 
 /// Response json object to initial auth request from an actor
@@ -575,6 +580,11 @@ impl OAuthRsa {
                 "failed to find location header in response".to_string(),
             ));
         }
+    }
+
+    #[cfg(test)]
+    pub fn client_id(&self) -> &str {
+        &self.client_id
     }
 }
 
