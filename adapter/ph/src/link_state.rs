@@ -6,6 +6,7 @@ use crate::km::{PeerCertificate, ZPIPair};
 use crate::km_multiplexor;
 use crate::logging::targets::LINK_STATE;
 use crate::mgmt;
+use crate::mgmt::core::{MgmtSendError, PacketStatus};
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
 use crate::special_peers::SpecialPeerName;
@@ -146,6 +147,7 @@ pub enum LinkEvent {
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
     ReceivedInitAuthAck,
+    ReceivedInitAuthTimeout,
 
     ReceivedAcquireZprAddressRequest(Option<Vec<IpAddress>>, String), // (requested_addrs, auth_blob)
 
@@ -469,6 +471,7 @@ impl LinkStateWrapper {
             }
 
             LinkEvent::ReceivedInitAuthAck => self.process_init_auth_ack(asm),
+            LinkEvent::ReceivedInitAuthTimeout => self.process_init_auth_timeout(asm),
 
             LinkEvent::ReceivedGrantZprAddressRequest(addrs) => {
                 self.process_grant_zpr_address_request(asm, addrs)
@@ -642,7 +645,7 @@ impl LinkStateWrapper {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
             mgmt::requests::send_hello_request(asm, self.id).enqueue();
-            self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
+            self.set_timeout(asm, &mut locked_fsm, config::LINK_HELLO_TIMEOUT);
             debug!(
                 target: LINK_STATE,
                 "Link {link_id} sent HelloRequest.  Waiting for other side to respond."
@@ -710,8 +713,6 @@ impl LinkStateWrapper {
 
                 locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
                 self.send_init_authentication_request(asm);
-                // short timeout until we at least get the ACK
-                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
                 debug!(
                     target: LINK_STATE,
                     "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
@@ -1237,7 +1238,22 @@ impl LinkStateWrapper {
         }
     }
 
-    /// Send off the Inti-Authentication message with a blob that the receiver could
+    fn process_init_auth_timeout(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        match (self.link_type, locked_fsm.state) {
+            (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
+                error!(target: LINK_STATE, "Link {} received init auth timeout", self.id);
+                locked_fsm.set_state(LinkState::Error);
+                drop(locked_fsm);
+                self.initiate_close(asm, TerminateReason::RequestTimedOut)
+            }
+            (_, _) => Err(LinkStateError::InvalidOperation(
+                "Discarded unsolicited init auth timeout".to_string(),
+            )),
+        }
+    }
+
+    /// Send off the Init-Authentication message with a blob that the receiver could
     /// use for authentication.
     fn send_init_authentication_request(&self, asm: &Arc<Assembly>) {
         let link_id = self.id;
@@ -1278,16 +1294,29 @@ impl LinkStateWrapper {
 
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
-            if mgmt::requests::send_init_authentication_request(&task_asm, link_id, flags, payload)
-                .acked()
-                .await
-                .is_err()
+            match mgmt::requests::send_init_authentication_request(
+                &task_asm, link_id, flags, payload,
+            )
+            .limit_retries(config::DEFAULT_ZDPR_RETRY_LIMIT)
+            .await
             {
-                // link was terminated
-                return;
+                Ok(PacketStatus::Acked) => {
+                    // ignore error here, it just means we've moved on to another state and got the ACK (very) late
+                    let _ =
+                        task_asm.process_link_state_event(link_id, LinkEvent::ReceivedInitAuthAck);
+                }
+
+                Ok(PacketStatus::Canceled) => {
+                    // timed out getting the ACK, tear down the link
+                    let _ = task_asm
+                        .process_link_state_event(link_id, LinkEvent::ReceivedInitAuthTimeout);
+                }
+
+                Err(MgmtSendError::LinkClosed) => {
+                    // link was terminated, simply return
+                    return;
+                }
             }
-            // ignore error here, it just means we've moved on to another state and got the ACK (very) late
-            let _ = task_asm.process_link_state_event(link_id, LinkEvent::ReceivedInitAuthAck);
         });
     }
 
@@ -1433,8 +1462,7 @@ impl LinkStateWrapper {
         // handle the timeout...
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA)
-            | (LinkType::AdapterToNode, LinkState::Helloing)
-            | (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
+            | (LinkType::AdapterToNode, LinkState::Helloing) => {
                 // Timeout here means we give up on the link.
                 error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
                 locked_fsm.set_state(LinkState::Error);

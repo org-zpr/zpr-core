@@ -46,7 +46,7 @@ pub const DEFAULT_ZDPR_RETRY_TIMER: std::time::Duration = std::time::Duration::f
 /// (Not a global default!)
 pub const DEFAULT_ZDPR_RETRY_LIMIT: u8 = 3;
 
-pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+pub const LINK_HELLO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub const DEFAULT_VSS_PORT: u16 = 8183;
