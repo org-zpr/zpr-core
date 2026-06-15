@@ -220,16 +220,14 @@ impl VisaTable {
             .expect("Failed to insert visa->node visa into table");
 
         visa_table.lookup_table = FiveTupleLookupTable::new();
-        visa_table
-            .lookup_table
-            .build_table_from_hash(&visa_table.table);
+        visa_table.lookup_table.add_hash_to_table(&visa_table.table);
 
         visa_table
     }
 
     /// Insert a visa from the Visa Service into the Visa Table
     pub fn insert_visa(&mut self, visa: vsapi_types::Visa) -> Result<VisaId, VisaTableError> {
-        let visa_id = visa.issuer_id as i32;
+        let visa_id = visa.issuer_id;
 
         let expiration = DateTime::from(visa.expires);
 
@@ -280,7 +278,7 @@ impl VisaTable {
     ) -> Result<(), VisaTableError> {
         self.revoke_no_rebuild(peer_table, visa_id)?;
         self.lookup_table = FiveTupleLookupTable::new();
-        self.lookup_table.build_table_from_hash(&self.table);
+        self.lookup_table.add_hash_to_table(&self.table);
 
         Ok(())
     }
@@ -298,7 +296,7 @@ impl VisaTable {
             let _ = self.revoke_no_rebuild(peer_table, timeout_entry.id);
         }
         self.lookup_table = FiveTupleLookupTable::new();
-        self.lookup_table.build_table_from_hash(&self.table);
+        self.lookup_table.add_hash_to_table(&self.table);
     }
 
     /// Revoke all visas that have any forwarding entry referencing `link_id`.
@@ -324,7 +322,7 @@ impl VisaTable {
             .table
             .iter()
             .filter_map(|(visa_id, visa)| {
-                if *visa_id >= config::MIN_VISA_ID as i32
+                if *visa_id >= config::MIN_VISA_ID
                     && visa.streams.iter().any(|entry| entry.0 == link_id)
                 {
                     Some(*visa_id)
@@ -341,7 +339,7 @@ impl VisaTable {
                 let _ = self.revoke_no_rebuild(peer_table, visa_id);
             }
             self.lookup_table = FiveTupleLookupTable::new();
-            self.lookup_table.build_table_from_hash(&self.table);
+            self.lookup_table.add_hash_to_table(&self.table);
         }
     }
 
@@ -384,7 +382,7 @@ impl VisaTable {
 }
 
 fn make_tcp_visa(
-    visa_id: i32,
+    visa_id: u64,
     source: &Ipv6Addr,
     source_port: u16,
     dest: &Ipv6Addr,
@@ -407,7 +405,7 @@ fn make_tcp_visa(
     };
 
     vsapi_types::Visa {
-        issuer_id: visa_id as u64,
+        issuer_id: visa_id,
         config: configuration,
         expires: UNIX_EPOCH + dur,
         visa_type: vsapi_types::VisaType::Full,
