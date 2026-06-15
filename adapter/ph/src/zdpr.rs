@@ -73,7 +73,7 @@ enum UnackedState<Pkt> {
         retry_count: u8,
         forgotten: bool,
     },
-    Canceled {
+    CancelRequested {
         waker: Waker,
         forgotten: bool,
     },
@@ -87,7 +87,7 @@ impl<Pkt> UnackedState<Pkt> {
         matches!(self, UnackedState::Acked | UnackedState::CancelAcked)
     }
 
-    /// Attempt to transition from `Unacked` to `Canceled`.
+    /// Attempt to transition from `Unacked` to `CancelRequested`.
     /// Returns the canceled packet if successful.
     pub fn cancel(&mut self) -> Option<Pkt> {
         replace_with_or_abort_and_return(self, |s| match s {
@@ -96,7 +96,7 @@ impl<Pkt> UnackedState<Pkt> {
                 waker,
                 forgotten,
                 ..
-            } => (Some(packet), Self::Canceled { waker, forgotten }),
+            } => (Some(packet), Self::CancelRequested { waker, forgotten }),
             s => (None, s),
         })
     }
@@ -122,14 +122,14 @@ impl<Pkt> UnackedState<Pkt> {
                 forgotten,
                 ..
             }
-            | Self::Canceled { forgotten, .. } => *forgotten = true,
+            | Self::CancelRequested { forgotten, .. } => *forgotten = true,
             Self::CancelAcked => *self = Self::Acked,
             _ => (),
         }
     }
 
     /// Increment the retry count for an `Unacked` packet.
-    /// If this goes below zero, transition the packet to `Canceled` and
+    /// If this goes below zero, transition the packet to `CancelRequested` and
     /// returns the canceled packet.
     pub fn age_retries(&mut self) -> Option<Pkt> {
         let UnackedState::Unacked {
@@ -158,7 +158,7 @@ impl<Pkt> UnackedState<Pkt> {
                 waker.wake();
                 Some(packet)
             }
-            Self::Canceled { waker, .. } => {
+            Self::CancelRequested { waker, .. } => {
                 waker.wake();
                 None
             }
@@ -268,10 +268,10 @@ impl<Pkt> std::fmt::Display for Sender<Pkt> {
                     retry_count,
                     ..
                 } => write!(f, "{}", limit - retry_count)?,
-                UnackedState::Canceled {
+                UnackedState::CancelRequested {
                     forgotten: true, ..
                 } => write!(f, "f")?,
-                UnackedState::Canceled {
+                UnackedState::CancelRequested {
                     forgotten: false, ..
                 } => write!(f, "c")?,
                 UnackedState::Acked => write!(f, "A")?,
@@ -488,7 +488,7 @@ impl<Pkt> Sender<Pkt> {
 
         let idx = (self.unacked.len() as i64 + offset - 1) as usize;
         match self.unacked[idx] {
-            UnackedState::Unacked { .. } | UnackedState::Canceled { .. } => {
+            UnackedState::Unacked { .. } | UnackedState::CancelRequested { .. } => {
                 panic!("packet must have been acknowledged")
             }
 
@@ -499,7 +499,7 @@ impl<Pkt> Sender<Pkt> {
 
     /// Implementation of `Future::poll` to wait for send of a given packet.
     ///
-    /// Panics if the indicated packet was canceled.
+    /// Panics if the indicated packet was canceled while blocked.
     ///
     /// Returns `None` if the packet has already been acknowledged; else returns
     /// the sequence number assigned to the packet which is suitable for
@@ -540,7 +540,7 @@ impl<Pkt> Sender<Pkt> {
         match self.unacked[idx] {
             UnackedState::Acked | UnackedState::CancelAcked => Poll::Ready(()),
             UnackedState::Unacked { ref mut waker, .. }
-            | UnackedState::Canceled { ref mut waker, .. } => {
+            | UnackedState::CancelRequested { ref mut waker, .. } => {
                 waker.clone_from(cx.waker());
                 Poll::Pending
             }
@@ -550,10 +550,16 @@ impl<Pkt> Sender<Pkt> {
     /// Implementation of `Future::poll` to wait for acknowledgement
     /// of a given packet which may not yet be sent.
     ///
-    /// Panics if the indicated packet was canceled.
+    /// Panics if the indicated packet was canceled while blocked.
+    ///
+    /// Returns `None` if the packet has already been forgotten; else returns
+    /// the sequence number assigned to the packet.
     pub fn poll_send_and_ack(&mut self, cx: &mut Context<'_>, id: QueuedPacketId) -> Poll<()> {
         match ready!(self.poll_send(cx, id)) {
-            Some(sn) => self.poll_ack(cx, sn).map(|_| ()),
+            Some(sn) => {
+                ready!(self.poll_ack(cx, sn));
+                Poll::Ready(())
+            }
             None => Poll::Ready(()),
         }
     }
@@ -702,7 +708,7 @@ impl<Pkt> Sender<Pkt> {
     /// Limit the number of times this packet will be retried.
     ///
     /// Same as [limit_retries_by_id()], but by sequence number.
-    pub fn limit_retries_by_seq_num(&mut self, sn: QueuedPacketId, retry_limit: u8) {
+    pub fn limit_retries_by_seq_num(&mut self, sn: SeqNum, retry_limit: u8) {
         let offset = sn.wrapping_sub(self.last_sent) as i64;
 
         if offset > 0 || -offset >= self.unacked.len() as i64 {
@@ -787,7 +793,9 @@ impl<Pkt> Sender<Pkt> {
                 (Some((Some(packet), waker)), UnackedState::Acked)
             }
 
-            UnackedState::Canceled { waker, .. } => (Some((None, waker)), UnackedState::Acked),
+            UnackedState::CancelRequested { waker, .. } => {
+                (Some((None, waker)), UnackedState::Acked)
+            }
 
             UnackedState::Acked => {
                 self.stats[SenderStat::DuplicateAck] += 1;
@@ -823,7 +831,7 @@ impl<Pkt> Sender<Pkt> {
         };
 
         let Some(waker) = replace_with_or_abort_and_return(&mut self.unacked[idx], |s| match s {
-            UnackedState::Canceled { waker, forgotten } => {
+            UnackedState::CancelRequested { waker, forgotten } => {
                 if forgotten {
                     (Some(waker), UnackedState::Acked)
                 } else {
@@ -934,7 +942,7 @@ impl<Pkt> Sender<Pkt> {
         self.unacked.iter().any(|pkt| !pkt.is_acked())
     }
 
-    /// Ages packet retry counts, and transitions expired packets to `Canceled`.
+    /// Ages packet retry counts, and transitions expired packets to `CancelRequested`.
     ///
     /// Should be called first before querying [retry_packets()] and [retry_cancels()].
     ///
@@ -976,7 +984,7 @@ impl<Pkt> Sender<Pkt> {
             .iter()
             .enumerate()
             .filter_map(move |(offset, pkt)| match pkt {
-                UnackedState::Canceled { .. } => Some(sn_base.wrapping_add(offset as u64)),
+                UnackedState::CancelRequested { .. } => Some(sn_base.wrapping_add(offset as u64)),
                 _ => None,
             })
     }

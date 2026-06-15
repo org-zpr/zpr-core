@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Core management packet functions.
 //!
 //! These are low-level primitives; most code should use the higher-level
@@ -180,6 +178,7 @@ impl<'a> Sent<'a> {
     ///
     /// Once true, [try_cancel()] can no longer succeed, dropping will no
     /// longer cancel the packet, and this future will be ready immediately.
+    #[allow(dead_code)]
     pub fn is_sent(&self) -> bool {
         let PacketId::Queued(packet_id) = self.packet_id else {
             return true;
@@ -197,6 +196,7 @@ impl<'a> Sent<'a> {
     /// Explicitly try to cancel sending the packet, returning the packet if
     /// successful, or an error if unsuccessful (meaning the packet was
     /// already sent).
+    #[allow(dead_code)]
     pub fn try_cancel(mut self) -> Result<Packet, Acked<'a>> {
         match self.try_cancel_internal() {
             Ok(packet) => Ok(packet),
@@ -242,6 +242,7 @@ impl<'a> Sent<'a> {
     ///
     /// Returns a future which resolves to an indication of whether the
     /// packet was indeed canceled.
+    #[allow(dead_code)]
     pub fn request_cancel(mut self) -> AckedOrCanceled<'a> {
         self.request_cancel_internal();
         AckedOrCanceled(self)
@@ -258,8 +259,6 @@ impl<'a> Sent<'a> {
             return;
         };
 
-        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
-
         if matches!(self.packet_id, PacketId::Queued(_)) {
             if self.try_cancel_internal().is_ok() {
                 // immediately canceled
@@ -274,10 +273,12 @@ impl<'a> Sent<'a> {
             unreachable!();
         };
 
+        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
         let Some(_pkt) = zdpr_send.cancel_sent_packet(seq_num) else {
             // already acked or cancel-requested
             return;
         };
+        drop(zdpr_send);
 
         // note, we drop the user's packet here; we could return it to them
 
@@ -374,18 +375,22 @@ impl<'a> std::future::Future for Sent<'a> {
 pub struct Acked<'a>(Sent<'a>);
 
 impl<'a> Acked<'a> {
+    #[allow(dead_code)]
     pub fn enqueue(self) {
         self.0.enqueue()
     }
 
+    #[allow(dead_code)]
     pub fn is_sent(&self) -> bool {
         self.0.is_sent()
     }
 
+    #[allow(dead_code)]
     pub fn request_cancel(self) -> AckedOrCanceled<'a> {
         self.0.request_cancel()
     }
 
+    #[allow(dead_code)]
     pub fn limit_retries(self, retry_limit: u8) -> AckedOrCanceled<'a> {
         self.0.limit_retries(retry_limit)
     }
@@ -394,7 +399,7 @@ impl<'a> Acked<'a> {
 impl<'a> std::future::Future for Acked<'a> {
     type Output = Result<(), MgmtSendError>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         if matches!(self.0.packet_id, PacketId::Acked) {
             return Poll::Ready(Ok(()));
         }
@@ -405,14 +410,22 @@ impl<'a> std::future::Future for Acked<'a> {
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
 
+        let seq_num;
         match self.0.packet_id {
             PacketId::Queued(packet_id) => {
-                zdpr_send.poll_send_and_ack(cx, packet_id).map(|()| Ok(()))
+                let Some(sn) = ready!(zdpr_send.poll_send(cx, packet_id)) else {
+                    return Poll::Ready(Ok(()));
+                };
+                // There may/will be further polls, so update `packet_id` with our new knowledge.
+                self.0.packet_id = PacketId::Sent(sn);
+                seq_num = sn;
             }
-            PacketId::Sent(seq_num) => zdpr_send.poll_ack(cx, seq_num).map(|()| Ok(())),
+            PacketId::Sent(sn) => seq_num = sn,
             PacketId::Acked => unreachable!(),    // handled above
             PacketId::Canceled => unreachable!(), // not possible in this state
         }
+
+        zdpr_send.poll_ack(cx, seq_num).map(|()| Ok(()))
     }
 }
 
@@ -436,12 +449,14 @@ pub enum PacketStatus {
 pub struct AckedOrCanceled<'a>(Sent<'a>);
 
 impl<'a> AckedOrCanceled<'a> {
+    #[allow(dead_code)]
     pub fn enqueue(mut self) {
         // skip Sent destructor, but not our destructor
         self.forget_internal();
         std::mem::forget(self);
     }
 
+    #[allow(dead_code)]
     pub fn is_sent(&self) -> bool {
         self.0.is_sent()
     }
@@ -449,11 +464,13 @@ impl<'a> AckedOrCanceled<'a> {
     /// Although this packet is already scheduled for cancellation,
     /// the cancellation may be in the form of a retry limit;
     /// if so, this may still be used to immediately request cancellation.
+    #[allow(dead_code)]
     pub fn request_cancel(mut self) -> Self {
         self.0.request_cancel_internal();
         self
     }
 
+    #[allow(dead_code)]
     pub fn limit_retries(mut self, retry_limit: u8) -> Self {
         self.0.limit_retries_internal(retry_limit);
         self
@@ -476,7 +493,7 @@ impl<'a> AckedOrCanceled<'a> {
 impl<'a> std::future::Future for AckedOrCanceled<'a> {
     type Output = Result<PacketStatus, MgmtSendError>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.0.packet_id {
             PacketId::Acked => {
                 return Poll::Ready(Ok(PacketStatus::Acked));
@@ -493,22 +510,28 @@ impl<'a> std::future::Future for AckedOrCanceled<'a> {
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
 
+        let seq_num;
         match self.0.packet_id {
             PacketId::Queued(packet_id) => {
-                ready!(zdpr_send.poll_send_and_ack(cx, packet_id));
-                Poll::Ready(Ok(PacketStatus::Acked))
+                let Some(sn) = ready!(zdpr_send.poll_send(cx, packet_id)) else {
+                    return Poll::Ready(Ok(PacketStatus::Acked));
+                };
+                // There may/will be further polls, so update `packet_id` with our new knowledge.
+                self.0.packet_id = PacketId::Sent(sn);
+                seq_num = sn;
             }
 
-            PacketId::Sent(seq_num) => {
-                ready!(zdpr_send.poll_ack(cx, seq_num));
-                if zdpr_send.is_cancel_acked(seq_num) {
-                    Poll::Ready(Ok(PacketStatus::Canceled))
-                } else {
-                    Poll::Ready(Ok(PacketStatus::Acked))
-                }
-            }
+            PacketId::Sent(sn) => seq_num = sn,
 
             PacketId::Acked | PacketId::Canceled => unreachable!(), // handled above
+        }
+
+        ready!(zdpr_send.poll_ack(cx, seq_num));
+
+        if zdpr_send.is_cancel_acked(seq_num) {
+            Poll::Ready(Ok(PacketStatus::Canceled))
+        } else {
+            Poll::Ready(Ok(PacketStatus::Acked))
         }
     }
 }
