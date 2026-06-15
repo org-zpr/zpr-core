@@ -237,17 +237,12 @@ impl Config {
     ) -> Result<Self, ArgsError> {
         let mut config = Config::default();
         if let Some(pkey_file) = auth_private_key {
-            if pkey_file.is_relative() {
-                let pkey_file = fs::canonicalize(pkey_file).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for auth_private_key: {:?}",
-                        e
-                    )))
-                })?;
-                config.auth_private_key = Some(pkey_file);
-            } else {
-                config.auth_private_key = Some(pkey_file);
-            }
+            config.auth_private_key = Some(path::absolute(pkey_file).or_else(|e| {
+                Err(ArgsError::PathError(format!(
+                    "path error for auth_private_key: {:?}",
+                    e
+                )))
+            })?);
         }
         config.set_from_common(common)?;
         if let Some(config_file) = config_file {
@@ -500,59 +495,42 @@ impl Config {
     fn set_from_common(&mut self, common: &CommonArgs) -> Result<(), ArgsError> {
         if let Some(control_path) = &common.control_path {
             let cp = PathBuf::from(control_path);
-            if cp.is_relative() {
-                self.control_path = path::absolute(cp).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for control_path: {:?}",
-                        e
-                    )))
-                })?;
-            } else {
-                self.control_path = cp;
-            }
+            self.control_path = path::absolute(cp).or_else(|e| {
+                Err(ArgsError::PathError(format!(
+                    "path error for control_path: {:?}",
+                    e
+                )))
+            })?;
         }
         if let Some(capture_path) = &common.capture_path {
             let cp = PathBuf::from(capture_path);
-            if cp.is_relative() {
-                self.capture_path = path::absolute(cp).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for capture_path: {:?}",
-                        e
-                    )))
-                })?;
-            } else {
-                self.capture_path = cp;
-            }
+            self.capture_path = path::absolute(cp).or_else(|e| {
+                Err(ArgsError::PathError(format!(
+                    "path error for capture_path: {:?}",
+                    e
+                )))
+            })?;
         }
         if let Some(self_addr) = &common.self_addr {
             self.self_addr = *self_addr;
         }
         if let Some(ca_file) = &common.ca_file {
             let cf = PathBuf::from(ca_file);
-            if cf.is_relative() {
-                self.ca_file = Some(fs::canonicalize(cf).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for ca_file: {:?}",
-                        e
-                    )))
-                })?);
-            } else {
-                self.ca_file = Some(PathBuf::from(ca_file));
-            }
+            self.ca_file = Some(path::absolute(cf).or_else(|e| {
+                Err(ArgsError::PathError(format!(
+                    "path error for ca_file: {:?}",
+                    e
+                )))
+            })?);
         }
         if let Some(certificate_file) = &common.certificate_file {
             let cf = PathBuf::from(certificate_file);
-            if cf.is_relative() {
-                let cfile = fs::canonicalize(cf).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for certificate_file: {:?}",
-                        e
-                    )))
-                })?;
-                self.certificate_file = Some(cfile);
-            } else {
-                self.certificate_file = Some(cf);
-            }
+            self.certificate_file = Some(path::absolute(cf).or_else(|e| {
+                Err(ArgsError::PathError(format!(
+                    "path error for certificate_file: {:?}",
+                    e
+                )))
+            })?);
         }
         if common.private_key_file.is_some() && common.noise_private_key.is_some() {
             return Err(ArgsError::ParseError(
@@ -566,17 +544,12 @@ impl Config {
         if let Some(private_key_file) = &common.private_key_file {
             self.private_key_data = None;
             let pkf = PathBuf::from(private_key_file);
-            if pkf.is_relative() {
-                let pkf_resolved = fs::canonicalize(pkf).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for private_key_file: {:?}",
-                        e
-                    )))
-                })?;
-                self.private_key_file = Some(pkf_resolved);
-            } else {
-                self.private_key_file = Some(PathBuf::from(private_key_file));
-            }
+            self.private_key_file = Some(path::absolute(pkf).or_else(|e| {
+                Err(ArgsError::PathError(format!(
+                    "path error for private_key_file: {:?}",
+                    e
+                )))
+            })?);
         }
         if let Some(tun_if) = &common.tun_if {
             self.tun_if = Some(tun_if.clone());

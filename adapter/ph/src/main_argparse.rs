@@ -5,9 +5,8 @@
 //! more details on the configuration.
 
 use clap::Parser;
-use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{self, Path};
 
 use crate::assembly::PhMode;
 use crate::main_args::{ArgsError, Command, Control};
@@ -47,7 +46,12 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             let config_file: Option<AdapterConfig> = match config_file {
                 Some(p) => match load_config::<AdapterConfig>(&p) {
                     Ok(mut ac) => {
-                        ac.config_path = fs::canonicalize(p).unwrap();
+                        ac.config_path = path::absolute(&p).or_else(|e| {
+                            Err(ArgsError::PathError(format!(
+                                "path error for config file: {:?}",
+                                e
+                            )))
+                        })?;
                         Some(ac)
                     }
                     Err(e) => {
@@ -67,28 +71,20 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                 config.node_addr = Some(node_addr);
             }
             if let Some(npkf) = node_public_key_file {
-                if npkf.is_relative() {
-                    let npkf = fs::canonicalize(npkf).or_else(|e| {
-                        Err(ArgsError::PathError(format!(
-                            "path error for node_public_key_file: {:?}",
-                            e
-                        )))
-                    })?;
-                    config.node_public_key_file = Some(npkf);
-                } else {
-                    config.node_public_key_file = Some(npkf);
-                }
+                config.node_public_key_file = Some(path::absolute(npkf).or_else(|e| {
+                    Err(ArgsError::PathError(format!(
+                        "path error for node_public_key_file: {:?}",
+                        e
+                    )))
+                })?);
             }
-            if let Some(mut bootstrap_key) = bootstrap_key {
-                if bootstrap_key.is_relative() {
-                    bootstrap_key = fs::canonicalize(bootstrap_key).or_else(|e| {
-                        Err(ArgsError::PathError(format!(
-                            "path error for bootstrap key: {:?}",
-                            e
-                        )))
-                    })?;
-                }
-                config.bootstrap_key_path = Some(bootstrap_key);
+            if let Some(bootstrap_key) = bootstrap_key {
+                config.bootstrap_key_path = Some(path::absolute(bootstrap_key).or_else(|e| {
+                    Err(ArgsError::PathError(format!(
+                        "path error for bootstrap key: {:?}",
+                        e
+                    )))
+                })?);
             }
         }
 
@@ -101,7 +97,12 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             let config_file: Option<NodeConfig> = match config_file {
                 Some(p) => match load_config::<NodeConfig>(&p) {
                     Ok(mut ac) => {
-                        ac.config_path = fs::canonicalize(p).unwrap();
+                        ac.config_path = path::absolute(&p).or_else(|e| {
+                            Err(ArgsError::PathError(format!(
+                                "path error for config file: {:?}",
+                                e
+                            )))
+                        })?;
                         Some(ac)
                     }
                     Err(e) => {
