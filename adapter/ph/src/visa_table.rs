@@ -198,8 +198,8 @@ impl VisaTable {
             0,
             &vs_zpr_addr,
             VISA_SERVICE_PORT,
-            expires_ms,
             VS_VISAS_CONFIG_ID,
+            expires_ms,
         );
         let vs2node = make_tcp_visa(
             2,
@@ -207,8 +207,8 @@ impl VisaTable {
             VISA_SERVICE_PORT,
             &node_zpr_addr,
             0,
-            expires_ms,
             VS_VISAS_CONFIG_ID,
+            expires_ms,
         );
 
         let mut visa_table = Self::new();
@@ -745,8 +745,8 @@ mod tests {
             + Duration::from_secs(3600))
         .as_millis() as i64;
 
-        let visa1_raw = make_tcp_visa(4000, &client1_addr, 0, &service_addr, 80, expires_ms, 100);
-        let visa2_raw = make_tcp_visa(4001, &client2_addr, 0, &service_addr, 80, expires_ms, 100);
+        let visa1_raw = make_tcp_visa(4000, &client1_addr, 0, &service_addr, 80, 100, expires_ms);
+        let visa2_raw = make_tcp_visa(4001, &client2_addr, 0, &service_addr, 80, 100, expires_ms);
 
         let mut visa_table = asm.visa_table.write().unwrap();
         let visa1_id = visa_table.insert_visa(visa1_raw).unwrap();
@@ -811,8 +811,8 @@ mod tests {
             + Duration::from_millis(10000))
         .as_millis() as i64;
 
-        let visa1 = make_tcp_visa(1000, &client1_addr, 0, &service_addr, 80, expires_ms, 100);
-        let visa2 = make_tcp_visa(1001, &client2_addr, 0, &service_addr, 80, expires_ms, 100);
+        let visa1 = make_tcp_visa(1000, &client1_addr, 0, &service_addr, 80, 100, expires_ms);
+        let visa2 = make_tcp_visa(1001, &client2_addr, 0, &service_addr, 80, 100, expires_ms);
         let v1 = new_vsapi_visa_tcp_default(12345, DateTime::<Utc>::MAX_UTC.into());
         let _ = visa_table.insert_visa(v1);
 
