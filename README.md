@@ -167,7 +167,6 @@ matches against.  Generate and sign one:
 
 Sample configuration, place in a file named `adapter-vs-conf.toml`.
 
-
 ```toml
 [global]
 # ca_file is optional for link establishment, but the VS adapter must present
