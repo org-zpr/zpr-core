@@ -136,7 +136,7 @@ Sample configuration, place in a file named `node-conf.toml`.
 [global]
 # ca_file is needed for the node to verify adapter certificates and recognize
 # the visa-service adapter as special.  Without it, VS routing will not work.
-ca_file = "auth-ca.crt"
+ca_file = "authority/auth-ca.crt"
 certificate_file = "node-noise.crt"
 private_key_file = "node-noise.key"
 self_addr = "129.6.7.1:5000"
@@ -169,7 +169,7 @@ matches against.  Generate and sign one:
 [global]
 # ca_file is optional for link establishment, but the VS adapter must present
 # a CA-signed certificate_file so the node can recognize it as the visa service.
-ca_file = "auth-ca.crt"
+ca_file = "authority/auth-ca.crt"
 certificate_file = "vs-noise.crt"   # CN must be "vs.zpr"
 private_key_file = "vs-noise.key"
 zpr_addr = [ "fd5a:5052::1" ]
