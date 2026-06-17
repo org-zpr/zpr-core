@@ -165,6 +165,9 @@ matches against.  Generate and sign one:
 
 ### Create a configuration file for the visa service adapter
 
+Sample configuration, place in a file named `adapter-vs-conf.toml`.
+
+
 ```toml
 [global]
 # ca_file is optional for link establishment, but the VS adapter must present
