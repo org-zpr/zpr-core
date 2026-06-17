@@ -105,7 +105,7 @@ Using the handy `zpr-pki` script:
 ./integration-test/lib/zpr-pki pubkey <node-noise.key >node-noise-pub.pem
 
 # Then sign the public key
-./zpr-pki gensignedcert authority/auth-ca.crt authority/auth-ca.key \
+./integration-test/zpr-pki gensignedcert authority/auth-ca.crt authority/auth-ca.key \
   /CN=node.zpr.org 365 < node-noise-pub.pem >node-noise.crt
 ```
 
@@ -285,7 +285,7 @@ here:
 # IP configuration for the node.
 sudo ip tuntap add name tun9 mode tun multi_queue
 sudo ip link set tun9 mtu 1400
-sudo addr add fd5a:5052:90de::1/32 dev tun9
+sudo ip addr add fd5a:5052:90de::1/32 dev tun9
 sudo ip link set tun9 up
 ```
 
@@ -304,7 +304,7 @@ need to configure its TUN interface similar to what we did for the node.
 # IP configuration for the visa service adapter.
 sudo ip tuntap add name tun9 mode tun multi_queue
 sudo ip link set tun9 mtu 1400
-sudo addr add fd5a:5052::1/32 dev tun9
+sudo ip addr add fd5a:5052::1/32 dev tun9
 sudo ip link set tun9 up
 ```
 
