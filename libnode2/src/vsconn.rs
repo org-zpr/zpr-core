@@ -2,7 +2,6 @@ use zpr::vsapi::v1 as vsapi2;
 use zpr::vsapi_types::ApiResponseError;
 
 use std::future::Future;
-use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,8 +21,8 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, Connection, DisconnectNotice, NodeConnect, StateFlag, Visa, VisaDecision,
-    VisaOp, VisaRequest, VisaResponse,
+    ConnectRequest, ConnectType, Connection, DisconnectNotice, NodeConnect, NodeOpen, Param,
+    StateFlag, VSConnectRequest, Visa, VisaDecision, VisaOp, VisaRequest, VisaResponse, pname,
 };
 use zpr::write_to::WriteTo;
 
@@ -32,8 +31,6 @@ use zpr::write_to::WriteTo;
 type ConnectFn = Box<
     dyn Fn(SocketAddr) -> Pin<Box<dyn Future<Output = std::io::Result<tokio::net::TcpStream>>>>,
 >;
-
-const PARAM_ZPR_ADDR: &str = "zpr_addr";
 
 const LIFECYCLE_EVENT_BUFFER_SIZE: usize = 64;
 
@@ -65,8 +62,12 @@ enum VS2Command {
     /// Stop the local vs-api run loop, optionally de-register from the visa service first.
     Stop(bool),
 
-    /// Run through the connect sequence. If connect succeeds the VSHandle is kept internally.
+    /// Run through the "bootstrap" connect sequence. If connect succeeds the VSHandle is kept internally.
     Connect(NodeConnect, oneshot::Sender<VSConnectResponse>),
+
+    /// Run through the "open" sequence for an already authenticated (via [VS2Command::AuthorizeConnect]) node.
+    /// If connect succeeds the VSHandle is kept internally. No `params` are required.
+    Open(NodeOpen, oneshot::Sender<VSConnectResponse>),
 
     VisaRequest(VisaRequest, oneshot::Sender<VSVisaResponse>),
 
@@ -423,6 +424,38 @@ impl VSConn {
                 Ok(())
             }
 
+            VS2Command::Open(req, resp_tx) => {
+                debug!(target: VS_RPC, "VSConn: open");
+                let stateflag = req.state.clone();
+                let resp = if cmd_state.is_connected() {
+                    Err(VSApiError::CommandFailed(
+                        "open called but already connected to VS-API".to_string(),
+                    ))
+                } else {
+                    self.do_open(&cmd_state.vs_service, req).await
+                };
+
+                let retval = match resp {
+                    Ok(handle) => {
+                        info!(target: VS_RPC, "VS API open succeeded");
+                        cmd_state.vs_handle = Some(handle);
+                        self.send_lifecycle_event(VSConnLifecycleEvent::ConnectedToVsApi(
+                            stateflag,
+                        ));
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!(target: VS_RPC, "VS API open failed: {:?}", e);
+                        Err(e)
+                    }
+                };
+
+                if let Err(e) = resp_tx.send(retval) {
+                    error!(target: VS_RPC, "failed to send open response: {:?}", e);
+                }
+                Ok(())
+            }
+
             VS2Command::VisaRequest(req, resp_tx) => {
                 debug!(target: VS_RPC, "VSConn: visa_request");
                 let resp = if !cmd_state.is_connected() {
@@ -540,35 +573,21 @@ impl VSConn {
         vs_service: &vsapi2::visa_service::Client,
         req: NodeConnect,
     ) -> Result<vsapi2::v_s_handle::Client, VSApiError> {
-        let mut vs_request = vs_service.connect_request();
-
-        let mut vscr_bldr = vs_request.get().init_req();
-        vscr_bldr.set_cn(&self.node_cn);
-
-        let ctype = match req.state {
-            StateFlag::HasState => vsapi2::VSConnT::Reconnect,
-            StateFlag::NoState => vsapi2::VSConnT::Reset,
+        let vs_cr = VSConnectRequest {
+            cn: self.node_cn.clone(),
+            ctype: match req.state {
+                StateFlag::HasState => ConnectType::Reconnect,
+                StateFlag::NoState => ConnectType::Reset,
+            },
+            // We set one param: the zpr_address for the node.
+            params: vec![Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr)],
         };
-        vscr_bldr.set_ctype(ctype);
 
-        // We set one param: the zpr_address for the node.
-        let mut params_bldr = vscr_bldr.init_params(1);
-        {
-            let mut param0 = params_bldr.reborrow().get(0);
-            param0.set_name(PARAM_ZPR_ADDR);
-            match req.zpr_addr {
-                IpAddr::V4(av4) => {
-                    param0.set_ptype(vsapi2::ParamT::Ipv4);
-                    param0.set_value_data(&av4.octets());
-                }
-                IpAddr::V6(av6) => {
-                    param0.set_ptype(vsapi2::ParamT::Ipv6);
-                    param0.set_value_data(&av6.octets());
-                }
-            }
-        }
+        debug!(target: VS_RPC, "VS-API -> connect (type = {:?})", vs_cr.ctype);
 
-        debug!(target: VS_RPC, "VS-API -> connect (type = {:?})", ctype);
+        let mut vs_request = vs_service.connect_request();
+        let mut vscr_bldr = vs_request.get().init_req();
+        vs_cr.write_to(&mut vscr_bldr);
 
         let vs_request_response = rpc_with_timeout(
             "connect",
@@ -642,6 +661,48 @@ impl VSConn {
         };
 
         // Ok we now have an authenticated handle to the VS.
+        Ok(vs_handle_svc)
+    }
+
+    /// Compared to VSAPI "connect", VSAPI "open" is far simpler. The VS already knows the node
+    /// (detected based on source address) is authtenticated and so a successful call just reutrns
+    /// the handle directly.
+    async fn do_open(
+        &self,
+        vs_service: &vsapi2::visa_service::Client,
+        oreq: NodeOpen,
+    ) -> Result<vsapi2::v_s_handle::Client, VSApiError> {
+        debug!(target: VS_RPC, "VS-API -> open (type = {:?})", oreq.state);
+
+        let req = VSConnectRequest {
+            cn: self.node_cn.clone(),
+            ctype: match oreq.state {
+                StateFlag::HasState => ConnectType::Reconnect,
+                StateFlag::NoState => ConnectType::Reset,
+            },
+            params: Vec::new(), // TODO: params should be optional
+        };
+
+        let mut vs_request = vs_service.open_request();
+        let mut vscr_bldr = vs_request.get().init_req();
+        req.write_to(&mut vscr_bldr);
+
+        let vs_request_response = rpc_with_timeout(
+            "open",
+            DEFAULT_CONNECT_RPC_TIMEOUT,
+            vs_request.send().promise,
+        )
+        .await?;
+
+        let handle_or_error = vs_request_response.get()?.get_resp()?;
+
+        let vs_handle_svc: vsapi2::v_s_handle::Client = match handle_or_error.which()? {
+            vsapi2::result::Which::Ok(vs_handle_obj) => vs_handle_obj?,
+            vsapi2::result::Which::Error(err_obj) => {
+                let err_obj = err_obj?;
+                return Err(ApiResponseError::try_from(err_obj)?.into());
+            }
+        };
         Ok(vs_handle_svc)
     }
 
@@ -857,6 +918,13 @@ impl VSConnHandle {
     pub async fn connect(&self, req: NodeConnect) -> Result<(), VSApiError> {
         let (resp_tx, resp_rx) = oneshot::channel();
         let cmd = VS2Command::Connect(req, resp_tx);
+        self.send_command(cmd).await?;
+        resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
+    }
+
+    pub async fn open(&self, req: NodeOpen) -> Result<(), VSApiError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = VS2Command::Open(req, resp_tx);
         self.send_command(cmd).await?;
         resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
     }

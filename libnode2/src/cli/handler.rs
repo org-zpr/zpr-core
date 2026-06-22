@@ -9,12 +9,12 @@ use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::AbortHandle;
 use tracing::{error, info, warn};
-use zpr::vsapi_types::{AuthBlob, CommFlag, ConnectRequest, DisconnectReason, PacketDesc, VisaOp};
-
-use crate::vsconn::{
-    StateFlag, VSConnHandle, VSConnLifecycleEvent, VSConnectRequest, VSDisconnectNotice,
-    VSVisaRequest,
+use zpr::vsapi_types::{
+    AuthBlob, CommFlag, ConnectRequest, DisconnectNotice, DisconnectReason, NodeConnect,
+    PacketDesc, StateFlag, VisaOp, VisaRequest,
 };
+
+use crate::vsconn::{VSConnHandle, VSConnLifecycleEvent};
 use crate::vss::{ListProcessingResponse, VSSMessage};
 
 use super::cmd::Cmd;
@@ -41,7 +41,7 @@ pub async fn run_handler(
     info!("allowing VSConn to start up...");
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    let request = VSConnectRequest {
+    let request = NodeConnect {
         zpr_addr: node_zpr_addr,
         state: StateFlag::NoState,
     };
@@ -93,7 +93,7 @@ pub async fn run_handler(
                                 five_tuple,
                                 comm_flags: CommFlag::BiDirectional,
                             };
-                            let req = VSVisaRequest {
+                            let req = VisaRequest {
                                 pdesc,
                                 previous_id: None,
                             };
@@ -129,7 +129,7 @@ pub async fn run_handler(
                             }
                         }
                         Cmd::NotifyDisconnect(zpr_addr) => {
-                            let notice = VSDisconnectNotice {
+                            let notice = DisconnectNotice {
                                 zpr_addr: Some(zpr_addr),
                                 reason: DisconnectReason::Admin,
                             };
@@ -212,6 +212,12 @@ pub async fn run_handler(
                         VSSMessage::SetServices(services, resp_tx) => {
                             let _ = output_tx.send(format!(
                                 "[VSS incoming] SetServices with {} services", services.len()
+                            ));
+                            let _ = resp_tx.send(Ok(()));
+                        }
+                        VSSMessage::SetTopology(links, resp_tx) => {
+                            let _ = output_tx.send(format!(
+                                "[VSS incoming] SetTopology with {} links", links.len()
                             ));
                             let _ = resp_tx.send(Ok(()));
                         }
