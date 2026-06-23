@@ -2,7 +2,7 @@ use zpr::vsapi::v1 as vsapi2;
 use zpr::vsapi_types::ApiResponseError;
 
 use std::future::Future;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,8 +21,8 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 use zpr::vsapi_types::{
-    ConnectRequest, ConnectType, Connection, DisconnectNotice, NodeConnect, NodeOpen, Param,
-    StateFlag, VSConnectRequest, Visa, VisaDecision, VisaOp, VisaRequest, VisaResponse, pname,
+    ConnectRequest, ConnectType, Connection, DisconnectNotice, Param, VSConnectRequest, Visa,
+    VisaDecision, VisaOp, VisaRequest, VisaResponse, pname,
 };
 use zpr::write_to::WriteTo;
 
@@ -55,6 +55,28 @@ type VSNotifyDisconnectResponse = Result<(), VSApiError>;
 type VSPingResponse = Result<(), VSApiError>;
 type VSVisaIdsResponse = Result<Vec<u64>, VSApiError>;
 type VSVisaByIdResponse = Result<Vec<Visa>, VSApiError>;
+
+#[derive(Debug)]
+pub struct NodeConnect {
+    /// Connect will fail if this does not match policy.
+    pub zpr_addr: IpAddr,
+    pub state: StateFlag,
+}
+
+#[derive(Debug)]
+pub struct NodeOpen {
+    pub state: StateFlag,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateFlag {
+    /// Visa service / node has no state for this connection.
+    #[default]
+    NoState,
+
+    /// Visa service / node has existing state for this connection.
+    HasState,
+}
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -140,6 +162,24 @@ impl VSCommandState {
     /// we are currently connected to the VS API.
     fn is_connected(&self) -> bool {
         self.vs_handle.is_some()
+    }
+}
+
+impl NodeConnect {
+    fn connect_type(&self) -> ConnectType {
+        match self.state {
+            StateFlag::NoState => ConnectType::Reset,
+            StateFlag::HasState => ConnectType::Reconnect,
+        }
+    }
+}
+
+impl NodeOpen {
+    fn connect_type(&self) -> ConnectType {
+        match self.state {
+            StateFlag::NoState => ConnectType::Reset,
+            StateFlag::HasState => ConnectType::Reconnect,
+        }
     }
 }
 
@@ -575,12 +615,8 @@ impl VSConn {
     ) -> Result<vsapi2::v_s_handle::Client, VSApiError> {
         let vs_cr = VSConnectRequest {
             cn: self.node_cn.clone(),
-            ctype: match req.state {
-                StateFlag::HasState => ConnectType::Reconnect,
-                StateFlag::NoState => ConnectType::Reset,
-            },
-            // We set one param: the zpr_address for the node.
-            params: vec![Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr)],
+            ctype: req.connect_type(),
+            params: Some(vec![Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr)]),
         };
 
         debug!(target: VS_RPC, "VS-API -> connect (type = {:?})", vs_cr.ctype);
@@ -676,11 +712,8 @@ impl VSConn {
 
         let req = VSConnectRequest {
             cn: self.node_cn.clone(),
-            ctype: match oreq.state {
-                StateFlag::HasState => ConnectType::Reconnect,
-                StateFlag::NoState => ConnectType::Reset,
-            },
-            params: Vec::new(), // TODO: params should be optional
+            ctype: oreq.connect_type(),
+            params: None,
         };
 
         let mut vs_request = vs_service.open_request();

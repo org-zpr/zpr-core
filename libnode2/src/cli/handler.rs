@@ -10,11 +10,11 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::AbortHandle;
 use tracing::{error, info, warn};
 use zpr::vsapi_types::{
-    AuthBlob, CommFlag, ConnectRequest, DisconnectNotice, DisconnectReason, NodeConnect,
-    PacketDesc, StateFlag, VisaOp, VisaRequest,
+    AuthBlob, CommFlag, ConnectRequest, DisconnectNotice, DisconnectReason, PacketDesc, VisaOp,
+    VisaRequest,
 };
 
-use crate::vsconn::{VSConnHandle, VSConnLifecycleEvent};
+use crate::vsconn::{NodeConnect, StateFlag, VSConnHandle, VSConnLifecycleEvent};
 use crate::vss::{ListProcessingResponse, VSSMessage};
 
 use super::cmd::Cmd;
