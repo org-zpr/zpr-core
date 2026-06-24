@@ -1,17 +1,16 @@
 use crate::adapter_tables;
 use crate::address_pool::AddressPool;
 use crate::capture_worker::CaptureWorker;
-use crate::config;
 use crate::counters::*;
 use crate::flow_control::FlowControl;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_multiplexor::KmState;
 use crate::km_noise;
 use crate::link_state::{LinkEvent, LinkStateError, LinkType};
-use crate::logging::targets::PEER_MGMT;
 use crate::mgmt_processor_worker;
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
+use crate::prelude::*;
 use crate::queues::*;
 use crate::special_peers::SpecialPeerName;
 use crate::tun_ctl::TunCtl;
@@ -25,7 +24,6 @@ use std::net::IpAddr;
 use std::num::NonZero;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
-use tracing::*;
 use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};

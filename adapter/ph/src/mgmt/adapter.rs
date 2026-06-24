@@ -8,14 +8,11 @@
 
 use super::{dock, txn_mgr};
 use crate::adapter_tables::{DltPep, EltPep};
-use crate::assembly::{Assembly, PhMode};
 use crate::counters::ManagementCounterType;
-use crate::logging::targets::FLOW_MGMT;
+use crate::prelude::*;
 use crate::queues;
 use crate::tc;
 use std::num::NonZero;
-use std::sync::Arc;
-use tracing::*;
 use zpr::packet_info::{LOCAL_ACTOR_LINK_ID, LinkId, StreamId};
 
 /// Request to bind a stream which egresses from the local adapter.

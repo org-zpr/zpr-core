@@ -5,12 +5,10 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
-use crate::assembly::{Assembly, PhMode};
-use crate::config;
 use crate::link_state::{LinkEvent, LinkState};
 use crate::logging;
-use crate::logging::targets::RPC;
-use crate::logging::{levels, targets};
+use crate::logging::{levels};
+use crate::prelude::*;
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
 use admin_api::rpc_commands::RpcCommands;
@@ -27,7 +25,6 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -36,7 +33,6 @@ use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
 use tokio_util::compat::*;
-use tracing::error;
 use tracing::*;
 use zpr::packet_info::DOCK_LINK_ID;
 use zpr::packet_info::LinkId;

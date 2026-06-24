@@ -1,13 +1,10 @@
-use crate::assembly::Assembly;
-use crate::config;
 use crate::logging::targets::CAPTURE;
 use crate::pcap_writer::*;
+use crate::prelude::*;
 use std::io;
-use std::sync::Arc;
 use tokio::fs::File;
 use tokio::net::UnixDatagram;
 use tokio::sync::Mutex;
-use tracing::error;
 
 pub struct CaptureWorker {
     inner: Mutex<Inner>,

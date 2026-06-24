@@ -3,14 +3,11 @@
 //! These are low-level primitives; most code should use the higher-level
 //! functions in `requests` instead.
 
-use crate::assembly::Assembly;
-use crate::config;
 use crate::counters::ManagementCounterType;
-use crate::packet::Packet;
+use crate::prelude::*;
 use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll, ready};
-use tracing::*;
 use zerocopy::FromBytes;
 use zpr::packet_info::{LINK_ID_UNKNOWN, LinkId, SeqNum, StreamId};
 

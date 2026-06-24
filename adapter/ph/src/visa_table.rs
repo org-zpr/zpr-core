@@ -2,10 +2,9 @@
 
 #![allow(dead_code)]
 
-use crate::config;
 use crate::defs::FiveTuple;
-use crate::logging::targets::VISA_MGMT;
 use crate::peer_table;
+use crate::prelude::*;
 use crate::tc;
 
 use chrono::{DateTime, Utc};
@@ -14,7 +13,6 @@ use std::collections::{BinaryHeap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tracing::*;
 use zpr::addrs::{VISA_SERVICE_ADDR, VISA_SERVICE_PORT};
 use zpr::five_tuple_lookup_table::FiveTupleLookupTable;
 use zpr::packet_info::{ForwardingEntry, LinkId, VisaId};

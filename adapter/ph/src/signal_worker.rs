@@ -1,12 +1,9 @@
 //! Worker which handles Unix signals.
 
-use crate::assembly::Assembly;
 use crate::counters::*;
-use crate::logging::targets::STARTUP;
-use std::sync::Arc;
+use crate::prelude::*;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::spawn_local;
-use tracing::*;
 
 pub async fn launch(asm: Arc<Assembly>) {
     let mut usr1_stream = signal(SignalKind::user_defined1()).unwrap();

@@ -2,14 +2,11 @@
 //! with the socket, performs action based on received command
 //! To avoid excess parsing, the command must not have spaces
 
-use crate::assembly::Assembly;
-use crate::config;
-use crate::logging::targets::RPC;
+use crate::prelude::*;
 use admin_api::rpc_commands::RpcCommands;
 use std::io::Error;
 use std::io::IoSliceMut;
 use std::str::FromStr;
-use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{UnixListener, UnixStream};

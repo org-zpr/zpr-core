@@ -4,16 +4,13 @@
 //! This implies that all functions here must be non-async.
 
 use crate::adapter_tables::EltEntry;
-use crate::assembly::{Assembly, PhMode};
 use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
-use crate::config;
 use crate::counters::{Aggregate, FastpathCounterType, FastpathCounters};
 use crate::defs::Direction;
 use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
-use crate::logging::targets::DATAPATH;
-use crate::packet::{Packet, PacketBuffer};
+use crate::prelude::*;
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
 use crate::two_way_queue;
 use crate::zdp;
@@ -24,9 +21,7 @@ use bytes::{Buf, BufMut};
 use classifier::{IPv4Header, IPv6Header};
 use internet_checksum;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::SystemTime;
-use tracing::*;
 use zerocopy::FromBytes;
 use zpr::packet_info::{
     A2aSaid, DOCK_LINK_ID, KM_ID_NOISE, L3Type, LINK_ID_UNKNOWN, LOCAL_ACTOR_LINK_ID, LinkId,

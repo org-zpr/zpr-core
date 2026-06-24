@@ -1,13 +1,11 @@
-use crate::assembly::Assembly;
-use crate::config;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::fastpath_io::FastpathIo;
 use crate::packet_queue;
+use crate::prelude::*;
 use crate::sys::ZprTun;
 use enum_map::{Enum, enum_map};
 use nix::poll;
 use std::net::UdpSocket;
-use std::sync::Arc;
 
 #[derive(Debug, Enum)]
 enum PollSlot {
