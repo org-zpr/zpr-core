@@ -2095,7 +2095,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tui-input",
- "zpr 0.18.1",
+ "zpr 0.19.0",
 ]
 
 [[package]]
@@ -2654,7 +2654,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "zerocopy",
- "zpr 0.18.1",
+ "zpr 0.19.0",
  "zpr-ext",
  "zpr-utils",
 ]
@@ -5148,7 +5148,8 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.18.1"
+version = "0.19.0"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.19.0#0c705e82c520a1114275782ab870a60a4dafd7e2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
