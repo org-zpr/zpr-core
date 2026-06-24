@@ -10,6 +10,7 @@ use crate::prelude::*;
 use crate::tc;
 use crate::tlv;
 use crate::zdp;
+use crate::assembly;
 use crate::{assembly::Assembly, auth};
 
 use bytes::BufMut;

@@ -7,7 +7,7 @@
 
 use crate::link_state::{LinkEvent, LinkState};
 use crate::logging;
-use crate::logging::{levels};
+use crate::logging::{levels, targets};
 use crate::prelude::*;
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
