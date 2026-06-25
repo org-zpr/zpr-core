@@ -288,7 +288,7 @@ impl svc::Server for AdminServiceImpl {
     ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Show link procedure initiated");
         let id = params.get()?.get_id();
-        debug!(target: RPC, "Show link id {id} requested");
+        debug!(target: RPC, "Show {} requested", self.asm.formatted_link_id(id));
 
         let mut results_builder = results.get();
         let response = match self.asm.peer_table.get(id) {
@@ -324,7 +324,7 @@ impl svc::Server for AdminServiceImpl {
     ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Start link procedure initiated");
         let id = params.get()?.get_id();
-        debug!(target: RPC, "Start link id {id} requested");
+        debug!(target: RPC, "Start {} requested", self.asm.formatted_link_id(id));
 
         let results_builder = results.get().init_result();
 
@@ -350,7 +350,7 @@ impl svc::Server for AdminServiceImpl {
         info!(target: RPC, "Stop link procedure initiated");
         let task_asm = self.asm.clone();
         let id = params.get()?.get_id();
-        debug!(target: RPC, "Stop link id {id} requested");
+        debug!(target: RPC, "Stop {} requested", self.asm.formatted_link_id(id));
 
         let results_builder = results.get().init_result();
 
@@ -375,7 +375,7 @@ impl svc::Server for AdminServiceImpl {
     ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Reset link procedure initiated");
         let id = params.get()?.get_id();
-        debug!(target: RPC, "Reset link id {id} requested");
+        debug!(target: RPC, "Reset {} requested", self.asm.formatted_link_id(id));
 
         self.asm.reset_peer(id).await;
         Ok(())

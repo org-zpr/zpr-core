@@ -252,8 +252,8 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
         Err(e) => {
             error!(
                 target: KEY_MGMT,
-                "key management handling failed on link {}: {e:?}",
-                pkt.metadata().ingress_link_id,
+                "key management handling failed on {}: {e:?}",
+                asm.formatted_link_id(pkt.metadata().ingress_link_id),
             );
             core::count_event(asm, ManagementCounterType::OtherError);
             return;

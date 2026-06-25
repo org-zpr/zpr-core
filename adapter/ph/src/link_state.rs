@@ -447,10 +447,12 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         match event {
             LinkEvent::ReceivedKeepAliveResponse | LinkEvent::Timeout { .. } => {
-                trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id)
+                trace!(target: LINK_STATE, "{}: *EVENT* {event:?}", asm.formatted_link_id(self.id))
             }
 
-            _ => debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id),
+            _ => {
+                debug!(target: LINK_STATE, "{}: *EVENT* {event:?}", asm.formatted_link_id(self.id))
+            }
         }
 
         match event {
@@ -514,7 +516,7 @@ impl LinkStateWrapper {
         locked_fsm.status = LinkStatus::Up;
         locked_fsm.set_state(LinkState::Keying);
 
-        info!(target: LINK_STATE, "Link {link_id} started.  Keying in progress");
+        info!(target: LINK_STATE, "{} started.  Keying in progress", asm.formatted_link_id(link_id));
 
         match self.link_type {
             LinkType::AdapterToNode => {
@@ -580,7 +582,7 @@ impl LinkStateWrapper {
             let require_ca_signature = asm.config.get().ca_file.is_some();
             let (cert, is_verified) = match peer_cert {
                 PeerCertificate::Unverified(cert) => {
-                    warn!(target: LINK_STATE, "Link {link_id} has unverified name {:?}", cert.subject_name());
+                    warn!(target: LINK_STATE, "{} has unverified name {:?}", asm.formatted_link_id(link_id), cert.subject_name());
                     if require_ca_signature {
                         // If this node has been configured with a CA certificate for checking these things
                         // then these rules kick in:
@@ -607,7 +609,7 @@ impl LinkStateWrapper {
                     (cert, false)
                 }
                 PeerCertificate::Verified(cert) => {
-                    info!(target: LINK_STATE, "Link {link_id} has verified name {:?}", cert.subject_name());
+                    info!(target: LINK_STATE, "{} has verified name {:?}", asm.formatted_link_id(link_id), cert.subject_name());
                     (cert, true)
                 }
             };
@@ -618,7 +620,7 @@ impl LinkStateWrapper {
                 {
                     warn!(
                         target: LINK_STATE,
-                        "Link {link_id} presented unverified certificate claiming special peer name {name:?}; ignoring"
+                        "{} presented unverified certificate claiming special peer name {name:?}; ignoring", asm.formatted_link_id(link_id)
                     );
                 }
             } else {
@@ -628,17 +630,17 @@ impl LinkStateWrapper {
                 {
                     match asm.peer_table.assign_special_name(name, link_id) {
                         Ok(()) => {
-                            info!(target: LINK_STATE, "Link {link_id} assigned special name {name:?}")
+                            info!(target: LINK_STATE, "{} assigned special name {name:?}", asm.formatted_link_id(link_id))
                         }
                         Err(_) => {
-                            warn!(target: LINK_STATE, "Unable to assign link {link_id} special name {name:?}")
+                            warn!(target: LINK_STATE, "Unable to assign {} special name {name:?}", asm.formatted_link_id(link_id))
                         }
                     }
                 }
             }
         }
 
-        debug!(target: LINK_STATE, "Link {link_id} finished keying.  Starting hello");
+        debug!(target: LINK_STATE, "{} finished keying.  Starting hello", asm.formatted_link_id(link_id));
 
         locked_fsm.set_state(LinkState::Helloing);
 
@@ -648,7 +650,7 @@ impl LinkStateWrapper {
             self.set_timeout(asm, &mut locked_fsm, config::LINK_HELLO_TIMEOUT);
             debug!(
                 target: LINK_STATE,
-                "Link {link_id} sent HelloRequest.  Waiting for other side to respond."
+                "{} sent HelloRequest.  Waiting for other side to respond.", asm.formatted_link_id(link_id)
             );
         }
         // Otherwise we are a node so wait for an adapter to reach out
@@ -664,13 +666,13 @@ impl LinkStateWrapper {
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToNode, LinkState::Helloing) => {
                 locked_fsm.set_state(LinkState::Active);
-                debug!(target: LINK_STATE, "Link {link_id} finished helloing.  Becoming active");
+                debug!(target: LINK_STATE, "{} finished helloing.  Becoming active", asm.formatted_link_id(link_id));
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} received hello request",
+                    "{} received hello request", asm.formatted_link_id(link_id)
                 );
 
                 // Reply with a Hello Response.
@@ -683,8 +685,8 @@ impl LinkStateWrapper {
                     let mut address_pool = asm.address_pool.lock().unwrap();
                     if let Some(pool) = address_pool.as_mut() {
                         let aaa_address = pool.get_aaa_address();
-                        debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
-                            pool.len());
+                        debug!(target: LINK_STATE, "{}: HelloResponse - allocated AAA address: {aaa_address} (active pool size: {})",
+                            asm.formatted_link_id(link_id), pool.len());
                         Some(aaa_address)
                     } else {
                         None
@@ -694,7 +696,7 @@ impl LinkStateWrapper {
                     self.process_assigned_aaa(asm, aaa_address)?;
                 } else {
                     // No pool.  Use dummy address.
-                    debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - no AAA pool available, no AAA address assigned");
+                    debug!(target: LINK_STATE, "{}: HelloResponse - no AAA pool available, no AAA address assigned", asm.formatted_link_id(link_id));
                 }
 
                 let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
@@ -715,7 +717,7 @@ impl LinkStateWrapper {
                 self.send_init_authentication_request(asm);
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
+                    "{} finished helloing.  Waiting for other side to respond to init-auth", asm.formatted_link_id(link_id)
                 );
                 Ok(())
             }
@@ -786,7 +788,7 @@ impl LinkStateWrapper {
                 locked_fsm.set_state(LinkState::WaitForInitAuth);
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} finished helloing.  Now waiting for init auth."
+                    "{} finished helloing.  Now waiting for init auth.", asm.formatted_link_id(link_id)
                 );
                 drop(locked_fsm);
                 Ok(())
@@ -796,7 +798,7 @@ impl LinkStateWrapper {
                 link_data.asa_addresses = maybe_asa_addrs.clone();
                 drop(link_data);
                 locked_fsm.set_state(LinkState::Active);
-                debug!(target: LINK_STATE, "Link {link_id} finished helloing.  Becoming active");
+                debug!(target: LINK_STATE, "{} finished helloing.  Becoming active", asm.formatted_link_id(link_id));
                 Ok(())
             }
             (LinkType::NodeToAdapter, _) => {
@@ -852,7 +854,7 @@ impl LinkStateWrapper {
                     IpAddress::UNSPECIFIED
                 } else {
                     // If we have multiple addresses, we cannot handle that. (yet?)
-                    warn!(target: LINK_STATE, "Link {link_id} received acquire request with multiple addresses");
+                    warn!(target: LINK_STATE, "{} received acquire request with multiple addresses", asm.formatted_link_id(link_id));
                     drop(locked_fsm);
                     return self.process_error_response(asm);
                 }
@@ -862,13 +864,13 @@ impl LinkStateWrapper {
 
         debug!(
             target: LINK_STATE,
-            "Link {link_id} received acquire addr request for actor (requested_addr = {requested_addr})."
+            "{} received acquire addr request for actor (requested_addr = {}).", asm.formatted_link_id(link_id), requested_addr
         );
 
         // A self-signed blob needs to be checked before we forward it on.
 
         let Ok(d_blob) = auth::decode_blob(&blob) else {
-            warn!(target: LINK_STATE, "Link {link_id} received acquire request with invalid blob");
+            warn!(target: LINK_STATE, "{} received acquire request with invalid blob", asm.formatted_link_id(link_id));
             drop(locked_fsm);
             return self.process_error_response(asm);
         };
@@ -907,7 +909,7 @@ impl LinkStateWrapper {
                     link_id,
                     LinkEvent::ReceivedAuthorizeResponse(requested_addr),
                 ) {
-                    error!(target: LINK_STATE, "Link {link_id} failed to process authorize response: {e}");
+                    error!(target: LINK_STATE, "{} failed to process authorize response: {e}", asm.formatted_link_id(link_id));
                 }
 
                 Ok(())
@@ -925,11 +927,11 @@ impl LinkStateWrapper {
     ) -> bool {
         // Now check that the CN in the presented blob matches the CN the peer used to establish link.
         let Some(peer_state) = asm.peer_table.get(link_id) else {
-            warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find peer state entry");
+            warn!(target: LINK_STATE, "{} blob check failed: cannot find peer state entry", asm.formatted_link_id(link_id));
             return false;
         };
         let Some(sa) = peer_state.get_established_transport_association() else {
-            warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find SA");
+            warn!(target: LINK_STATE, "{} blob check failed: cannot find SA", asm.formatted_link_id(link_id));
             return false;
         };
 
@@ -941,17 +943,17 @@ impl LinkStateWrapper {
             }
         });
         if key.is_none() {
-            warn!(target: LINK_STATE, "Link {link_id} received acquire request but have no auth key");
+            warn!(target: LINK_STATE, "{} received acquire request but have no auth key", asm.formatted_link_id(link_id));
             return false;
         }
         let key = key.unwrap();
 
         let Some(ref peer_cert) = sa.peer_cert else {
-            warn!(target: LINK_STATE, "Link {link_id} no peer cert found, cannot validate blob");
+            warn!(target: LINK_STATE, "{} no peer cert found, cannot validate blob", asm.formatted_link_id(link_id));
             return false;
         };
         if let Err(e) = ss_blob.verify_blob_challenge(peer_cert.get_cert(), &key) {
-            warn!(target: LINK_STATE, "Link {link_id} challenge verification failed: {e}");
+            warn!(target: LINK_STATE, "{} challenge verification failed: {e}", asm.formatted_link_id(link_id));
             return false;
         }
         true
@@ -979,7 +981,7 @@ impl LinkStateWrapper {
                 match addrs {
                     Some(addrs) => {
                         // TODO: In future we will take addresses from here and configure TUN.
-                        info!(target: LINK_STATE, "Link {link_id} granted ZPR addresses {:?}, becoming ACTIVE", addrs);
+                        info!(target: LINK_STATE, "{} granted ZPR addresses {:?}, becoming ACTIVE", asm.formatted_link_id(link_id), addrs);
 
                         let data = self.locked_data.lock().unwrap();
                         if let Some(aaa_addr) = data.aaa_address {
@@ -991,7 +993,7 @@ impl LinkStateWrapper {
                             {
                                 Ok(()) => {}
                                 Err(e) => {
-                                    warn!(target: LINK_STATE, "Link {link_id} failed to clear AAA address: {e}");
+                                    warn!(target: LINK_STATE, "{} failed to clear AAA address: {e}", asm.formatted_link_id(link_id));
                                     // continue...
                                 }
                             }
@@ -1001,13 +1003,13 @@ impl LinkStateWrapper {
                         // I keep the aaa address around... TODO: should we clear it?
 
                         if addrs.len() > 1 {
-                            warn!(target: LINK_STATE, "Link {link_id} multiple addresses in Grant ZPR Address not supported: using first one only");
+                            warn!(target: LINK_STATE, "{} multiple addresses in Grant ZPR Address not supported: using first one only", asm.formatted_link_id(link_id));
                         }
 
                         // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
                         if let Err(e) = asm.tun_ctl.add_address(addrs[0].into(), ZPRNET_PREFIX_LEN)
                         {
-                            warn!(target: LINK_STATE, "Link {link_id} failed to set ZPR address: {e}");
+                            warn!(target: LINK_STATE, "{} failed to set ZPR address: {e}", asm.formatted_link_id(link_id));
                             locked_fsm.set_state(LinkState::Error);
                             drop(locked_fsm);
                             return self.initiate_close(asm, TerminateReason::Other);
@@ -1019,13 +1021,13 @@ impl LinkStateWrapper {
                         asm.tun_ctl.set_carrier(true).unwrap();
                         debug!(
                             target: LINK_STATE,
-                            "Link {link_id} finished registering actor address: becoming active"
+                            "{} finished registering actor address: becoming active", asm.formatted_link_id(link_id)
                         );
                         self.run_active(asm, locked_fsm)
                     }
                     None => {
                         // Grant failed.
-                        warn!(target: LINK_STATE, "Link {link_id} failed to be granted ZPR address");
+                        warn!(target: LINK_STATE, "{} failed to be granted ZPR address", asm.formatted_link_id(link_id));
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         self.initiate_close(asm, TerminateReason::Other)
@@ -1034,7 +1036,7 @@ impl LinkStateWrapper {
             }
             (LinkType::AdapterToNode, LinkState::Active) => {
                 // Assume this is just a retransmit.
-                debug!(target: LINK_STATE, "Link {link_id} received unsolicited Grant ZPR Address request while already in active, ignoring");
+                debug!(target: LINK_STATE, "{} received unsolicited Grant ZPR Address request while already in active, ignoring", asm.formatted_link_id(link_id));
                 Ok(())
             }
             (_, _) => Err(LinkStateError::InvalidOperation(
@@ -1059,7 +1061,7 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
-        info!(target: LINK_STATE, "Link {} received authorize response with ZPR address {}", self.id, zpr_addr);
+        info!(target: LINK_STATE, "{} received authorize response with ZPR address {}", asm.formatted_link_id(self.id), zpr_addr);
 
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {} // ok
@@ -1078,7 +1080,7 @@ impl LinkStateWrapper {
 
         // Will call back via ReceivedGrantResponse event if successful.
         self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
-        debug!(target: LINK_STATE, "Link {} has ACKd the grant.  Becoming active", self.id);
+        debug!(target: LINK_STATE, "{} has ACKd the grant.  Becoming active", asm.formatted_link_id(self.id));
         self.run_active(asm, locked_fsm)
     }
 
@@ -1112,13 +1114,13 @@ impl LinkStateWrapper {
             // NOTE: This is not exactly right, in general we can get an InitAuth at any time, though we
             // may not want to act on it and sometimes may be a protocol error.
             (LinkType::AdapterToNode, LinkState::WaitForInitAuth) => {
-                debug!(target: LINK_STATE, "Link {link_id} received init auth (bootstrap_supported: {}, bootstrap_configured: {})",
-                    bootstrap, asm.config.get().bootstrap.is_some());
+                debug!(target: LINK_STATE, "{} received init auth (bootstrap_supported: {}, bootstrap_configured: {})",
+                    asm.formatted_link_id(link_id), bootstrap, asm.config.get().bootstrap.is_some());
 
                 // If we can do bootstrap and it is allowed, then do that.
                 if bootstrap && asm.config.get().bootstrap.is_some() {
                     if challenge.is_none() {
-                        error!(target: LINK_STATE, "Link {link_id} received init auth with no challenge");
+                        error!(target: LINK_STATE, "{} received init auth with no challenge", asm.formatted_link_id(link_id));
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::Other);
@@ -1144,7 +1146,7 @@ impl LinkStateWrapper {
                                 );
                             }
                             Err(e) => {
-                                error!(target: LINK_STATE, "Link {link_id} failed to self-authenticate: {e:?}");
+                                error!(target: LINK_STATE, "{} failed to self-authenticate: {e:?}", asm.formatted_link_id(link_id));
                                 // Shutdown the link
                                 locked_fsm.set_state(LinkState::Error);
                                 drop(locked_fsm);
@@ -1155,24 +1157,24 @@ impl LinkStateWrapper {
                 } else {
                     // Bootstrap not allowed or not configured.
                     locked_fsm.set_state(LinkState::RegisterAA);
-                    info!(target: LINK_STATE, "Link {link_id} received init auth, time to talk to authentication service");
+                    info!(target: LINK_STATE, "{} received init auth, time to talk to authentication service", asm.formatted_link_id(link_id));
 
                     // In order to authenticate, we need an ASA address to talk to and an
                     // AAA address to talk from.
                     if aaa_addr.is_none() {
-                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no AAA address configured");
+                        error!(target: LINK_STATE, "{} unable to perform auth: no AAA address configured", asm.formatted_link_id(link_id));
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::Other);
                     }
                     if asa_addrs.is_none() {
-                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no ASA address configured");
+                        error!(target: LINK_STATE, "{} unable to perform auth: no ASA address configured", asm.formatted_link_id(link_id));
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::Other);
                     }
                     if asm.config.get().rsaoauth.is_none() {
-                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no RSA external auth service configured");
+                        error!(target: LINK_STATE, "{} unable to perform auth: no RSA external auth service configured", asm.formatted_link_id(link_id));
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::Other);
@@ -1198,7 +1200,7 @@ impl LinkStateWrapper {
                             self.do_https_authenticate(asm, asa_addrs.unwrap());
                         }
                         Err(e) => {
-                            error!(target: LINK_STATE, "Link {link_id} failed to configure TUN with AAA address: {e}");
+                            error!(target: LINK_STATE, "{} failed to configure TUN with AAA address: {e}", asm.formatted_link_id(link_id));
                             return self.initiate_close(asm, TerminateReason::Other);
                         }
                     }
@@ -1223,7 +1225,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
-                debug!(target: LINK_STATE, "Link {} received init auth ack", self.id);
+                debug!(target: LINK_STATE, "{} received init auth ack", asm.formatted_link_id(self.id));
                 // Now we are waiting on the adapter to perform authentication and
                 // that may involve external services and could be quite slow relative to a
                 // straightforward ZDP response.  So, we set a longer timeout.  We do not retransmit
@@ -1242,7 +1244,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
-                error!(target: LINK_STATE, "Link {} received init auth timeout", self.id);
+                error!(target: LINK_STATE, "{} received init auth timeout", asm.formatted_link_id(self.id));
                 locked_fsm.set_state(LinkState::Error);
                 drop(locked_fsm);
                 self.initiate_close(asm, TerminateReason::RequestTimedOut)
@@ -1281,7 +1283,7 @@ impl LinkStateWrapper {
                 None => {
                     // TODO: Possibly we want to send the Init Authentication message anyway, but
                     //       just not support bootstrap mode.
-                    error!(target: LINK_STATE, "unable to send Init Authentication: no auth key found for link {link_id}");
+                    error!(target: LINK_STATE, "unable to send Init Authentication: no auth key found for {}", asm.formatted_link_id(link_id));
                     if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::Error) {
                         error!(target: LINK_STATE, "event handling error: {e}");
                     }
@@ -1347,10 +1349,10 @@ impl LinkStateWrapper {
         let link_id = self.id;
 
         if asa_addrs.is_empty() {
-            error!(target: LINK_STATE, "Link {link_id}: no ASA addresses provided for authentication");
+            error!(target: LINK_STATE, "{}: no ASA addresses provided for authentication", asm.formatted_link_id(link_id));
             if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::AuthenticationFailure)
             {
-                error!(target: LINK_STATE, "Link {link_id}: event handling error {e}");
+                error!(target: LINK_STATE, "{}: event handling error {e}", asm.formatted_link_id(link_id));
             }
             return;
         }
@@ -1362,23 +1364,23 @@ impl LinkStateWrapper {
         tokio::task::spawn_local(async move {
             let binding = task_asm.config.get();
             let Some(rsauth) = binding.rsaoauth.as_ref() else {
-                error!(target: LINK_STATE, "Link {link_id}: auth requested but no auth service configured");
+                error!(target: LINK_STATE, "{}: auth requested but no auth service configured", task_asm.formatted_link_id(link_id));
                 if let Err(e) =
                     task_asm.process_link_state_event(link_id, LinkEvent::AuthenticationFailure)
                 {
-                    error!(target: LINK_STATE, "Link {link_id}: event handling error {e}");
+                    error!(target: LINK_STATE, "{}: event handling error {e}", task_asm.formatted_link_id(link_id));
                 }
                 return;
             };
             let event = match rsauth.authenticate(service_addr, tls_cert).await {
                 Ok(blob) => LinkEvent::AuthenticationSuccess(blob),
                 Err(e) => {
-                    error!(target: LINK_STATE, "Link {link_id} failed to authenticate with auth service: {e:?}");
+                    error!(target: LINK_STATE, "{}: failed to authenticate with auth service: {e:?}", task_asm.formatted_link_id(link_id));
                     LinkEvent::AuthenticationFailure
                 }
             };
             if let Err(e) = task_asm.process_link_state_event(link_id, event) {
-                error!(target: LINK_STATE, "Link {link_id}: event handling error {e}");
+                error!(target: LINK_STATE, "{}: event handling error {e}", task_asm.formatted_link_id(link_id));
             }
         });
     }
@@ -1389,7 +1391,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.set_state(LinkState::Error);
         drop(locked_fsm);
-        info!(target: LINK_STATE, "Link {link_id} authentication failed");
+        info!(target: LINK_STATE, "{}: authentication failed", asm.formatted_link_id(link_id));
         self.initiate_close(asm, TerminateReason::Other)
     }
 
@@ -1408,13 +1410,14 @@ impl LinkStateWrapper {
 
         if locked_fsm.state != LinkState::RegisterAA {
             error!(
-                "Link {link_id} authentication success ignored in unexpected state {:?}",
+                "{}: authentication success ignored in unexpected state {:?}",
+                asm.formatted_link_id(link_id),
                 locked_fsm.state
             );
             return Ok(());
         }
 
-        info!(target: LINK_STATE, "Link {link_id}: authentication success, client_id={}", blob.client_id);
+        info!(target: LINK_STATE, "{}: authentication success, client_id={}", asm.formatted_link_id(link_id), blob.client_id);
         let blobstr = blob.encode();
         let requested_addrs = asm.get_local_zpr_addrs_std();
         self.send_acquire_zpr_address_request(asm, &requested_addrs, &blobstr);
@@ -1442,7 +1445,8 @@ impl LinkStateWrapper {
     fn process_error_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         asm.counters.management[ManagementCounterType::PeerHandshakeFailure].increment();
-        warn!(target: LINK_STATE, "Link {link_id} bringup failed at state {:?}",
+        warn!(target: LINK_STATE, "{}: bringup failed at state {:?}",
+            asm.formatted_link_id(link_id),
             self.locked_fsm.lock().unwrap().state);
 
         self.initiate_close(&asm, TerminateReason::Other)
@@ -1464,7 +1468,7 @@ impl LinkStateWrapper {
             (LinkType::AdapterToNode, LinkState::RegisterAA)
             | (LinkType::AdapterToNode, LinkState::Helloing) => {
                 // Timeout here means we give up on the link.
-                error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
+                error!(target: LINK_STATE, "{}: timed out in state {:?}", asm.formatted_link_id(self.id), locked_fsm.state);
                 locked_fsm.set_state(LinkState::Error);
                 drop(locked_fsm);
                 return self.initiate_close(asm, TerminateReason::RequestTimedOut);
@@ -1476,7 +1480,7 @@ impl LinkStateWrapper {
                         // there was an outstanding echo, and we've timed out
                         echo_handle.abort();
                         self.locked_data.lock().unwrap().echo_timeout += 1;
-                        error!(target: LINK_STATE, "Link {} failed to respond to keep-alive messages", self.id);
+                        error!(target: LINK_STATE, "{} failed to respond to keep-alive messages", asm.formatted_link_id(self.id));
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::RequestTimedOut);
@@ -1516,7 +1520,7 @@ impl LinkStateWrapper {
             (_, LinkState::Closing) => {
                 // This is a timeout while we are waiting for a terminate response post initiate close.
                 // Now we finish the job,
-                debug!(target: LINK_STATE, "Link {} received timeout waiting on terminate response, shutting down link", self.id);
+                debug!(target: LINK_STATE, "{} received timeout waiting on terminate response, shutting down link", asm.formatted_link_id(self.id));
                 drop(locked_fsm);
                 self.clean_up_link_state(asm).detach_all();
                 Ok(())
@@ -1595,7 +1599,7 @@ impl LinkStateWrapper {
         }
 
         let link_id = self.id;
-        info!(target: LINK_STATE,"Initiating shutdown on link {link_id}");
+        info!(target: LINK_STATE,"Initiating shutdown on {}", asm.formatted_link_id(link_id));
 
         self.maybe_disconnect_visa_service_client(asm, true, reason)
     }
@@ -1604,7 +1608,7 @@ impl LinkStateWrapper {
         let locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::Disconnecting(reason)) => {
-                debug!(target: LINK_STATE, "Link {} received disconnect ack", self.id);
+                debug!(target: LINK_STATE, "{} received disconnect ack", asm.formatted_link_id(self.id));
                 self.continue_close(asm, locked_fsm, reason)
             }
             (_, _) => Err(LinkStateError::InvalidOperation(
@@ -1659,14 +1663,14 @@ impl LinkStateWrapper {
         match locked_fsm.state {
             LinkState::Closing | LinkState::Resetting => {
                 drop(locked_fsm);
-                info!(target: LINK_STATE, "Link {link_id} is clearing its state");
+                info!(target: LINK_STATE, "{} is clearing its state", asm.formatted_link_id(link_id));
 
                 let mut link_data = self.locked_data.lock().unwrap();
                 if let Some(aaa_addr) = link_data.aaa_address.take() {
                     if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
                         match pool.release_address(aaa_addr) {
                             Ok(_) => {
-                                debug!(target: LINK_STATE, "Link {link_id} released AAA address {aaa_addr}")
+                                debug!(target: LINK_STATE, "{} released AAA address {aaa_addr}", asm.formatted_link_id(link_id))
                             }
                             Err(e) => {
                                 error!(target: LINK_STATE, "Failed to release AAA address {aaa_addr}: {e:?}")
@@ -1690,7 +1694,7 @@ impl LinkStateWrapper {
 
                     if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::CloseDone)
                     {
-                        error!(target: LINK_STATE, "Error shutting down link {link_id}: {e:?}");
+                        error!(target: LINK_STATE, "Error shutting down {}: {e:?}", task_asm.formatted_link_id(link_id));
                     }
                 });
             }
@@ -1707,7 +1711,7 @@ impl LinkStateWrapper {
     /// Generates no packets
     fn complete_close(&self, asm: &Arc<Assembly>) {
         let link_id = self.id;
-        info!(target: LINK_STATE, "Shutting down link {link_id}");
+        info!(target: LINK_STATE, "Shutting down {}", asm.formatted_link_id(link_id));
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (locked_fsm.state, self.link_type) {
@@ -1720,7 +1724,7 @@ impl LinkStateWrapper {
             (LinkState::Closing, _) => {
                 locked_fsm.silent = false;
                 locked_fsm.set_state(LinkState::Inactive);
-                info!(target: LINK_STATE, "Link {link_id} has fully shut down");
+                info!(target: LINK_STATE, "{} has fully shut down", asm.formatted_link_id(link_id));
                 if !locked_fsm.shutting_down {
                     drop(locked_fsm);
                     self.setup_restart(asm);
@@ -1732,7 +1736,8 @@ impl LinkStateWrapper {
             _ => {
                 error!(
                     target: LINK_STATE,
-                    "Link {link_id} tried to close from state {:?}",
+                    "{} tried to close from state {:?}",
+                    asm.formatted_link_id(link_id),
                     locked_fsm.state
                 );
             }
@@ -1746,7 +1751,7 @@ impl LinkStateWrapper {
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
             tokio::time::sleep(config::DEFAULT_LINK_RESTART_HOLDDOWN).await;
-            info!(target: LINK_STATE, "Attempting to restart link {link_id}");
+            info!(target: LINK_STATE, "Attempting to restart {}", task_asm.formatted_link_id(link_id));
             let _ = task_asm.process_link_state_event(link_id, LinkEvent::Start);
         });
     }
@@ -1757,7 +1762,8 @@ impl LinkStateWrapper {
     pub async fn reset(&self, asm: &Arc<Assembly>) {
         let link_id = self.id;
         info!(target: LINK_STATE,
-            "Resetting link {link_id} from state {:?}",
+            "Resetting {} from state {:?}",
+            asm.formatted_link_id(link_id),
             self.locked_fsm.lock().unwrap().state
         );
         self.locked_fsm
@@ -1778,7 +1784,7 @@ impl LinkStateWrapper {
     /// before we proceed with shutting down the link.
     fn process_terminate_ack(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
-        info!(target: LINK_STATE,"Received terminate response for link {link_id}");
+        info!(target: LINK_STATE,"Received terminate response for {}", asm.formatted_link_id(link_id));
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match locked_fsm.state {
             LinkState::Closing => {
@@ -1806,7 +1812,7 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,
-            "Received terminate for link {link_id} with reason {reason:?}"
+            "Received terminate for {} with reason {:?}", asm.formatted_link_id(link_id), reason
         );
         self.locked_fsm
             .lock()
@@ -1856,7 +1862,7 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         locked_fsm.set_state(LinkState::Active);
         asm.counters.management[ManagementCounterType::PeerHandshakeSuccess].increment();
-        debug!(target: LINK_STATE, "Link {} entering active state", self.id);
+        debug!(target: LINK_STATE, "{} entering active state", asm.formatted_link_id(self.id));
 
         // kick off our keepalive mechanism
         locked_fsm.echo_handle.take().inspect(|(_, h)| h.abort()); // should already be None (indicating no echo outstanding) but let's be sure
@@ -1875,14 +1881,14 @@ fn get_available_asa_addresses(asm: &Assembly, link_id: LinkId) -> Vec<SocketAdd
         // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
         for authservice in &svclist.services {
             if let Some(sa) = authservice.get_socket_addr() {
-                debug!(target: LINK_STATE, "Link {link_id}: HelloResponse - adding ASA address: {sa}");
+                debug!(target: LINK_STATE, "{}: HelloResponse - adding ASA address: {sa}", asm.formatted_link_id(link_id));
                 asa_addresses.push(sa);
             } else {
-                warn!(target: LINK_STATE, "Link {link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
+                warn!(target: LINK_STATE, "{}: HelloResponse - service {} has no valid ASA address", asm.formatted_link_id(link_id), authservice.service_id);
             }
         }
     } else {
-        warn!(target: LINK_STATE, "Link {link_id}: HelloResponse - no valid auth services available");
+        warn!(target: LINK_STATE, "{}: HelloResponse - no valid auth services available", asm.formatted_link_id(link_id));
     }
 
     asa_addresses

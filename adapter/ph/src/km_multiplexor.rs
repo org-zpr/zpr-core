@@ -99,33 +99,33 @@ pub async fn launch_signal_worker(
                         if let Some(km) = asm.peer_table.clone_km_manager(*link_id) {
                             match km.restart() {
                                 Ok(_) => {
-                                    debug!(target: KEY_MGMT, "multiplexor: restarted key manager on link {link_id} (error_count = {})", stat.error_count);
+                                    debug!(target: KEY_MGMT, "multiplexor: restarted key manager on {} (error_count = {})", asm.formatted_link_id(*link_id), stat.error_count);
                                     stat.restart_t = now;
                                 }
                                 Err(e) => {
-                                    error!(target: KEY_MGMT, "multiplexor: failed to restart KM on link {link_id}: {e:?}");
+                                    error!(target: KEY_MGMT, "multiplexor: failed to restart KM on {}: {e:?}", asm.formatted_link_id(*link_id));
                                     stat.error_count += 1;
                                 }
                             }
                         } else {
-                            error!(target: KEY_MGMT, "multiplexor: unable to restart key manager on link {link_id}: not found in peer table");
+                            error!(target: KEY_MGMT, "multiplexor: unable to restart key manager on {}: not found in peer table", asm.formatted_link_id(*link_id));
                         }
                     }
                 }
             }
 
             Some(linkmsg) = sig_queue.recv() => {
-                debug!(target: KEY_MGMT, "multiplexor: link: {}, signal {:?}", linkmsg.link_id, linkmsg.msg);
+                debug!(target: KEY_MGMT, "multiplexor: {}, signal {:?}", asm.formatted_link_id(linkmsg.link_id), linkmsg.msg);
                 match linkmsg.msg {
                     KmSignal::SaIdChange { old, new } => {
-                        debug!(target: KEY_MGMT, "multiplexor: SA ID change on link {}: {} -> {}", linkmsg.link_id, old, new);
+                        debug!(target: KEY_MGMT, "multiplexor: SA ID change on {}: {} -> {}", asm.formatted_link_id(linkmsg.link_id), old, new);
                         if old == 0 {
                             let _ = status.remove(&linkmsg.link_id);
                         }
                     }
                     KmSignal::SaEstablished(sa) => {
-                        debug!(target: KEY_MGMT, "multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
-                            linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
+                        debug!(target: KEY_MGMT, "multiplexor: {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
+                            asm.formatted_link_id(linkmsg.link_id), sa.send_zpis, sa.recv_zpis);
                         match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
                             Ok(_) => (),
                             Err(e) => {
@@ -163,11 +163,11 @@ pub async fn launch_signal_worker(
                         };
                         stat.error_count += 1;
                         stat.last_error_t = time::Instant::now();
-                        warn!(target: KEY_MGMT, "multiplexor: Error signal on link {}", linkmsg.link_id);
+                        warn!(target: KEY_MGMT, "multiplexor: Error signal on {}", asm.formatted_link_id(linkmsg.link_id));
                     }
                     KmSignal::Termination => {
                         let _ = status.remove(&linkmsg.link_id);
-                        debug!(target: KEY_MGMT, "multiplexor: termination signal on link {}", linkmsg.link_id);
+                        debug!(target: KEY_MGMT, "multiplexor: termination signal on {}", asm.formatted_link_id(linkmsg.link_id));
                     }
                 }
             }
@@ -259,7 +259,7 @@ pub async fn drop_link(asm: &Arc<Assembly>, link_id: LinkId) {
         match kmh.join_handle.await {
             Ok(_) => (),
             Err(e) => {
-                error!(target: KEY_MGMT, "statemachine shutdown join failed on link {link_id}: {e:?}");
+                error!(target: KEY_MGMT, "statemachine shutdown join failed on {}: {e:?}", asm.formatted_link_id(link_id));
             }
         }
     }

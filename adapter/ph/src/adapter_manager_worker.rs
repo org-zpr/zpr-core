@@ -49,14 +49,14 @@ fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     };
 
     if !peer_state.link_state_machine.is_ready() {
-        debug!(target: FLOW_MGMT, "Link {dock_link_id} is not ready to receive traffic yet");
+        debug!(target: FLOW_MGMT, "{} is not ready to receive traffic yet", asm.formatted_link_id(dock_link_id));
         mgmt::core::count_event(asm, ManagementCounterType::DroppedNoSA);
         return;
     }
 
     // try open a transaction on the link; if we can't due to backpressure, don't wait, just give up
     let Some(txn) = peer_state.txn_mgr.try_open() else {
-        debug!(target: FLOW_MGMT, "link {dock_link_id}: backpressure on link prevents issuing bind request for {five_tuple}");
+        debug!(target: FLOW_MGMT, "{}: backpressure on link prevents issuing bind request for {five_tuple}", asm.formatted_link_id(dock_link_id));
         mgmt::core::count_event(asm, ManagementCounterType::QueueBackpressure);
         return;
     };
@@ -82,7 +82,7 @@ fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
         }
     }
 
-    debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
+    debug!(target: FLOW_MGMT, "{}: Issuing bind request for {five_tuple} (is now set PENDING)", asm.formatted_link_id(dock_link_id));
 
     match asm.ph_mode {
         PhMode::Adapter => {

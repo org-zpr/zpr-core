@@ -158,14 +158,14 @@ pub async fn handle_init_authentication_request(
             warn!(target: ZDP, "packet too short for payload");
             return Err(HandleMgmtError::BadStructure);
         }
-        debug!(target: ZDP, "Received Init Authentication +bootstrap for link {ingress_link_id}");
+        debug!(target: ZDP, "Received Init Authentication +bootstrap for {}", asm.formatted_link_id(ingress_link_id));
 
         let Ok(payload) = auth::ZdpInitAuthenticationPayload::read_from_buf(&mut pkt) else {
             return Err(HandleMgmtError::BadStructure);
         };
         challenge_opt = Some(payload);
     } else {
-        debug!(target: ZDP, "Received Init Authentication for link {ingress_link_id} -- bootstrap not supported");
+        debug!(target: ZDP, "Received Init Authentication for {} -- bootstrap not supported", asm.formatted_link_id(ingress_link_id));
         challenge_opt = None;
     }
 
@@ -191,7 +191,7 @@ pub async fn handle_terminate_link_or_docking_session(
         return Err(HandleMgmtError::BadStructure);
     };
 
-    info!(target: ZDP, "Received Terminate Link or Docking Session for link {ingress_link_id}");
+    info!(target: ZDP, "Received Terminate Link or Docking Session for {}", asm.formatted_link_id(ingress_link_id));
 
     asm.process_link_state_event(
         ingress_link_id,
@@ -207,15 +207,15 @@ pub async fn handle_terminate_link_or_docking_session(
 pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     if asm.ph_mode != PhMode::Node {
-        warn!(target: ZDP, "Link {ingress_link_id} received Hello Request but not in node mode");
+        warn!(target: ZDP, "{} received Hello Request but not in node mode", asm.formatted_link_id(ingress_link_id));
         return Err(HandleMgmtError::MessageNotPermitted);
     }
-    debug!(target: ZDP, "Received Hello Request for link {ingress_link_id}");
+    debug!(target: ZDP, "Received Hello Request for {}", asm.formatted_link_id(ingress_link_id));
 
     let tlv_data = match tlv::parse_from_buf(&mut pkt) {
         Ok(data) => data,
         Err(_) => {
-            error!(target: ZDP, "Link {ingress_link_id}: Failed to parse HelloRequest TLV data");
+            error!(target: ZDP, "{}: Failed to parse HelloRequest TLV data", asm.formatted_link_id(ingress_link_id));
             return Err(HandleMgmtError::BadStructure);
         }
     };
@@ -228,7 +228,8 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
             }
             _ => {
                 info!(
-                    "Link {ingress_link_id}: HelloRequest includes ignored TLV type: {tlv_type} => {tlv_value:?}"
+                    "{}: HelloRequest includes ignored TLV type: {tlv_type} => {tlv_value:?}",
+                    asm.formatted_link_id(ingress_link_id)
                 );
             }
         }
@@ -246,14 +247,14 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 
     let link_id = pkt.metadata().ingress_link_id;
     let status = hdr.status;
-    debug!(target: ZDP, "Link {link_id}: received HelloResponse, status: {status:?}");
+    debug!(target: ZDP, "{}: received HelloResponse, status: {status:?}", asm.formatted_link_id(link_id));
 
     // Following status are the TLVs.
     // A tlv has a type (number) and a value.
     let tlv_data = match tlv::parse_from_buf(&mut pkt) {
         Ok(data) => data,
         Err(e) => {
-            error!(target: ZDP, "Link {link_id}: HelloResponse - failed to parse TLVs: {:?}", e);
+            error!(target: ZDP, "{}: HelloResponse - failed to parse TLVs: {:?}", asm.formatted_link_id(link_id), e);
             return Err(HandleMgmtError::BadStructure);
         }
     };
@@ -265,23 +266,23 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
     for (tlv_type, tlv_value) in &tlv_data {
         match tlv_type {
             &tlv::DataType::VERSION => {
-                info!(target: ZDP, "Link {link_id}: HelloResponse - peer version is : {}", tlv_value[0]);
+                info!(target: ZDP, "{}: HelloResponse - peer version is : {}", asm.formatted_link_id(link_id), tlv_value[0]);
             }
             &tlv::DataType::WINDOW_SIZE => {
                 process_window_size_tlv(&asm, link_id, "HelloResponse", tlv_value)?;
             }
             &tlv::DataType::POLICY_ID => {
-                info!(target: ZDP, "Link {link_id}: HelloResponse - peer policy ID is : {}", tlv_value[0]);
+                info!(target: ZDP, "{}: HelloResponse - peer policy ID is : {}", asm.formatted_link_id(link_id), tlv_value[0]);
             }
             &tlv::DataType::ASA => {
                 for asa_entry in tlv_value {
                     match asa_entry {
                         tlv::TlvValue::SocketAddr(sa) => {
-                            info!(target: ZDP, "Link {link_id}: HelloResponse includes ASA address:{sa}");
+                            info!(target: ZDP, "{}: HelloResponse includes ASA address:{sa}", asm.formatted_link_id(link_id));
                             asa_addresses.push(sa.clone());
                         }
                         _ => {
-                            warn!(target: ZDP, "Link {link_id}: HelloResponse ASA value type is wrong: {asa_entry:?}");
+                            warn!(target: ZDP, "{}: HelloResponse ASA value type is wrong: {asa_entry:?}", asm.formatted_link_id(link_id));
                             return Err(HandleMgmtError::BadStructure);
                         }
                     }
@@ -290,27 +291,27 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
             &tlv::DataType::AAA => {
                 for aaa_entry in tlv_value {
                     if aaa_address.is_some() {
-                        warn!(target: ZDP, "Link {link_id}: HelloResponse includes multiple AAA addresses");
+                        warn!(target: ZDP, "{}: HelloResponse includes multiple AAA addresses", asm.formatted_link_id(link_id));
                         return Err(HandleMgmtError::BadStructure);
                     }
                     match aaa_entry {
                         tlv::TlvValue::Ipv4Addr(ipa) => {
-                            info!(target: ZDP, "Link {link_id}: HelloResponse includes AAA address:{ipa}");
+                            info!(target: ZDP, "{}: HelloResponse includes AAA address:{ipa}", asm.formatted_link_id(link_id));
                             aaa_address = Some(IpAddress::new_from_std_v4(ipa));
                         }
                         tlv::TlvValue::Ipv6Addr(ipa) => {
-                            info!(target: ZDP, "Link {link_id}: HelloResponse includes AAA address:{ipa}");
+                            info!(target: ZDP, "{}: HelloResponse includes AAA address:{ipa}", asm.formatted_link_id(link_id));
                             aaa_address = Some(IpAddress::new_from_std_v6(ipa));
                         }
                         _ => {
-                            warn!(target: ZDP, "Link {link_id}: HelloResponse AAA value type is wrong: {aaa_entry:?}");
+                            warn!(target: ZDP, "{}: HelloResponse AAA value type is wrong: {aaa_entry:?}", asm.formatted_link_id(link_id));
                             return Err(HandleMgmtError::BadStructure);
                         }
                     }
                 }
             }
             _ => {
-                info!(target: ZDP, "Link {link_id}: HelloResponse includes ignored TLV type: {tlv_type}, continuing");
+                info!(target: ZDP, "{}: HelloResponse includes ignored TLV type: {tlv_type}, continuing", asm.formatted_link_id(link_id));
             }
         }
     }
@@ -318,11 +319,11 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
     if aaa_address.is_none() {
         // Pretty sure only happens if node has no AAA pool from VS yet.
         // Not an issue unless this adapter needs to talk to an authentication service.
-        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include AAA");
+        warn!(target: ZDP, "{}: HelloResponse did not include AAA", asm.formatted_link_id(link_id));
     }
 
     let maybe_asa_addrs = if asa_addresses.is_empty() {
-        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include ASA");
+        warn!(target: ZDP, "{}: HelloResponse did not include ASA", asm.formatted_link_id(link_id));
         None
     } else {
         Some(asa_addresses)
@@ -346,9 +347,9 @@ fn process_window_size_tlv(
         match window_size_entry {
             tlv::TlvValue::U16(window_size) => {
                 if *window_size < 1 {
-                    warn!(target: ZDP, "Link {link_id}: {message_name} window size is invalid: {window_size}");
+                    warn!(target: ZDP, "{}: {message_name} window size is invalid: {window_size}", asm.formatted_link_id(link_id));
                 } else {
-                    info!(target: ZDP, "Link {link_id}: Applying window size {window_size} from {message_name}");
+                    info!(target: ZDP, "{}: Applying window size {window_size} from {message_name}", asm.formatted_link_id(link_id));
                     asm.peer_table.inspect(link_id, |ps| {
                         ps.zdpr_send
                             .lock()
@@ -358,7 +359,7 @@ fn process_window_size_tlv(
                 }
             }
             _ => {
-                warn!(target: ZDP, "Link {link_id}: {message_name} window size type is wrong: {window_size_entry:?}");
+                warn!(target: ZDP, "{}: {message_name} window size type is wrong: {window_size_entry:?}", asm.formatted_link_id(link_id));
                 return Err(HandleMgmtError::BadStructure);
             }
         }
@@ -390,14 +391,14 @@ pub async fn handle_acquire_zpr_address_request(
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let Ok((actor_addresses, blob)) = parse_acquire_zpr_address_request(&mut pkt) else {
-        error!(target: ZDP, "Link {ingress_link_id} Failed to parse Acquire Zpr Address Request message");
+        error!(target: ZDP, "{} Failed to parse Acquire Zpr Address Request message", asm.formatted_link_id(ingress_link_id));
         return Err(HandleMgmtError::BadStructure);
     };
 
     // Now we can do our async prcessing of the acquire which will involve talking to
     // the visa service.
 
-    debug!(target: ZDP, "Link {}: received Acquire ZPR Address Request for link with addresses {:?}", ingress_link_id, actor_addresses);
+    debug!(target: ZDP, "{}: received Acquire ZPR Address Request for link with addresses {:?}", asm.formatted_link_id(ingress_link_id), actor_addresses);
 
     asm.process_link_state_event(
         ingress_link_id,
@@ -428,7 +429,7 @@ pub async fn handle_grant_zpr_address_request(
                 return Err(HandleMgmtError::BadStructure);
             } else {
                 info!(target: ZDP,
-                    "Received Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
+                    "Received Grant Zpr Address Request for {} with addresses {:?}", asm.formatted_link_id(ingress_link_id), actor_addresses);
                 grant_event_payload = Some(actor_addresses);
             }
         }
@@ -596,7 +597,7 @@ pub async fn handle_bind_actor_address_request(
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     if !matches!(asm.ph_mode, PhMode::Node) {
-        error!(target: ZDP, "Link {}: received BindActorAddress message on adapter", pkt.metadata().ingress_link_id);
+        error!(target: ZDP, "{}: received BindActorAddress message on adapter", asm.formatted_link_id(pkt.metadata().ingress_link_id));
         return Err(HandleMgmtError::MessageNotPermitted);
     }
 
@@ -620,7 +621,7 @@ pub async fn handle_bind_actor_address_request(
         return Ok(());
     };
 
-    debug!(target: ZDP, "Link {ingress_link_id}: handlers.handle_bind_actor_address_request");
+    debug!(target: ZDP, "{}: handlers.handle_bind_actor_address_request", asm.formatted_link_id(ingress_link_id.get()));
 
     dock::bind_actor_address(asm, ingress_link_id, txn_id, l3_type, pkt.body());
 
@@ -633,7 +634,7 @@ pub async fn handle_bind_egress_stream_request(
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     if !matches!(asm.ph_mode, PhMode::Adapter) {
-        error!(target: ZDP, "Link {}: received BindEgressStream message on node", pkt.metadata().ingress_link_id);
+        error!(target: ZDP, "{}: received BindEgressStream message on node", asm.formatted_link_id(pkt.metadata().ingress_link_id));
         return Err(HandleMgmtError::MessageNotPermitted);
     }
 
@@ -642,7 +643,7 @@ pub async fn handle_bind_egress_stream_request(
     };
 
     if !matches!(hdr.tcst, Tcst::Ip5Tuple) {
-        warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, hdr.tcst.0);
+        warn!(target: ZDP, "{}: unsupported TCST {}", asm.formatted_link_id(pkt.metadata().ingress_link_id), hdr.tcst.0);
         return Err(HandleMgmtError::BadStructure);
     }
 
@@ -658,8 +659,8 @@ pub async fn handle_bind_egress_stream_request(
 
     debug!(
         target: ZDP,
-        "Link {}: handlers.handle_bind_egress_stream_request -- five_tuple {}",
-        ingress_link_id.get(), tc.five_tuple()
+        "{}: handlers.handle_bind_egress_stream_request -- five_tuple {}",
+        asm.formatted_link_id(ingress_link_id.get()), tc.five_tuple()
     );
 
     adapter::bind_egress_stream(asm, ingress_link_id, txn_id, tc);
@@ -695,7 +696,7 @@ pub async fn handle_bind_actor_address_response(
             };
 
             if !matches!(tcst, Tcst::Ip5Tuple) {
-                warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, tcst.0);
+                warn!(target: ZDP, "{}: unsupported TCST {}", asm.formatted_link_id(pkt.metadata().ingress_link_id), tcst.0);
                 return Err(HandleMgmtError::BadStructure);
             }
 
@@ -785,7 +786,7 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
     match (link_type, ingress_link_id.get()) {
         (LinkType::NodeToAdapter, _) | (LinkType::Internal, LOCAL_ACTOR_LINK_ID) => {
             // We are the node
-            debug!(target: ZDP, "Link {ingress_link_id}: unbind actor address, node -> adapter");
+            debug!(target: ZDP, "{}: unbind actor address, node -> adapter", asm.formatted_link_id(ingress_link_id.get()));
             // Remove from PFT
             dock::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
         }
@@ -793,8 +794,8 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
             // We are the adapter
             debug!(
                 target: ZDP,
-                "Link {}: unbind egress stream, adapter -> node",
-                ingress_link_id.get()
+                "{}: unbind egress stream, adapter -> node",
+                asm.formatted_link_id(ingress_link_id.get())
             );
             // Remove from DLT
             adapter::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
@@ -802,16 +803,16 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
         (LinkType::NodeToNode, _) => {
             debug!(
                 target: ZDP,
-                "Link {}: node -> node UNIMPLEMENTED",
-                ingress_link_id.get()
+                "{}: node -> node UNIMPLEMENTED",
+                asm.formatted_link_id(ingress_link_id.get())
             );
             return Err(HandleMgmtError::MessageNotPermitted);
         }
         (LinkType::Internal, _) => {
             error!(
                 target: ZDP,
-                "Link {}: internal",
-                ingress_link_id.get()
+                "{}: internal",
+                asm.formatted_link_id(ingress_link_id.get())
             );
             return Err(HandleMgmtError::MessageNotPermitted);
         }

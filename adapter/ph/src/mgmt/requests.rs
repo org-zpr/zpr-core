@@ -112,7 +112,7 @@ pub fn send_init_authentication_request(
     flags: u8,
     payload: auth::ZdpInitAuthenticationPayload,
 ) -> Sent<'_> {
-    debug!(target: ZDP, "Link {link_id}: sending InitAuthenticationRequest, flags: {flags:x?}");
+    debug!(target: ZDP, "{}: sending InitAuthenticationRequest, flags: {flags:x?}", asm.formatted_link_id(link_id));
 
     let mut req = core::new_heap_packet();
 
@@ -205,7 +205,7 @@ pub fn send_grant_zpr_address_request<'a>(
     status_code: zdp::ResponseCode,
     actor_addrs: &'_ [IpAddr],
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id} - sending GrantZprAddressRequest, status: {status_code:?}");
+    debug!(target: ZDP, "{} - sending GrantZprAddressRequest, status: {status_code:?}", asm.formatted_link_id(link_id));
 
     let mut req = core::new_heap_packet();
 
@@ -271,7 +271,7 @@ pub fn send_bind_actor_address_request<'a>(
     l3_type: L3Type,
     packet_body: &[u8],
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest with packet_body size {}", packet_body.len());
+    debug!(target: ZDP, "{}: sending BindActorAddressRequest with packet_body size {}", asm.formatted_link_id(link_id), packet_body.len());
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindActorAddressRequestHeader>();
@@ -300,7 +300,7 @@ pub fn send_bind_actor_address_success_response<'a>(
     tether_id: StreamId,
     tc: tc::Ip5TupleTc,
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending BindActorAddressResponse [success] for {txn_id}");
+    debug!(target: ZDP, "{}: sending BindActorAddressResponse [success] for {txn_id}", asm.formatted_link_id(link_id));
 
     let mut rsp_pkt = core::new_heap_packet();
 
@@ -330,7 +330,7 @@ pub fn send_bind_actor_address_error_response<'a>(
     txn_id: TxnId,
     reason: &str,
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending BindActorAddressResponse [error] for {txn_id}");
+    debug!(target: ZDP, "{}: sending BindActorAddressResponse [error] for {txn_id}", asm.formatted_link_id(link_id));
 
     let mut rsp_pkt = core::new_heap_packet();
 
@@ -361,7 +361,7 @@ pub fn send_bind_egress_stream_request<'a>(
     txn_id: TxnId,
     tc: tc::Ip5TupleTc,
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {tc}");
+    debug!(target: ZDP, "{}: sending BindEgressStreamRequest for {tc}", asm.formatted_link_id(link_id));
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
@@ -384,7 +384,7 @@ pub fn send_bind_egress_stream_success_response<'a>(
     txn_id: TxnId,
     tether_id: StreamId,
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending BindEgressStreamResponse [success] for {txn_id}");
+    debug!(target: ZDP, "{}: sending BindEgressStreamResponse [success] for {txn_id}", asm.formatted_link_id(link_id));
 
     let mut rsp_pkt = core::new_heap_packet();
 
@@ -411,7 +411,7 @@ pub fn send_bind_egress_stream_error_response<'a>(
     txn_id: TxnId,
     reason: &str,
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending BindEgressStreamResponse [error] for {txn_id}");
+    debug!(target: ZDP, "{}: sending BindEgressStreamResponse [error] for {txn_id}", asm.formatted_link_id(link_id));
 
     let mut rsp_pkt = core::new_heap_packet();
     let max_sz = u8::MAX as usize;
@@ -454,7 +454,7 @@ pub fn send_unbind_egress_stream_request<'a>(
     link_id: LinkId,
     stream_id: StreamId,
 ) -> Sent<'a> {
-    debug!(target: ZDP, "Link {link_id}: sending UnbindEgressStreamIndication");
+    debug!(target: ZDP, "{}: sending UnbindEgressStreamIndication", asm.formatted_link_id(link_id));
 
     let req = core::new_heap_packet();
 

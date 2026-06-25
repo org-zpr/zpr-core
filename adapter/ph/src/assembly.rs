@@ -21,6 +21,7 @@ use crate::zdpr_worker;
 use km_noise::NoiseKeypair;
 use rcu;
 use std::collections::HashMap;
+use std::fmt::{Error, Formatter};
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::result::Result;
@@ -155,7 +156,7 @@ impl Assembly {
                 .link_state_machine
                 .process_event(self, LinkEvent::Close(TerminateReason::Shutdown))
             {
-                error!(target: PEER_MGMT, "Failed to nicely close peer {peer_id}: {e}");
+                error!(target: PEER_MGMT, "Failed to nicely close peer {}: {e}", self.formatted_link_id(peer_id.get()));
                 // So try harder...
                 let spawn_self = self.clone();
                 join_set.spawn_local(async move { spawn_self.reset_peer(peer_id.get()).await });
@@ -289,9 +290,9 @@ impl Assembly {
             .peer_table
             .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
         if vs_link_id.is_some() && link_id == vs_link_id.unwrap().get() {
-            debug!(target: PEER_MGMT, "Removing peer {link_id} [VISA SERVICE]");
+            debug!(target: PEER_MGMT, "Removing peer {} [VISA SERVICE]", self.formatted_link_id(link_id));
         } else {
-            debug!(target: PEER_MGMT, "Removing peer {link_id}");
+            debug!(target: PEER_MGMT, "Removing peer {}", self.formatted_link_id(link_id));
         }
         if self.ph_mode == PhMode::Node {
             self.visa_table
@@ -300,7 +301,7 @@ impl Assembly {
                 .revoke_for_link(link_id, &self.peer_table);
         }
         self.peer_table.remove(link_id);
-        info!(target: PEER_MGMT, "Removed peer {link_id}");
+        info!(target: PEER_MGMT, "Removed peer {}", self.formatted_link_id(link_id));
     }
 
     /// Part of graceful shutdown (or administrative link shutdown).
@@ -348,13 +349,13 @@ impl Assembly {
             .link_state_machine
             .process_event(self, LinkEvent::Start)
         {
-            error!(target: PEER_MGMT, "Link {peer_id} failed to start with error {e}.  Resetting");
+            error!(target: PEER_MGMT, "{} failed to start with error {e}.  Resetting", self.formatted_link_id(peer_id.get()));
             peer.link_state_machine
                 .process_event(self, LinkEvent::Error)
                 .expect("This shouldn't error!");
             return Err(PeerInsertError::FailedToStart(e.to_string()));
         } else {
-            info!(target: PEER_MGMT, "Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
+            info!(target: PEER_MGMT, "Successfully started tether with {adapter_addr}.  Assigned ID {}", self.formatted_link_id(peer_id.get()));
         }
 
         return Ok(peer_id);
@@ -382,6 +383,22 @@ impl Assembly {
                     .any(|addr| *addr == actor_addr)
             })
             .map(|(id, _peer)| id)
+    }
+
+    // Formats link IDs for display purposes
+    pub fn format_link_id(&self, link_id: LinkId, f: &mut Formatter<'_>) -> Result<(), Error> {
+        match link_id {
+            0 => f.write_str("unknown link")?,
+            1 => f.write_str("adapter link")?,
+            2 => f.write_str("dock link")?,
+            _ => write!(f, "link {}", link_id)?,
+        }
+        Ok(())
+    }
+
+    /// Returns a formatted string for the given link ID
+    pub fn formatted_link_id(&self, link_id: LinkId) -> impl std::fmt::Display {
+        std::fmt::from_fn(move |f| self.format_link_id(link_id, f))
     }
 }
 

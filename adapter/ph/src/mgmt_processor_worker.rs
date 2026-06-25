@@ -37,9 +37,9 @@ pub async fn launch(
                     Ok(()) => (),
                     Err(err) => {
                         let link_id = config.link_id.get();
-                        error!(target: ZDP, "Error handling packet received on link {link_id}: {err}");
+                        error!(target: ZDP, "Error handling packet received on {}: {err}", asm.formatted_link_id(link_id));
                         if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::Error) {
-                            error!(target: LINK_STATE, "Error handling link error on link {link_id}: {e}");
+                            error!(target: LINK_STATE, "Error handling link error on {}: {e}", asm.formatted_link_id(link_id));
                         }
                         mgmt::core::count_event(&asm, (&err).into());
                     }
@@ -66,8 +66,8 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         ZdpPacketType::Echo => {
             trace!(
                 target: ZDP,
-                "Link {}: handling mgmt message type {:?} seq_num {seq_num}",
-                pkt.metadata().ingress_link_id,
+                "{}: handling mgmt message type {:?} seq_num {seq_num}",
+                asm.formatted_link_id(pkt.metadata().ingress_link_id),
                 base_hdr.packet_type,
 
             );
@@ -75,8 +75,8 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         _ => {
             debug!(
                 target: ZDP,
-                "Link {}: handling mgmt message type {:?} seq_num {seq_num}",
-                pkt.metadata().ingress_link_id,
+                "{}: handling mgmt message type {:?} seq_num {seq_num}",
+                asm.formatted_link_id(pkt.metadata().ingress_link_id),
                 base_hdr.packet_type,
             );
         }

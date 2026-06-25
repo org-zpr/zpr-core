@@ -200,8 +200,8 @@ impl FastpathWorker {
         if zpi_hdr.zpi == ZPI_0 && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
             warn!(
                 target: DATAPATH,
-                "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
-                pkt.metadata().ingress_link_id,
+                "ingress: {}: ZPI 0 only allows key management messages, not {:?}",
+                self.asm.formatted_link_id(pkt.metadata().ingress_link_id),
                 base_hdr.packet_type
             );
             self.drop_and_count(pkt, FastpathCounterType::OtherError);
@@ -456,19 +456,23 @@ impl FastpathWorker {
     pub fn substrate_egress(&mut self, mut pkt: Packet) {
         let link_id = pkt.metadata().egress_link_id;
 
-        let (dest_sa, src_intf) =
-            match substrate_egress_common(&self.asm, link_id, &mut pkt, &self.batch_counters) {
-                Ok(Some((dest_sa, src_intf))) => (dest_sa, src_intf),
-                Ok(None) => {
-                    self.drop_and_count(pkt, FastpathCounterType::PeerRemoved);
-                    return;
-                }
-                Err(err) => {
-                    error!(target: DATAPATH, "egress: link {link_id}: encryption error: {err}");
-                    self.drop_and_count(pkt, FastpathCounterType::EncryptionFailure);
-                    return;
-                }
-            };
+        let (dest_sa, src_intf) = match substrate_egress_common(
+            &self.asm,
+            link_id,
+            &mut pkt,
+            &self.batch_counters,
+        ) {
+            Ok(Some((dest_sa, src_intf))) => (dest_sa, src_intf),
+            Ok(None) => {
+                self.drop_and_count(pkt, FastpathCounterType::PeerRemoved);
+                return;
+            }
+            Err(err) => {
+                error!(target: DATAPATH, "egress: {}: encryption error: {err}", self.asm.formatted_link_id(link_id));
+                self.drop_and_count(pkt, FastpathCounterType::EncryptionFailure);
+                return;
+            }
+        };
 
         assert!(!dest_sa.ip().is_unspecified());
         assert!(!src_intf.ip().is_unspecified());
@@ -728,8 +732,8 @@ fn decrypt_with_sa(
         // We have an SA and ZPI does not match.
         warn!(
             target: DATAPATH,
-            "ingress: link {}: unexpected ZPI value {} (expected {:?})",
-            pkt.metadata().ingress_link_id,
+            "ingress: {}: unexpected ZPI value {} (expected {:?})",
+            asm.formatted_link_id(pkt.metadata().ingress_link_id),
             zpi_hdr.zpi,
             transport_sa.recv_zpis
         );
@@ -756,7 +760,7 @@ fn decrypt(
                 }
                 None => {
                     // Either no security association on link, or it is not yet established.
-                    debug!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
+                    debug!(target: DATAPATH, "INSECURE, no SA on {}", asm.formatted_link_id(pkt.metadata().ingress_link_id));
                 }
             }
         }
@@ -765,7 +769,7 @@ fn decrypt(
             debug!(
                 target: DATAPATH,
                 "INSECURE, no link in peer table for {}",
-                pkt.metadata().ingress_link_id
+                asm.formatted_link_id(pkt.metadata().ingress_link_id)
             );
         }
     }
@@ -776,7 +780,7 @@ fn decrypt(
         warn!(
             target: DATAPATH,
             "ingress: {}: ZPI {} not allowed on unestablished SA",
-            pkt.metadata().ingress_link_id,
+            asm.formatted_link_id(pkt.metadata().ingress_link_id),
             zpi_hdr.zpi
         );
         return Err(DecryptError::UnknownZpi);
@@ -785,7 +789,7 @@ fn decrypt(
     debug!(
         target: DATAPATH,
         "INSECURE, decrypting null packet from {}",
-        pkt.metadata().ingress_link_id
+        asm.formatted_link_id(pkt.metadata().ingress_link_id)
     );
 
     return decrypt_null(pkt);
@@ -802,7 +806,7 @@ fn substrate_egress_common(
     let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
         Ok((zdp_hdr, _)) => zdp_hdr,
         Err(_) => {
-            error!(target: DATAPATH, "egress: link {}: failed to parse the ZDP header", link_id);
+            error!(target: DATAPATH, "egress: {}: failed to parse the ZDP header", asm.formatted_link_id(link_id));
             return Err(km::EncryptionError::ParseError);
         }
     };
@@ -824,7 +828,7 @@ fn substrate_egress_common(
     //       See https://github.com/org-zpr/zpr-core/issues/444
     let transport_sa;
     if zdp_hdr.packet_type == zdp::ZdpPacketType::KeyManagement {
-        debug!(target: DATAPATH, "link {link_id}: KM message detected, using ZPI=0 ignoring security association");
+        debug!(target: DATAPATH, "{}: KM message detected, using ZPI=0 ignoring security association", asm.formatted_link_id(link_id));
         transport_sa = None;
     } else {
         transport_sa = peer_state.get_established_transport_association();

@@ -697,11 +697,11 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Adapter {
         local_set.block_on(&runtime, async {
             let dsid = DOCK_LINK_ID;
-            debug!(target: STARTUP, "waiting on security association establishment on link {dsid}");
+            debug!(target: STARTUP, "waiting on security association establishment on {}", asm.formatted_link_id(dsid));
             while !asm.peer_table.is_security_association_established(dsid) {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            debug!(target: STARTUP, "security association established successfully on link {dsid}");
+            debug!(target: STARTUP, "security association established successfully on {}", asm.formatted_link_id(dsid));
         });
     }
 

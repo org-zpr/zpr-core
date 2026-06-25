@@ -32,11 +32,11 @@ pub fn authorize_connect(
             .await
         {
             Ok(cr) => {
-                info!(target: VISA_MGMT, "link {link_id}: VS authorize_connect returned successfully");
+                info!(target: VISA_MGMT, "{}: VS authorize_connect returned successfully", task_asm.formatted_link_id(link_id));
                 match cr.zpr_addr {
                     IpAddr::V4(_) => {
                         // Our ZPR addresses should be IPv6 -- at least for now.
-                        error!(target: VISA_MGMT, "link {link_id} authorized, but zpr address is not IPv6");
+                        error!(target: VISA_MGMT, "{} authorized, but zpr address is not IPv6", task_asm.formatted_link_id(link_id));
                         let _ignore_error =
                             task_asm.process_link_state_event(link_id, LinkEvent::Error);
                         return;
@@ -52,7 +52,7 @@ pub fn authorize_connect(
             }
 
             Err(err) => {
-                warn!(target: VISA_MGMT, "link {link_id}: VS authorize_connect failed with error: {err}");
+                warn!(target: VISA_MGMT, "{}: VS authorize_connect failed with error: {err}", task_asm.formatted_link_id(link_id));
                 let _ignore_error = task_asm.process_link_state_event(link_id, LinkEvent::Error);
             }
         }
@@ -154,7 +154,7 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
         cn = String::new();
     }
 
-    debug!(target: VISA_MGMT, "Link {id} CN is {cn}");
+    debug!(target: VISA_MGMT, "{} CN is {cn}", asm.formatted_link_id(id));
 
     Ok(cn)
 }

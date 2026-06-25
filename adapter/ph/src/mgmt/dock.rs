@@ -115,7 +115,7 @@ pub fn bind_actor_address(
 ) {
     debug!(
         target: FLOW_MGMT,
-        "bind_actor_address(ingress_link_id={ingress_link_id}, txn_id={txn_id})");
+        "bind_actor_address(ingress_link_id={}, txn_id={txn_id})", asm.formatted_link_id(ingress_link_id.get()));
 
     // Determine five-tuple of the initial packet.
 
@@ -127,11 +127,11 @@ pub fn bind_actor_address(
     match classifier::classify_with_options(&mut five_tuple, packet_body, &classifier_options) {
         Ok(classifier::ClassifierResult::OK) => (),
         Ok(classifier::ClassifierResult::UnclassifiedL4) => {
-            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: bind request: unsupported IP protocol {}", five_tuple.l4_protocol);
+            warn!(target: FLOW_MGMT, "{}: bind request: unsupported IP protocol {}", asm.formatted_link_id(ingress_link_id.get()), five_tuple.l4_protocol);
             return requested_visa_denied(asm, ingress_link_id, txn_id);
         }
         _ => {
-            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: bind request: invalid initial packet");
+            warn!(target: FLOW_MGMT, "{}: bind request: invalid initial packet", asm.formatted_link_id(ingress_link_id.get()));
             return requested_visa_denied(asm, ingress_link_id, txn_id);
         }
     }
@@ -146,7 +146,7 @@ pub fn bind_actor_address(
         .link_state_machine
         .has_actor_address(&five_tuple.src_address)
     {
-        warn!(target: FLOW_MGMT, "Link {ingress_link_id}: bind request: source address {} does not match actor address", &five_tuple.src_address);
+        warn!(target: FLOW_MGMT, "{}: bind request: source address {} does not match actor address", asm.formatted_link_id(ingress_link_id.get()), &five_tuple.src_address);
         return requested_visa_denied(asm, ingress_link_id, txn_id);
     }
 
@@ -165,7 +165,7 @@ pub fn bind_actor_address(
             Ok(link_id) => {
                 debug!(
                     target: FLOW_MGMT,
-                    "matched existing visa {matched_visa_id} for {five_tuple}, egress_link_id = {link_id}"
+                    "matched existing visa {matched_visa_id} for {five_tuple}, egress_link_id = {}", asm.formatted_link_id(link_id.get())
                 );
                 // This visa is valid; treat as an immediate grant.
                 return requested_visa_granted(asm, ingress_link_id, txn_id, matched_visa_id);
@@ -199,7 +199,8 @@ pub fn bind_actor_address(
 
     debug!(
         target: FLOW_MGMT,
-        "issuing visa request for {five_tuple} from ingress_link_id {ingress_link_id} packet_body.len() = {}",
+        "issuing visa request for {five_tuple} from ingress_link_id {} packet_body.len() = {}",
+        asm.formatted_link_id(ingress_link_id.get()),
         packet_body.len()
     );
 
@@ -307,7 +308,7 @@ fn requested_visa_granted(
 ) {
     debug!(
         target: FLOW_MGMT,
-        "requested_visa_granted(ingress_link_id={ingress_link_id}, txn_id={txn_id}, visa_id={visa_id})");
+        "requested_visa_granted(ingress_link_id={}, txn_id={txn_id}, visa_id={visa_id})", asm.formatted_link_id(ingress_link_id.get()));
 
     // Look up the egress link for this visa.
 
@@ -530,7 +531,7 @@ fn bind_actor_address_reject(
 ) {
     debug!(
         target: FLOW_MGMT,
-        "bind_actor_address_reject(ingress_link_id={ingress_link_id}, txn_id={txn_id})");
+        "bind_actor_address_reject(ingress_link_id={}, txn_id={txn_id})", asm.formatted_link_id(ingress_link_id.get()));
 
     let Some(ingress_peer_state) = asm.peer_table.get(ingress_link_id.get()) else {
         return;
@@ -722,7 +723,7 @@ pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stre
 
     // Get visa id of next hop
     let Some(pft_pep) = peer_table.pft.get(stream_id) else {
-        warn!(target: FLOW_MGMT, "Link {ingress_link_id}: unbind request: no pft pep for stream {stream_id}");
+        warn!(target: FLOW_MGMT, "{}: unbind request: no pft pep for stream {stream_id}", asm.formatted_link_id(ingress_link_id.get()));
         return;
     };
 
@@ -738,11 +739,11 @@ pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stre
     {
         Ok(b) => {
             if !b {
-                warn!(target: FLOW_MGMT, "Link {ingress_link_id}: stream {} not found in visa {}", pft_pep.next_hop.1, pft_pep.visa_id)
+                warn!(target: FLOW_MGMT, "{}: stream {} not found in visa {}", asm.formatted_link_id(ingress_link_id.get()), pft_pep.next_hop.1, pft_pep.visa_id)
             }
         }
         Err(e) => {
-            warn!(target: FLOW_MGMT, "Link {ingress_link_id}: error removing stream from visa: {}", e)
+            warn!(target: FLOW_MGMT, "{}: error removing stream from visa: {}", asm.formatted_link_id(ingress_link_id.get()), e)
         }
     }
 
