@@ -95,7 +95,6 @@ use zpr::addrs::{
 use zpr::packet_info::{DOCK_LINK_ID, LOCAL_ACTOR_LINK_ID};
 use zpr::vsapi_types::AuthServicesList;
 
-
 /// Creates a nonblocking local socket pair suitable for transferring
 /// PACKET_BUFFER_SIZE-sized messages.
 fn packet_buffer_socket_pair(
