@@ -42,7 +42,7 @@ jobs:
   # Build and upload ph
   build-ph:
     name: PH
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.2.1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.3
     with:
       name: 'ph'
       path: './adapter/ph'
@@ -54,7 +54,7 @@ jobs:
   # Build and upload ph-cli
   build-ph-cli:
     name: PH CLI
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.2.1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.3
     with:
       name: 'ph-cli'
       path: './adapter/cli'
