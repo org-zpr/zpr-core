@@ -69,7 +69,7 @@ jobs:
   test-ph:
     name: PH
     needs: [build-ph]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.2
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.3
     with:
       name: 'ph'
       path: './adapter/ph'
@@ -80,7 +80,7 @@ jobs:
   test-ph-cli:
     name: PH CLI
     needs: [build-ph-cli]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.2
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.3
     with:
       name: 'ph-cli'
       path: './adapter/cli'
