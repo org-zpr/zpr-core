@@ -5,7 +5,6 @@ use crate::mgmt;
 use crate::prelude::*;
 use tokio::select;
 use tokio::time;
-use zpr::packet_info::LinkId;
 
 pub async fn launch(asm: Arc<Assembly>, link_id: LinkId) {
     let mut retry_interval = time::interval(config::DEFAULT_ZDPR_RETRY_TIMER);

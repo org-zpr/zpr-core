@@ -6,7 +6,6 @@ use crate::queues::AdapterManagerMessage;
 use crate::two_way_queue;
 use std::num::NonZero;
 use tokio;
-use zpr::packet_info::{DOCK_LINK_ID, LOCAL_ACTOR_LINK_ID};
 
 pub async fn launch(
     asm: Arc<Assembly>,

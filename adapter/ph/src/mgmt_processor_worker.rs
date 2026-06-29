@@ -6,7 +6,6 @@ use crate::prelude::*;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
 use tokio::sync::mpsc;
-use zpr::packet_info::LinkId;
 use zpr_ext::zerocopy::*;
 
 #[derive(Clone, Copy)]

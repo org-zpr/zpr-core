@@ -17,16 +17,10 @@ use crate::zdp;
 use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
-use bytes::{Buf, BufMut};
 use classifier::{IPv4Header, IPv6Header};
 use internet_checksum;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use zerocopy::FromBytes;
-use zpr::packet_info::{
-    A2aSaid, DOCK_LINK_ID, KM_ID_NOISE, L3Type, LINK_ID_UNKNOWN, LOCAL_ACTOR_LINK_ID, LinkId,
-    StreamId, SubstrateAddr, ZPI_0, Zpi,
-};
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 use zpr_utils::net_defs;

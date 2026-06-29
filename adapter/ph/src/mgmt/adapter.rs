@@ -13,7 +13,6 @@ use crate::prelude::*;
 use crate::queues;
 use crate::tc;
 use std::num::NonZero;
-use zpr::packet_info::{LOCAL_ACTOR_LINK_ID, LinkId, StreamId};
 
 /// Request to bind a stream which egresses from the local adapter.
 ///

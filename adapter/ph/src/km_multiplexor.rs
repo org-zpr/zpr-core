@@ -9,7 +9,6 @@ use bytes::Bytes;
 use std::collections::HashMap;
 use tokio::{sync::mpsc, time};
 use tokio_util::sync::CancellationToken;
-use zpr::packet_info::LinkId;
 
 /// How often the signal monitor worker checks the error conditions
 /// on the KeyManager state machines.  Indirectly, this controls how

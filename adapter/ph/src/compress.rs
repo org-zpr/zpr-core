@@ -2,11 +2,11 @@
 
 use crate::classifier;
 use crate::defs::FiveTuple;
-use crate::packet::Packet;
+use crate::prelude::*;
 use bytes::Buf;
 use internet_checksum;
 use zerocopy::*;
-use zpr::packet_info::{CompressionMode, L3Type, compression_mode::*};
+use zpr::packet_info::compression_mode::*;
 use zpr_ext::bytes::BufExt;
 use zpr_utils::net_defs;
 

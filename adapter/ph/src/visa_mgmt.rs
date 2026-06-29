@@ -10,7 +10,6 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use libnode::claims;
 use std::net::IpAddr;
 use std::num::NonZero;
-use zpr::packet_info::{LinkId, VisaId};
 use zpr::vsapi_types::{self, DisconnectNotice, DisconnectReason};
 use zpr_utils::net_defs::IpAddress;
 

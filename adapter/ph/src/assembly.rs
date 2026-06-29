@@ -27,7 +27,6 @@ use std::sync::{Arc, Mutex};
 use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
-use zpr::packet_info::{LOCAL_ACTOR_LINK_ID, LinkId, SubstrateAddr};
 use zpr::vsapi_types::AuthServicesList;
 use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 

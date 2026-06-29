@@ -8,8 +8,6 @@ use crate::prelude::*;
 use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll, ready};
-use zerocopy::FromBytes;
-use zpr::packet_info::{LINK_ID_UNKNOWN, LinkId, SeqNum, StreamId};
 
 /// Helper to allocate a new Packet with default parameters from the heap.
 /// The packet is sized to fit most outbound management traffic, but

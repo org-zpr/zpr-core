@@ -24,9 +24,6 @@ use crate::visa_table::VisaTableError;
 
 use dashmap::DashMap;
 use std::num::NonZero;
-use zpr::packet_info::{
-    DOCK_LINK_ID, ForwardingEntry, L3Type, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, VisaId,
-};
 use zpr::vsapi_types::{CommFlag, PacketDesc, VisaRequest, VsapiFiveTuple, vsapi_ip_number};
 
 /// State of an in-progress inbound bind request.

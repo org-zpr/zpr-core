@@ -1,6 +1,5 @@
 use std::net::{IpAddr, SocketAddr};
 use tokio::sync::broadcast;
-use tracing::{error, info};
 
 use crate::prelude::*;
 use crate::vss_worker;

@@ -33,9 +33,6 @@ use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
 use tokio_util::compat::*;
-use tracing::*;
-use zpr::packet_info::DOCK_LINK_ID;
-use zpr::packet_info::LinkId;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 

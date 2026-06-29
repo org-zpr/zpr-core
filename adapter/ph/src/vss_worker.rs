@@ -4,7 +4,6 @@ use crate::{visa_mgmt, visa_table};
 
 use libnode::vss::{ConfigureResponse, ListProcessingResponse, SetTopologyResponse, VSSMessage};
 use tokio::sync::mpsc;
-use zpr::packet_info::VisaId;
 use zpr::vsapi_types::{ApiResponseError, ErrorCode, Link, Param, ParamValue, VisaOp, pname};
 
 pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMessage>) {

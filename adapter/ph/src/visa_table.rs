@@ -15,7 +15,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use zpr::addrs::{VISA_SERVICE_ADDR, VISA_SERVICE_PORT};
 use zpr::five_tuple_lookup_table::FiveTupleLookupTable;
-use zpr::packet_info::{ForwardingEntry, LinkId, VisaId};
 use zpr::vsapi_types;
 use zpr::vsapi_types::{HasFiveTuple, VsapiFiveTuple};
 use zpr_utils::net_defs::IpAddress;

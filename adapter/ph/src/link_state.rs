@@ -18,7 +18,6 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use zpr::addrs::ZPRNET_PREFIX_LEN;
-use zpr::packet_info::{LINK_ID_UNKNOWN, LinkId, ZPI_ENCRYPTED_HEADER_FLAG};
 use zpr_utils::net_defs::IpAddress;
 
 /// State machine for links and docking sessions
