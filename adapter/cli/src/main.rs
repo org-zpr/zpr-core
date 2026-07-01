@@ -3,6 +3,7 @@
 //! when a command is multiple words, this program assumes the spaces are replaced
 //! with a '-' on the command line
 mod main_args;
+mod rusty_helper;
 
 use crate::main_args::{CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkCommands};
 use admin_api::rpc_commands::RpcCommands;
@@ -11,8 +12,7 @@ use cbpf_rs;
 use clap::Parser;
 use cli::cmd_line_inter as svc;
 use pcap::{Capture, Linktype};
-use rustyline::DefaultEditor;
-use rustyline::error::ReadlineError;
+use rustyline::{CompletionType, Config, Editor, error::ReadlineError, history::FileHistory};
 use std::borrow::Borrow;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
@@ -82,7 +82,13 @@ async fn main() -> Result<(), CliError> {
 }
 
 async fn run_cli(socket: PathBuf, cap_socket: PathBuf) -> Result<(), CliError> {
-    let mut rl = DefaultEditor::new()?;
+    let config = Config::builder()
+        .completion_type(CompletionType::List)
+        .completion_show_all_if_ambiguous(true)
+        .build();
+    let mut rl = Editor::<rusty_helper::RustyHelper, FileHistory>::with_config(config)?;
+
+    rl.set_helper(Some(rusty_helper::RustyHelper));
 
     // Optionally load history from a file, allows for cross sessioin history
     let history_path = dirs::home_dir().map(|p| p.join(".ph_cli_history"));
