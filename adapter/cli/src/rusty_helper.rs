@@ -19,6 +19,7 @@ const COMMANDS: &[&str] = &[
     "logging",
     "addr",
     "quit",
+    "help",
 ];
 
 const CAPTURE_SUBCOMMANDS: &[&str] = &[
@@ -151,28 +152,27 @@ fn candidate_list(head_command: &str) -> &'static [&'static str] {
 // Helper function to get the parameter info for a given command
 fn get_command_parameter_info(command: &str) -> &str {
     match command {
-        "echo" => " : Ping the Packet Handler",
-        "counters" => " -r/--reset : Display all counters + uptime; --reset to zero them instead.",
-        "watch" => " <interval> (secs) : Poll counters every interval seconds and print deltas.",
-        "perf-sample" => " <duration> <frequency> : Performancy sampling",
-        "capture" => " <subcommand>",
-        "link" => " <subcommand>",
-        "logging" => " [<level>=<target>] (>=1 pair) : Change log levels at runtime",
-        "addr" => " : get address of adapter's node (IP + port)",
-        "quit" => " : Exit the CLI",
-        "set-file" => " <file_path> : Set the pcap output file",
-        "close-file" => " : Close the pcap output file",
-        "set-program" => {
-            " [program] : install a BPF filter (default: link[0] == 1 or link[0] == 0)"
-        }
-        "delete-program" => " : delete the BPF filter",
-        "flush-file" => " : Flush outstanding packets to disk",
-        "sequence" => " <file_path> <duration> [program] : open, filter, wait, close",
-        "show" => " [id] : show one link, or summary if no id",
-        "configure" => " <id>",
-        "start" => " <id>",
-        "stop" => " <id>",
-        "reset" => " <id>",
+        "echo" => "",
+        "counters" => " Display or reset counters",
+        "watch" => " Connect to the Packet Handler for periodic counter updates",
+        "perf-sample" => " Start performance sampling",
+        "capture" => " Set up or tear down packet captures",
+        "link" => " Change link state",
+        "logging" => " Change the log level of a node or adapter",
+        "addr" => " Gets the address of an adapter's node",
+        "quit" => " Exit the CLI",
+        "set-file" => " Set a capture file",
+        "close-file" => " Close a capture file",
+        "set-program" => " Set a BPF to filter captured packets",
+        "delete-program" => " Delete any set BPF",
+        "flush-file" => " Flush any outstanding packets to the capture file",
+        "sequence" => " Create a temporary packet capture",
+        "show" => " Show a link's status",
+        "configure" => " Configure a link",
+        "start" => " Start a link",
+        "stop" => " Stop a link",
+        "reset" => " Reset a link. It will require a configure before starting again",
+        "help" => " Display command help information",
         _ => "",
     }
 }
