@@ -44,9 +44,21 @@ pub async fn launch_capnp(
         let (sock, _addr) = listener.accept().await?;
 
         let (reader, writer) = sock.into_split();
+
+        #[cfg(not(feature = "capnp-ancillary"))]
         let network = capnp_rpc::twoparty::VatNetwork::new(
             tokio::io::BufReader::new(reader).compat(),
             tokio::io::BufWriter::new(writer).compat_write(),
+            capnp_rpc::rpc_twoparty_capnp::Side::Server,
+            capnp::message::ReaderOptions::new(),
+        );
+
+        //use an FD-passing transport instead of a plain byte stream.
+        #[cfg(feature = "capnp-ancillary")]
+        let network = capnp_rpc::twoparty::io::VatNetwork::new_with_fds(
+            capnp_futures::io::tokio::UnixFdStream::new(reader),
+            capnp_futures::io::tokio::UnixFdStream::new(writer),
+            1,
             capnp_rpc::rpc_twoparty_capnp::Side::Server,
             capnp::message::ReaderOptions::new(),
         );
@@ -149,6 +161,7 @@ impl svc::Server for AdminServiceImpl {
         Ok(())
     }
 
+    #[cfg(not(feature = "capnp-ancillary"))]
     async fn set_capture_file(
         self: Rc<Self>,
         _: svc::SetCaptureFileParams,
@@ -157,6 +170,48 @@ impl svc::Server for AdminServiceImpl {
         Err(capnp::Error::unimplemented(
             "method cmd_line_inter::Server::set_capture_file not implemented".to_string(),
         ))
+    }
+
+    /// Opens the capture file from an FD received as ancillary data.
+    #[cfg(feature = "capnp-ancillary")]
+    async fn set_capture_file(
+        self: Rc<Self>,
+        params: svc::SetCaptureFileParams,
+        mut results: svc::SetCaptureFileResults,
+    ) -> Result<(), capnp::Error> {
+        info!(target: RPC, "Set capture file procedure initiated");
+        let capture_file = params.get()?.get_capture_file()?;
+        let fd = capture_file.client.get_fd().await?;
+        let results_builder = results.get().init_result();
+
+        match fd {
+            Some(fd) => {
+                let owned_fd = fd.try_clone_to_owned().map_err(|e| {
+                    capnp::Error::failed(format!("failed to clone capture file fd: {e}"))
+                })?;
+                let file = File::from(std::fs::File::from(owned_fd));
+                match self.asm.capture_worker.open_capture_file(file).await {
+                    Ok(()) => {
+                        debug!(target: RPC, "Capture file opened");
+                        results_builder.init_success().set_none(());
+                    }
+                    Err(err) => {
+                        debug!(target: RPC, "Error opening capture file: {err}");
+                        results_builder
+                            .init_error()
+                            .set_txt(format!("Error opening capture file: {err}").as_str());
+                    }
+                }
+            }
+            None => {
+                debug!(target: RPC, "Error opening capture file: no file descriptor received");
+                results_builder
+                    .init_error()
+                    .set_txt("Error opening capture file: no file descriptor received");
+            }
+        }
+
+        Ok(())
     }
 
     async fn close_capture_file(

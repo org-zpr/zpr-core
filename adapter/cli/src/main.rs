@@ -19,10 +19,13 @@ use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
+#[cfg(feature = "capnp-ancillary")]
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::time::{Duration, sleep};
+#[cfg(not(feature = "capnp-ancillary"))]
 use tokio_util::compat::*;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
 
@@ -160,9 +163,19 @@ async fn process_command(
     let sock = tokio::net::UnixStream::connect(socket).await?;
     let (reader, writer) = sock.into_split();
 
+    #[cfg(not(feature = "capnp-ancillary"))]
     let network = capnp_rpc::twoparty::VatNetwork::new(
         tokio::io::BufReader::new(reader).compat(),
         tokio::io::BufWriter::new(writer).compat_write(),
+        capnp_rpc::rpc_twoparty_capnp::Side::Client,
+        capnp::message::ReaderOptions::new(),
+    );
+
+    #[cfg(feature = "capnp-ancillary")]
+    let network = capnp_rpc::twoparty::io::VatNetwork::new_with_fds(
+        capnp_futures::io::tokio::UnixFdStream::new(reader),
+        capnp_futures::io::tokio::UnixFdStream::new(writer),
+        1,
         capnp_rpc::rpc_twoparty_capnp::Side::Client,
         capnp::message::ReaderOptions::new(),
     );
@@ -187,7 +200,10 @@ async fn process_command(
                 }
                 Commands::Capture(capture) => match capture.command {
                     CaptureCommands::SetFile { file_path } => {
-                        handle_set_capture_file(file_path, cap_socket)?
+                        #[cfg(not(feature = "capnp-ancillary"))]
+                        handle_set_capture_file(file_path, cap_socket)?;
+                        #[cfg(feature = "capnp-ancillary")]
+                        set_capture_file_task(service, file_path).await?;
                     }
                     CaptureCommands::CloseFile => close_capture_file_task(service).await?,
                     CaptureCommands::FlushFile => flush_capture_file_task(service).await?,
@@ -276,27 +292,46 @@ async fn counters_task(service: svc::Client) -> Result<(), CliError> {
     Ok(())
 }
 
-// TODO determine if possible to send FD through capnp or by some side channel
-#[allow(dead_code)]
-async fn set_capture_file_task(_service: svc::Client, _file_path: String) -> Result<(), CliError> {
-    // let mut request = service.set_capture_file_request();
-    // request
-    //     .get()
-    //     .init_file_path(file_path.len() as u32)
-    //     .push_str(&file_path);
+// This struct is used to implement the capture_file interface for the RPC worker.
+// It is only used when the capnp-ancillary feature is enabled, which allows for file descriptor passing over Unix sockets.
+#[cfg(feature = "capnp-ancillary")]
+struct CaptureFileImpl {
+    fd: OwnedFd,
+}
 
-    // let response = request.send().promise.await?;
-    // let results = response.get()?;
-    // match results.get_result()?.which()? {
-    //     cli::success_or_error::Which::Success(_) => {
-    //         println!("Capture file set")
-    //     }
-    //     cli::success_or_error::Which::Error(e) => {
-    //         let result = e.unwrap().get_txt()?.to_string()?;
-    //         return Err(capnp::Error::failed(result));
-    //     }
-    // };
-    Ok(())
+#[cfg(feature = "capnp-ancillary")]
+impl cli::capture_file::Server for CaptureFileImpl {
+    fn get_fd(&self) -> Option<BorrowedFd<'_>> {
+        Some(self.fd.as_fd())
+    }
+}
+
+/// Opens the named capture file and passes its FD to the PH as a CaptureFile to set_capture_file_request.  This is only used when the capnp-ancillary feature is enabled, which allows for file descriptor passing over Unix sockets.
+#[cfg(feature = "capnp-ancillary")]
+async fn set_capture_file_task(service: svc::Client, file_path: String) -> Result<(), CliError> {
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(file_path)?;
+
+    let mut request = service.set_capture_file_request();
+    request
+        .get()
+        .set_capture_file(capnp_rpc::new_client(CaptureFileImpl { fd: file.into() }));
+    let response = request.send().promise.await?;
+
+    match response.get()?.get_result()?.which()? {
+        cli::success_or_error::Which::Success(_) => {
+            println!("Capture file opened");
+            Ok(())
+        }
+        cli::success_or_error::Which::Error(e) => {
+            let result = e?.get_txt()?.to_string()?;
+            println!("{result}");
+            Err(CliError::RpcError(result))
+        }
+    }
 }
 
 async fn close_capture_file_task(service: svc::Client) -> Result<(), CliError> {
@@ -365,6 +400,7 @@ async fn delete_capture_program_task(service: svc::Client) -> Result<(), CliErro
     Ok(())
 }
 
+#[cfg_attr(feature = "capnp-ancillary", allow(unused_variables))]
 async fn capture_sequence_task(
     service: svc::Client,
     file_path: String,
@@ -373,7 +409,10 @@ async fn capture_sequence_task(
     cap_socket: &PathBuf,
 ) -> Result<(), CliError> {
     let sleep_time = Duration::new(time, 0);
+    #[cfg(not(feature = "capnp-ancillary"))]
     handle_set_capture_file(file_path, cap_socket)?;
+    #[cfg(feature = "capnp-ancillary")]
+    set_capture_file_task(service.clone(), file_path).await?;
     set_capture_program_task(service.clone(), program).await?;
 
     let handler = Arc::new(CtrlcHandle::new());

@@ -11,6 +11,7 @@ base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
 bytes = { version = "1.11.1" }
 capnp = { workspace = true }
+capnp-futures = { workspace = true, optional = true }
 capnp-rpc = { workspace = true }
 cbpf-rs = { workspace = true }
 chrono = "0.4.39"
@@ -70,6 +71,7 @@ rcu-crossbeam-epoch = ["rcu/rcu-crossbeam-epoch", "zpr/rcu-crossbeam-epoch"]
 rcu-mutex-arc = ["rcu/rcu-mutex-arc", "zpr/rcu-mutex-arc"]
 rcu-rwlock = ["rcu/rcu-rwlock", "zpr/rcu-rwlock"]
 complete = ["clap_complete"]
+capnp-ancillary = ["dep:capnp-futures", "capnp-futures/tokio-unix-fd-stream"]
 
 [[bin]]
 name = "ph"

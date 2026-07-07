@@ -374,9 +374,8 @@ checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "capnp"
-version = "0.25.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63da65e5e9ffc3b8f993d4ad222a548152549351a643f6b850a7773cb6ff2809"
+version = "0.25.5"
+source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cfbcb9b#cfbcb9bf2b620db96cffdfd4bb09af4837093bab"
 dependencies = [
  "embedded-io",
 ]
@@ -384,30 +383,32 @@ dependencies = [
 [[package]]
 name = "capnp-futures"
 version = "0.25.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73b69dfddccc57844f9a90f9d72b44b97c326914851ea94fb7da40ef9cad6e8d"
+source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cfbcb9b#cfbcb9bf2b620db96cffdfd4bb09af4837093bab"
 dependencies = [
  "capnp",
  "futures-channel",
- "futures-util",
+ "futures-core",
+ "futures-io",
+ "rustix",
+ "tokio",
 ]
 
 [[package]]
 name = "capnp-rpc"
 version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3c74c337e87f75f3174ffb3513738ab0acc631c04f64cc33b867c60f84771da"
+source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cfbcb9b#cfbcb9bf2b620db96cffdfd4bb09af4837093bab"
 dependencies = [
  "capnp",
  "capnp-futures",
- "futures",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
 ]
 
 [[package]]
 name = "capnpc"
 version = "0.25.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fca02be865c8c5a78bfc24b9819006ab6b59bef238467203928e26459557af93"
+source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cfbcb9b#cfbcb9bf2b620db96cffdfd4bb09af4837093bab"
 dependencies = [
  "capnp",
 ]
@@ -2613,6 +2614,7 @@ dependencies = [
  "blake3",
  "bytes",
  "capnp",
+ "capnp-futures",
  "capnp-rpc",
  "cbpf-rs",
  "chrono",
@@ -2665,6 +2667,7 @@ version = "0.6.0"
 dependencies = [
  "admin-api",
  "capnp",
+ "capnp-futures",
  "capnp-rpc",
  "cbpf-rs",
  "clap",

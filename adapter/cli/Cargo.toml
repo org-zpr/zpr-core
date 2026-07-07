@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 admin-api = { path = "../admin-api" }
 capnp = { workspace = true }
+capnp-futures = { workspace = true, optional = true } 
 capnp-rpc = { workspace = true }
 cbpf-rs = { workspace = true, features = ["pcap"]}
 clap = { workspace = true }
@@ -25,6 +26,7 @@ dirs = "6.0.0"
 
 [features]
 complete = ["clap_complete"]
+capnp-ancillary = ["dep:capnp-futures", "capnp-futures/tokio-unix-fd-stream"]
 
 [[bin]]
 name = "ph-cli"

@@ -53,6 +53,7 @@ mod pki;
 mod prelude;
 mod queues;
 mod sample_ring;
+#[cfg(not(feature = "capnp-ancillary"))]
 mod set_capture_file_worker;
 mod signal_worker;
 mod special_peers;
@@ -271,19 +272,23 @@ fn main() -> ExitCode {
         UnixListener::bind(&config.control_path).expect("failed to bind to control socket");
     info!(target: STARTUP, "control socket bound to {:?}", config.control_path);
 
-    fs::remove_file(&config.capture_path)
-        .or_else(|e| {
-            if e.kind() == ErrorKind::NotFound {
-                Ok(())
-            } else {
-                Err(e)
-            }
-        })
-        .unwrap();
-    let capture_socket = Arc::new(
-        UnixListener::bind(&config.capture_path).expect("failed to bind to capture socket"),
-    );
-    info!(target: STARTUP, "capture socket bound to {:?}", config.capture_path);
+    #[cfg(not(feature = "capnp-ancillary"))]
+    let capture_socket = {
+        fs::remove_file(&config.capture_path)
+            .or_else(|e| {
+                if e.kind() == ErrorKind::NotFound {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })
+            .unwrap();
+        let capture_socket = Arc::new(
+            UnixListener::bind(&config.capture_path).expect("failed to bind to capture socket"),
+        );
+        info!(target: STARTUP, "capture socket bound to {:?}", config.capture_path);
+        capture_socket
+    };
 
     //
     // open TUN devices and actor requeue sockets
@@ -620,6 +625,7 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
+    #[cfg(not(feature = "capnp-ancillary"))]
     js.spawn_local(set_capture_file_worker::launch(
         asm.clone(),
         capture_socket.clone(),

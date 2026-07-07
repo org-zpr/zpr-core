@@ -4,7 +4,7 @@ interface CmdLineInter {
     echo                 @0 () -> ();
     resetCounters        @1 () -> ();
     counters             @2 () -> (counts: Counters);
-    setCaptureFile       @3 (filePath: Text) -> (result: SuccessOrError);
+    setCaptureFile       @3 (captureFile: CaptureFile) -> (result: SuccessOrError);
     closeCaptureFile     @4 () -> ();
     flushCaptureFile     @5 () -> ();
     setCaptureProgram    @6 (program: Program) -> (result: SuccessOrError);
@@ -18,6 +18,10 @@ interface CmdLineInter {
     resetLink            @14 (id: UInt32) -> ();
     changeLogging        @15 (logs: List(Log)) -> (result: LogsApplied);
     getNodeInfo          @16 () -> (result: SuccessOrError);
+}
+
+interface CaptureFile {
+    # expects an FD to be passed as ancillary data
 }
 
 struct SuccessOrError {
