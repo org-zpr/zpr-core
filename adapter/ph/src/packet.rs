@@ -338,8 +338,9 @@ impl Packet {
 
     fn metadata_is_valid(&self) -> bool {
         let md = self.metadata();
-        md.offset >= Self::MIN_BODY_OFFSET && md.len <= self.buf.len()
-            || md.offset <= self.buf.len() - md.len
+        md.offset >= Self::MIN_BODY_OFFSET
+            && md.len <= self.buf.len()
+            && md.offset <= self.buf.len() - md.len
     }
 
     /// Initialize a buffer with existing packet data and metadata as a packet buffer.
