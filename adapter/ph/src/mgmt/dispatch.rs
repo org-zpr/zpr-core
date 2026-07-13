@@ -24,7 +24,7 @@ pub fn dispatch_mgmt_packet_with_addr(
     pkt: &mut Packet,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
-        Ok(base_hdr) if base_hdr.0.packet_type == zdp::ZdpPacketType::KeyManagement => {
+        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
 
             // TODO: once we have multi-node, how do we know whether this is a link or a
@@ -52,6 +52,7 @@ pub fn dispatch_mgmt_packet_with_addr(
             pkt.metadata_mut().ingress_link_id = ingress_link_id;
             handle_key_management(asm, pkt);
         }
+
         _ => {
             core::count_event(asm, ManagementCounterType::UnknownPeer);
             return;
@@ -63,7 +64,7 @@ pub fn dispatch_mgmt_packet_with_addr(
 ///
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
-pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
+pub fn dispatch_mgmt_packet_with_link(asm: &Assembly, pkt: &mut Packet) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
@@ -98,7 +99,21 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             let seq_num = mgmt_hdr.sequence_number.get();
             pkt.metadata_mut().seq_num = seq_num;
 
-            // determine packet disposition per ZDPR mechanism
+            // attempt to queue packet if processing is indicated by ZDPR
+            if receiver.should_process_packet(seq_num) {
+                let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+                match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
+                    Ok(()) => (),
+                    Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
+                        // we were unable to queue the packet; treat it as if
+                        // we never received it (so, no ACK or updating ZDPR)
+                        core::count_event(asm, ManagementCounterType::QueueBackpressure);
+                        return;
+                    }
+                }
+            }
+
+            // update ZDPR that we've accepted the packet
             let disp = receiver.process_packet(seq_num);
             count_zdpr_receiver_stats(&asm.counters.management, &mut receiver);
             drop(receiver);
@@ -108,17 +123,6 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
                     core::send_canceled(&asm, pkt.metadata().ingress_link_id, seq_num);
                 } else {
                     core::send_acknowledgement(&asm, pkt.metadata().ingress_link_id, seq_num);
-                }
-            }
-
-            if disp.should_process() {
-                let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
-                match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
-                    Ok(()) => (),
-                    Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
-                        core::count_event(asm, ManagementCounterType::QueueBackpressure);
-                        return;
-                    }
                 }
             }
         }
@@ -210,7 +214,7 @@ fn handle_acknowledgement_canceled_common(asm: &Assembly, pkt: &mut Packet, is_c
 
 // ZPI and Base header is already gone by the time we get here.  So we expect
 // to parse starting from the KeyManagement header.
-fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
+fn handle_key_management(asm: &Assembly, pkt: &mut Packet) {
     let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(pkt) else {
         error!(target: ZDP, "KeyManagement packet arrived with unparseable header");
         core::count_event(asm, ManagementCounterType::BadStructure);
@@ -295,19 +299,21 @@ fn count_zdpr_receiver_stats(mgmt_counters: &ManagementCounters, receiver: &mut 
 
 #[cfg(test)]
 mod test {
-
     use super::*;
     use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
     use crate::config::PACKET_BUFFER_SIZE;
     use crate::km_cert_exchange::KmCertExchange;
     use crate::km_noise::NoiseKeypair;
     use crate::km_testdata::test::*;
+    use crate::link_state::LinkType;
+    use crate::peer_table::PeerState;
     use std::net::Ipv4Addr;
-    use tokio::task::LocalSet;
+    use std::num::NonZero;
+    use std::sync::Arc;
 
     // Ensure that this old issue is fixed:
     // https://github.com/org-zpr/zpr-core/issues/929
-    #[tokio::test]
+    #[tokio::test(flavor = "local")]
     async fn test_duplicate_no_tether_packet_no_crash() {
         let mut asm = create_assembly(TestAssemblyBuilder::new());
         asm.self_noise_keypair = Some(NoiseKeypair::generate());
@@ -328,17 +334,116 @@ mod test {
         hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
 
         let peer_sa = SubstrateAddr::from(([127, 0, 0, 1], 1234));
-        let int_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 1).into());
+        let intf_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 1).into());
 
-        let local = LocalSet::new();
-        local
-            .run_until(async move {
-                dispatch_mgmt_packet_with_addr(&aasm, peer_sa, int_addr, &mut pkt1);
-                dispatch_mgmt_packet_with_addr(&aasm, peer_sa, int_addr, &mut pkt2);
-            })
-            .await;
+        dispatch_mgmt_packet_with_addr(&aasm, peer_sa, intf_addr, &mut pkt1);
+        dispatch_mgmt_packet_with_addr(&aasm, peer_sa, intf_addr, &mut pkt2);
 
         // If we get here we didn't crash!
         assert!(true);
+    }
+
+    // Ensure we don't drop mgmt packets due to a full internal queue
+    // after ZDPR-acking them.  (Old bug)
+    #[tokio::test(flavor = "local")]
+    async fn test_no_post_ack_queue_drops() {
+        let mut tab = TestAssemblyBuilder::new();
+        let (egress_send, mut egress_recv) = crate::packet_queue::packet_queue(1);
+        tab.mgmt_substrate_egress = Some(crate::queues::MgmtSubstrateEgress::new(egress_send));
+        let asm = create_assembly(tab);
+
+        let peer_sa = SubstrateAddr::from(([127, 0, 0, 1], 1234));
+        let intf_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 1).into());
+        let peer_entry = asm.peer_table.vacant_entry().unwrap();
+        let (mp_outq_out, mut mp_outq_in) = tokio::sync::oneshot::channel();
+        let peer_state = PeerState::new(
+            peer_entry.key(),
+            LinkType::NodeToAdapter,
+            peer_sa,
+            intf_addr,
+            move |q| {
+                mp_outq_out.send(q).unwrap();
+                std::future::pending()
+            },
+        );
+        let mut mp_outq = mp_outq_in.try_recv().unwrap();
+        let link_id = peer_entry.insert(peer_state);
+
+        let mut num_acked = 0;
+
+        let peer_state = asm.peer_table.get(link_id.get()).unwrap();
+        let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
+
+        // first, check that all packets we get acks for get placed in the mgmt queue
+        loop {
+            // we expect not to be blocked here; we exit the loop once we no longer receive an ACK
+            let zdpr::EnqueueResult::Sent(sn, pkt) =
+                zdpr_send.enqueue_packet(build_discard_packet(link_id))
+            else {
+                panic!("test error; ZDPR window full");
+            };
+            set_sequence_number(sn, pkt);
+            dispatch_mgmt_packet_with_link(&asm, pkt);
+
+            // we should keep getting ACKs until the mgmt queue gets full
+            let Ok(ack_pkt) = egress_recv.try_recv(Box::new([0u8; 256])) else {
+                // once we're blocked, no need to keep sending packets, the test is done!
+                break;
+            };
+
+            validate_packet(&ack_pkt, zdp::ZdpPacketType::Acknowledgement, sn);
+            num_acked += 1;
+            zdpr_send.process_ack(sn);
+
+            // if the bug is present, we'll always get ACKs and never block
+            // despite the mgmt queue filling up
+            assert_eq!(
+                num_acked,
+                mp_outq.len(),
+                "packet was acknowledged but never sent to mgmt"
+            );
+        }
+
+        assert_eq!(
+            num_acked,
+            mp_outq.max_capacity(),
+            "test error; didn't fill mgmt queue"
+        );
+
+        // drain the queue
+        while let Ok(_) = mp_outq.try_recv() {}
+
+        // finally, confirm that retrying the blocked packet results in it ending up on the queue
+        assert!(zdpr_send.retry_needed());
+        zdpr_send.age_retries().for_each(drop);
+        for (sn, pkt) in zdpr_send.retry_packets() {
+            set_sequence_number(sn, pkt);
+            dispatch_mgmt_packet_with_link(&asm, pkt);
+            mp_outq
+                .try_recv()
+                .expect("should have received retried packet on mgmt queue");
+        }
+    }
+
+    fn build_discard_packet(ingress_link_id: NonZero<LinkId>) -> Packet {
+        let mut pkt = core::new_heap_packet();
+        pkt.metadata_mut().ingress_link_id = ingress_link_id.get();
+        let _mgmt_hdr = pkt.alloc_zeroed_header::<zdp::ZdpMgmtHeader>();
+        let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+        base_hdr.packet_type = zdp::ZdpPacketType::Discard;
+        pkt
+    }
+
+    fn set_sequence_number(sn: SeqNum, pkt: &mut Packet) {
+        let (_base_hdr, rest) = zdp::ZdpBaseHeader::mut_from_prefix(pkt.body_mut()).unwrap();
+        let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::mut_from_prefix(rest).unwrap();
+        mgmt_hdr.sequence_number = sn.into();
+    }
+
+    fn validate_packet(pkt: &Packet, expected_type: zdp::ZdpPacketType, expected_sn: SeqNum) {
+        let (base_hdr, rest) = zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()).unwrap();
+        assert_eq!(base_hdr.packet_type, expected_type);
+        let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::read_from_prefix(rest).unwrap();
+        assert_eq!(mgmt_hdr.sequence_number.get(), expected_sn);
     }
 }

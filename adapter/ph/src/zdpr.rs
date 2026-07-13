@@ -1248,6 +1248,39 @@ impl Receiver {
         }
     }
 
+    /// Query whether the received packet should be processed,
+    /// without yet marking it as processed.
+    ///
+    /// This returns the same indication that a call to `process_packet()`
+    /// will, but does not modify state, in case e.g. the packet is unable
+    /// to be processed and therefore must be dropped.
+    pub fn should_process_packet(&mut self, sn: SeqNum) -> bool {
+        let offset = sn.wrapping_sub(self.highest_seen) as i64;
+
+        if offset <= -(self.window_size as i64) {
+            // Too old!  Ignore.  (Should only happen due to race with an already-received ACK.)
+            return false;
+        }
+
+        if offset >= self.oldest_unrecvd_offset() + (self.window_size as i64) {
+            // Too new!  Ignore.  (Shouldn't happen if peer is functioning properly.)
+            return false;
+        }
+
+        if offset > 0 {
+            // Newer than any we've seen prior; accept.
+            return true;
+        }
+
+        if (self.recvd >> -offset) & 1 == 0 {
+            // Old, but within our window.  Accept.
+            return true;
+        }
+
+        // Already seen and within our window.  Do not process.
+        return false;
+    }
+
     /// Fetch & reset the specified statistic.
     pub fn fetch_reset_stat(&mut self, stat: ReceiverStat) -> u64 {
         std::mem::take(&mut self.stats[stat])
