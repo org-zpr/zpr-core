@@ -14,6 +14,7 @@ use crate::zdp::{self, ResponseCode, TerminateReason};
 use openssl::x509::X509;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
+use std::num::NonZero;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -316,6 +317,9 @@ pub struct LinkStateWrapper {
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
     pub locked_data: Mutex<LinkData>,
+    /// Internal links _may_ be associated with another internal link
+    /// representing its remote side.
+    pub internal_peer_id: Option<NonZero<LinkId>>,
 }
 
 impl LinkStateWrapper {
@@ -333,6 +337,7 @@ impl LinkStateWrapper {
             link_type: new_link_type,
             locked_fsm: Mutex::new(lsm),
             locked_data: Mutex::new(LinkData::new()),
+            internal_peer_id: None,
         }
     }
 

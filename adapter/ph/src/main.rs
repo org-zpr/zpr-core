@@ -563,6 +563,7 @@ fn main() -> ExitCode {
         logging: Mutex::new(logging_map),
         reload_handle,
     });
+
     //
     // create a Tokio "local set" to schedule all our management workers on
     //
@@ -572,36 +573,19 @@ fn main() -> ExitCode {
     let _local_set_guard = local_set.enter();
 
     //
-    // instantiate the "fake" local actor link
-    //
-
-    assert_eq!(
-        asm.peer_table.insert_internal_peer().get(),
-        LOCAL_ACTOR_LINK_ID
-    );
-
-    if matches!(ph_mode, PhMode::Node) {
-        // Nodes use this link as the source of bind requests from the
-        // internal adapter, which require that the originator has a valid
-        // actor address (which matches the requested source address).
-
-        for addr in &asm.config.get().zpr_addr {
-            asm.peer_table
-                .get(LOCAL_ACTOR_LINK_ID)
-                .unwrap()
-                .link_state_machine
-                .add_internal_actor_address(addr.into());
-        }
-    }
-
-    //
-    // instantiate tether if we're an adapter,
-    // or "fake" internal dock link if we're a node
+    // instantiate local actor and tether links
     // NOTE: must occur before we start any other workers!
     //
 
     match ph_mode {
         PhMode::Adapter => {
+            // instantiate the "fake" local actor link
+            assert_eq!(
+                asm.peer_table.insert_internal_peer().get(),
+                LOCAL_ACTOR_LINK_ID
+            );
+
+            // instantiate tether
             let dsid = asm
                 .start_tether(
                     asm.config.get().node_addr.as_ref().unwrap(),
@@ -613,7 +597,24 @@ fn main() -> ExitCode {
             assert_eq!(dsid.get(), DOCK_LINK_ID);
         }
 
-        PhMode::Node => assert_eq!(asm.peer_table.insert_internal_peer().get(), DOCK_LINK_ID),
+        PhMode::Node => {
+            // instantiate the "fake" local actor and dock links
+
+            let (lalid, dlid) = asm.peer_table.insert_internal_peer_pair();
+            assert_eq!(lalid.get(), LOCAL_ACTOR_LINK_ID);
+            assert_eq!(dlid.get(), DOCK_LINK_ID);
+
+            // Nodes use the local actor link as the source of bind requests from the
+            // internal adapter, which require that the originator has a valid
+            // actor address (which matches the requested source address).
+            for addr in &asm.config.get().zpr_addr {
+                asm.peer_table
+                    .get(LOCAL_ACTOR_LINK_ID)
+                    .unwrap()
+                    .link_state_machine
+                    .add_internal_actor_address(addr.into());
+            }
+        }
     }
 
     //
