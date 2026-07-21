@@ -232,7 +232,7 @@ We assume:
 Create a file called `zpr-full-access.zpl` with these contents:
 
 ```
-Define WebService as a service with endpoint.zpr.adapter.cn:'web.zpr.org'.
+Define WebService as a service with device.zpr.adapter.cn:'web.zpr.org'.
 Allow user to access WebService.
 ```
 
@@ -241,14 +241,14 @@ Create a file called `zpr-full-access.zplc` with these contents.
 
 ```toml
 [nodes."node"]
-provider = [ ["endpoint.zpr.adapter.cn", "node.zpr.org"]]
+provider = [ ["device.zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "fd5a:5052:90de::1"
 
 [trusted_services.default]
 
 [visa_service]
 dock_node = "node"
-admin_attrs = [ [ "endpoint.zpr.adapter.cn", "admin.zpr.org" ] ]
+admin_attrs = [ [ "device.zpr.adapter.cn", "admin.zpr.org" ] ]
 
 [bootstrap]
 "node.zpr.org" = "node-public-key.pem"
@@ -365,6 +365,11 @@ visa-service traffic is not routed to it.
 
 ## Updates
 
++ July 21, 2026
+  + **Breaking:** the ZPL `endpoint` class and its `endpoint.*` attribute domain
+    were renamed to `device` / `device.*` (e.g. `endpoint.zpr.adapter.cn` →
+    `device.zpr.adapter.cn`). Requires `zpr-common` v0.20.0; device-era compiled
+    policy is not wire-compatible with endpoint-era runtimes.
 + June 11, 2026
   + `ca_file` is now optional for adapters (was previously required at startup).
   + Adapter `certificate_file` is optional; a self-signed cert is generated from `name` when absent.
