@@ -40,12 +40,11 @@ use crate::prelude::*;
 use base64::prelude::*;
 use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
-use openssl::rand::rand_bytes;
+use rand::{TryRngCore, rngs::OsRng};
 use std::fmt::{self, Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
-
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
 const MSG_BUF_SIZE: usize = 4096;
@@ -410,7 +409,7 @@ impl KeyManagerStateMachine for KmNoise {
                 return Err(KmError::ConfigurationError);
             }
         };
-        rand_bytes(&mut self.recv_hmac_key).unwrap(); // generate an HMAC key
+        OsRng.try_fill_bytes(&mut self.recv_hmac_key).expect("OS RNG Failed"); // generate an HMAC key
         self.send_hmac_key = None;
         if self.initiate {
             let rpk = self.peer_pub_key.as_ref().unwrap();

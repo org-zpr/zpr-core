@@ -2086,6 +2086,7 @@ dependencies = [
  "clap",
  "crossterm",
  "openssl",
+ "rand 0.9.4",
  "ratatui",
  "rcgen",
  "rustls",

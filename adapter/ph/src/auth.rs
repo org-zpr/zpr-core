@@ -11,11 +11,11 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
-use openssl::rand::rand_bytes;
 use openssl::rsa::Padding;
 use openssl::sign::Signer;
 use openssl::x509::X509;
 
+use rand::{TryRngCore, rngs::OsRng};
 use reqwest::StatusCode;
 use reqwest::header;
 use reqwest::redirect::Policy;
@@ -279,7 +279,9 @@ impl ZdpInitAuthenticationPayload {
             .as_secs() as u64;
         let be_time = ctime.to_be_bytes();
         let mut nonce = [0u8; 8];
-        rand_bytes(&mut nonce).expect("failed to generate random bytes for nonce");
+        OsRng
+            .try_fill_bytes(&mut nonce)
+            .expect("failed to generate random bytes for nonce");
         let mut hasher = blake3::Hasher::new_keyed(&key);
         hasher.update(&nonce);
         hasher.update(&be_time);

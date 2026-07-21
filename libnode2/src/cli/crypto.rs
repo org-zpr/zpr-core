@@ -2,9 +2,9 @@
 
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
-use openssl::rand::rand_bytes;
 use openssl::rsa::Rsa;
 use openssl::sign::Signer;
+use rand::{TryRngCore, rngs::OsRng};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,7 +20,7 @@ pub fn build_self_signed_blob(
     private_key: &PKey<Private>,
 ) -> Result<SelfSignedBlob, Box<dyn std::error::Error>> {
     let mut challenge = vec![0u8; 32];
-    rand_bytes(&mut challenge)?;
+    OsRng.try_fill_bytes(&mut challenge)?;
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
