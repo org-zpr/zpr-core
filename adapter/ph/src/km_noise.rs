@@ -409,7 +409,9 @@ impl KeyManagerStateMachine for KmNoise {
                 return Err(KmError::ConfigurationError);
             }
         };
-        OsRng.try_fill_bytes(&mut self.recv_hmac_key).expect("OS RNG Failed"); // generate an HMAC key
+        OsRng
+            .try_fill_bytes(&mut self.recv_hmac_key)
+            .expect("OS RNG Failed"); // generate an HMAC key
         self.send_hmac_key = None;
         if self.initiate {
             let rpk = self.peer_pub_key.as_ref().unwrap();

@@ -12,7 +12,7 @@ use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use enum_map::EnumMap;
-use rand::{rngs::OsRng, TryRngCore};
+use rand::{TryRngCore, rngs::OsRng};
 use rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use std::default::Default;
 use std::future::Future;
@@ -92,7 +92,9 @@ impl PeerState {
 
         let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
         if link_type == LinkType::NodeToAdapter {
-            OsRng.try_fill_bytes(&mut key).expect("failed to generate random bytes for peer auth key");
+            OsRng
+                .try_fill_bytes(&mut key)
+                .expect("failed to generate random bytes for peer auth key");
         }
         Self {
             substrate_addr,

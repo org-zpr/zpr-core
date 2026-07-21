@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 admin-api = { path = "../admin-api" }
+aws-lc-rs = "1.17"
 arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }

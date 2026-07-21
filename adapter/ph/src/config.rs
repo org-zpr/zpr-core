@@ -7,7 +7,7 @@ use zpr::packet_info::{KM_ID_NOISE, KM_ID_NULL, KmId};
 
 use admin_api::get_data_home;
 use base64::prelude::*;
-use openssl::pkey::PKey;
+use libnode::rsa_sign::load_rsa_key;
 use serde::Deserialize;
 
 use crate::assembly::PhMode;
@@ -289,7 +289,7 @@ impl Config {
                     e
                 ))
             })?;
-            let priv_key = PKey::private_key_from_pem(pemdata.as_bytes()).map_err(|e| {
+            let priv_key = load_rsa_key(pemdata.as_bytes()).map_err(|e| {
                 ArgsError::ParseError(format!(
                     "failed to parse bas_key file {}: {:?}",
                     path.display(),

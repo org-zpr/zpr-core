@@ -1,12 +1,11 @@
 //! Cryptographic helpers used by lntest for key loading and self-signed blob construction.
 
-use openssl::hash::MessageDigest;
-use openssl::pkey::{PKey, Private};
-use openssl::rsa::Rsa;
-use openssl::sign::Signer;
+use crate::rsa_sign::{load_rsa_key, sign_rsa_key};
+use aws_lc_rs::signature::RsaKeyPair;
 use rand::{TryRngCore, rngs::OsRng};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zpr::vsapi_types::{ChallengeAlg, SelfSignedBlob};
 
@@ -17,7 +16,7 @@ use zpr::vsapi_types::{ChallengeAlg, SelfSignedBlob};
 /// RSA PKCS#1 v1.5, and returns the completed blob.
 pub fn build_self_signed_blob(
     cn: &str,
-    private_key: &PKey<Private>,
+    private_key: &RsaKeyPair,
 ) -> Result<SelfSignedBlob, Box<dyn std::error::Error>> {
     let mut challenge = vec![0u8; 32];
     OsRng.try_fill_bytes(&mut challenge)?;
@@ -32,9 +31,7 @@ pub fn build_self_signed_blob(
     data.extend_from_slice(cn.as_bytes());
     data.extend_from_slice(&challenge);
 
-    let mut signer = Signer::new(MessageDigest::sha256(), private_key)?;
-    signer.update(&data)?;
-    let raw_signature = signer.sign_to_vec()?;
+    let raw_signature = sign_rsa_key(private_key, &data);
 
     Ok(SelfSignedBlob {
         alg: ChallengeAlg::RsaSha256Pkcs1v15,
@@ -46,9 +43,9 @@ pub fn build_self_signed_blob(
 }
 
 /// Load an RSA private key from a PEM file.
-pub fn load_private_key(keyfile: &Path) -> Result<PKey<Private>, Box<dyn std::error::Error>> {
+pub fn load_private_key(
+    keyfile: &Path,
+) -> Result<Arc<RsaKeyPair>, Box<dyn std::error::Error + Send + Sync>> {
     let key_data = fs::read(keyfile)?;
-    let rsa = Rsa::private_key_from_pem(&key_data)?;
-    let pkey = PKey::from_rsa(rsa)?;
-    Ok(pkey)
+    Ok(load_rsa_key(&key_data)?)
 }
