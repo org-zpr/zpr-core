@@ -13,8 +13,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-use openssl::x509::X509;
-
 use rand::{TryRngCore, rngs::OsRng};
 use reqwest::StatusCode;
 use reqwest::header;
@@ -27,7 +25,7 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::pki::get_cn_from_cert;
+use crate::pki::{Cert, get_cn_from_cert};
 
 /// When a node signs a challenge for an adapter it uses this sort of key.
 pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
@@ -215,7 +213,7 @@ impl ZdpSelfSignedBlob {
     ///   - The blob is not older than `MAX_BLOB_AGE_SECONDS`.
     pub fn verify_blob_challenge(
         &self,
-        peer_cert: &X509,
+        peer_cert: &Cert,
         key: &[u8; AUTH_KEY_SIZE_BYTES],
     ) -> Result<(), AuthError> {
         if let Some(link_cn) = get_cn_from_cert(peer_cert) {
@@ -442,7 +440,7 @@ impl OAuthRsa {
     pub async fn authenticate(
         &self,
         service_addr: SocketAddr,
-        tls_cert: X509,
+        tls_cert: Cert,
     ) -> Result<ZdpAuthCodeBlob, AuthError> {
         let der = tls_cert.to_der().unwrap();
         let tls_cert = Certificate::from_der(&der).unwrap();

@@ -594,8 +594,6 @@ impl KeyManagerStateMachine for KmNoise {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    use openssl::x509::X509;
     use tokio::sync::mpsc;
     use tokio::task::yield_now;
     use tokio::time::timeout;
@@ -603,6 +601,7 @@ mod test {
 
     use crate::km;
     use crate::km_testdata::test::*;
+    use crate::pki::Cert;
 
     #[test]
     fn test_noise_handshake_manually_1() {
@@ -761,7 +760,7 @@ mod test {
         assert!(i_transport.peer_cert.is_some());
 
         {
-            let actual_i_cert = match X509::from_pem(ADAPTER_CERT_DATA.as_bytes()) {
+            let actual_i_cert = match Cert::from_pem(ADAPTER_CERT_DATA.as_bytes()) {
                 Ok(cert) => cert,
                 Err(e) => {
                     panic!("error constructing cert from PEM data: {}", e);
@@ -776,7 +775,7 @@ mod test {
         }
 
         {
-            let actual_r_cert = match X509::from_pem(NODE_CERT_DATA.as_bytes()) {
+            let actual_r_cert = match Cert::from_pem(NODE_CERT_DATA.as_bytes()) {
                 Ok(cert) => cert,
                 Err(e) => {
                     panic!("error constructing cert from PEM data: {}", e);

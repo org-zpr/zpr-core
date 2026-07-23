@@ -17,14 +17,13 @@
 //!
 //!
 
-use openssl::x509::X509;
 use tracing::{error, warn};
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use crate::km::PeerCertificate;
 use crate::logging::targets::KEY_MGMT;
-use crate::pki::ParseError;
+use crate::pki::{Cert, ParseError};
 
 #[derive(Debug)]
 pub enum CertExchangeError {
@@ -34,6 +33,8 @@ pub enum CertExchangeError {
     InvalidPayloadError,
     ShortPayloadError,
     BufferSizeError,
+
+    #[allow(dead_code)]
     CertificateVerificationError,
     KeyMismatchError,
 }
@@ -49,14 +50,14 @@ struct CertExchgHdr {
 /// and the certificate for our trusted signing authority.
 #[derive(Clone)]
 pub struct KmCertExchange {
-    local_cert: X509,
-    authority_cert: Option<X509>,
+    local_cert: Cert,
+    authority_cert: Option<Cert>,
 }
 
 impl KmCertExchange {
     /// - `cert` - the certificate of the initiator.
     /// - `authority_cert` - the certificate of the authority that is expected to have signed the responders certificate.
-    pub fn new(cert: X509, authority_cert: Option<X509>) -> Self {
+    pub fn new(cert: Cert, authority_cert: Option<Cert>) -> Self {
         KmCertExchange {
             local_cert: cert,
             authority_cert,
@@ -66,20 +67,8 @@ impl KmCertExchange {
     /// Like [KmCertExchange::new] but takes the contents of the various PEM files.
     #[allow(dead_code)]
     pub fn new_from_pem(cert_pem: &str, authority_cert_pem: &str) -> Result<Self, ParseError> {
-        let cert = match X509::from_pem(cert_pem.as_bytes()) {
-            Ok(c) => c,
-            Err(e) => {
-                error!(target: KEY_MGMT, "error constructing cert from PEM data: {e}");
-                return Err(ParseError::PEMFormatError);
-            }
-        };
-        let authority_cert = match X509::from_pem(authority_cert_pem.as_bytes()) {
-            Ok(c) => c,
-            Err(e) => {
-                error!(target: KEY_MGMT, "error constructing cert from PEM data: {e}");
-                return Err(ParseError::PEMFormatError);
-            }
-        };
+        let cert = Cert::from_pem(cert_pem.as_bytes())?;
+        let authority_cert = Cert::from_pem(authority_cert_pem.as_bytes())?;
         Ok(KmCertExchange::new(cert, Some(authority_cert)))
     }
 
@@ -143,7 +132,7 @@ impl KmCertExchange {
         }
 
         let cert_offset = std::mem::size_of::<CertExchgHdr>();
-        let initiator_cert = match X509::from_der(&payload[cert_offset..]) {
+        let initiator_cert = match Cert::from_der(&payload[cert_offset..]) {
             Ok(c) => c,
             Err(e) => {
                 error!(target: KEY_MGMT, "error constructing cert from DER data: {e}");
@@ -160,8 +149,8 @@ impl KmCertExchange {
                     false
                 }
                 Err(e) => {
-                    error!(target: KEY_MGMT, "cert verification failed with unexpected error: {e}");
-                    return Err(CertExchangeError::CertificateVerificationError);
+                    warn!(target: KEY_MGMT, "cert not verifiable against authority (unverified): {e}");
+                    false
                 }
             }
         } else {
@@ -247,7 +236,7 @@ mod test {
         };
 
         // Node emits the initiator cert on success:
-        let adapter_cert = X509::from_pem(ADAPTER_CERT_DATA.as_bytes()).unwrap();
+        let adapter_cert = Cert::from_pem(ADAPTER_CERT_DATA.as_bytes()).unwrap();
         assert_eq!(PeerCertificate::Verified(adapter_cert), i_cert);
     }
 

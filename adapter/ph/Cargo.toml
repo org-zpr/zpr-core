@@ -31,8 +31,8 @@ libc = { version = "0.2.183" }
 libnode = { package = "libnode2", path = "../../libnode2" }
 nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll", "uio"] }
 open-enum = { version = "0.5.1" }
-openssl = { workspace = true }
-openssl-sys = { version = "0.9.102" }
+pem = "3"
+pkcs8 = "0.11"
 rand = "0.9.3"
 rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.1", default-features = false }
 replace_with = "0.1.8"
@@ -53,6 +53,9 @@ zerocopy = { version = "0.8.3", features = ["derive", "std"] }
 zpr = { workspace = true }
 zpr-ext = { workspace = true, features = ["bytes", "tokio", "socket2", "zerocopy"] }
 zpr-utils = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-utils-v0.2.0"}
+x509-cert = { version = "0.3.0", features = ["builder"] }
+x509-parser = "0.18"
+ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "alloc"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7.4", optional = true }
