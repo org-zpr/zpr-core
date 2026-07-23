@@ -8,12 +8,9 @@ mod rusty_helper;
 use crate::main_args::{CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkCommands};
 use admin_api::rpc_commands::RpcCommands;
 use admin_api::v1 as cli;
-use cbpf_rs;
 use clap::Parser;
 use cli::cmd_line_inter as svc;
-use pcap::{Capture, Linktype};
 use rustyline::{CompletionType, Config, Editor, error::ReadlineError, history::FileHistory};
-use std::borrow::Borrow;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
@@ -28,6 +25,13 @@ use tokio::time::{Duration, sleep};
 #[cfg(not(feature = "capnp-ancillary"))]
 use tokio_util::compat::*;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
+
+#[cfg(feature = "pcap")]
+use {
+    cbpf_rs,
+    pcap::{Capture, Linktype},
+    std::borrow::Borrow,
+};
 
 #[allow(unused_imports)]
 use ctrlc;
@@ -47,12 +51,18 @@ enum CliError {
     ParseError(String),
     #[error("RPC error: {0}")]
     RpcError(String),
-    #[error("Pcap error: {0}")]
-    CaptureError(#[from] pcap::Error),
     #[error("Deserialization Error")]
     DeserializationError(#[from] std::array::TryFromSliceError),
     #[error("ReadLineError")]
     ReadLineError(#[from] ReadlineError),
+
+    #[allow(dead_code)]
+    #[error("Feature Not Enabled: {0}")]
+    FeatureNotEnabled(String),
+
+    #[cfg(feature = "pcap")]
+    #[error("Pcap error: {0}")]
+    CaptureError(#[from] pcap::Error),
 }
 
 // thiserror does not propagate From implementations up
@@ -362,6 +372,7 @@ async fn flush_capture_file_task(service: svc::Client) -> Result<(), CliError> {
 /// need to use the pcap library, and can just have knowledge of the serialized
 /// format and use exclusively cbpf-rs
 // TODO change parameters of set cap prog to take the actual bpf vals instead of string
+#[cfg(feature = "pcap")]
 async fn set_capture_program_task(service: svc::Client, program: String) -> Result<(), CliError> {
     let capture = Capture::dead(Linktype::USER0)?;
     let program = capture.compile(&program, true)?;
@@ -395,6 +406,13 @@ async fn set_capture_program_task(service: svc::Client, program: String) -> Resu
         }
     };
     Ok(())
+}
+
+#[cfg(not(feature = "pcap"))]
+async fn set_capture_program_task(_service: svc::Client, _program: String) -> Result<(), CliError> {
+    Err(CliError::FeatureNotEnabled(
+        "packet capture (pcap)".to_string(),
+    ))
 }
 
 async fn delete_capture_program_task(service: svc::Client) -> Result<(), CliError> {
