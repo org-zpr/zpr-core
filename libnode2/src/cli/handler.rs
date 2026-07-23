@@ -151,10 +151,10 @@ pub async fn run_handler(
                                 }
                             };
 
-                            let cn = match claims.iter().find(|c| c.key == "endpoint.zpr.adapter.cn") {
+                            let cn = match claims.iter().find(|c| c.key == crate::claims::key::CN) {
                                 Some(c) => c.value.clone(),
                                 None => {
-                                    let _ = output_tx.send("error: endpoint.zpr.adapter.cn claim is required".to_string());
+                                    let _ = output_tx.send("error: device.zpr.adapter.cn claim is required".to_string());
                                     continue;
                                 }
                             };

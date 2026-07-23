@@ -2212,6 +2212,7 @@ dependencies = [
  "tui-input",
  "x509-parser",
  "zpr 0.19.0",
+ "zpr 0.20.0",
 ]
 
 [[package]]
@@ -2747,7 +2748,7 @@ dependencies = [
  "x509-cert",
  "x509-parser",
  "zerocopy",
- "zpr 0.19.0",
+ "zpr 0.20.0",
  "zpr-ext",
  "zpr-utils",
 ]
@@ -5354,8 +5355,8 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.19.0"
-source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.19.0#0c705e82c520a1114275782ab870a60a4dafd7e2"
+version = "0.20.0"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.20.0#76b909ebce8d865b99fd6659ffda7b560423f120"
 dependencies = [
  "base64 0.22.1",
  "bytes",

@@ -40,7 +40,7 @@ pub fn help(output_tx: &mpsc::UnboundedSender<String>) {
         "                               authorize an adapter connection".to_string(),
         "                               Claims are key:value pairs (split on first ':')."
             .to_string(),
-        "                               The endpoint.zpr.adapter.cn claim is required.".to_string(),
+        "                               The device.zpr.adapter.cn claim is required.".to_string(),
         "  notify_disconnect <ZPR_ADDR>  : notify VS to disconnect an adapter".to_string(),
     ];
     for line in &lines {
