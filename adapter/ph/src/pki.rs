@@ -65,8 +65,8 @@ pub struct PubKey {
 }
 
 impl PubKey {
-    pub fn raw_public_key(&self) -> Result<Vec<u8>, ParseError> {
-        Ok(self.key.clone())
+    pub fn raw_public_key(&self) -> &[u8] {
+        &self.key
     }
 }
 
@@ -104,13 +104,13 @@ impl Cert {
     }
 
     /// The DER encoding of the certificate.
-    pub fn to_der(&self) -> Result<Vec<u8>, ParseError> {
-        Ok(self.der.clone())
+    pub fn to_der(&self) -> &[u8] {
+        &self.der
     }
 
     /// The PEM encoding of the certificate. (Used in tests)
     #[allow(dead_code)]
-    pub fn to_pem(&self) -> Result<Vec<u8>, ParseError> {
+    pub fn to_pem(&self) -> Vec<u8> {
         let b64 = BASE64_STANDARD.encode(&self.der);
         let mut out = String::with_capacity(b64.len() + 64);
         out.push_str(PEM_BEGIN_CERTIFICATE);
@@ -121,7 +121,7 @@ impl Cert {
         }
         out.push_str(PEM_END_CERTIFICATE);
         out.push('\n');
-        Ok(out.into_bytes())
+        out.into_bytes()
     }
 
     /// The certificate subject's Common Name
@@ -382,5 +382,70 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
         let self_signed_cert = generate_self_signed_noise_cert("foo.zpr", &keypair).unwrap();
         let cn = get_cn_from_cert(&self_signed_cert).unwrap();
         assert_eq!(cn, "foo.zpr".to_string());
+    }
+
+    const TEST_X25519_PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VuBCIEINjp9Br1Ykn9R6D2sCUkOUMJKSEZXMX5JPR65vb6+yl6\n-----END PRIVATE KEY-----\n";
+    const TEST_X25519_PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VuAyEAFlTnsuk9He+ISGuIRgE37erOxcR3HhV3fFJt4NSyUH4=\n-----END PUBLIC KEY-----\n";
+
+    fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_load_noise_keys_roundtrip() {
+        use crate::km_noise::derive_public_key;
+
+        let priv_path = write_temp("zpr_test_noise_priv.pem", TEST_X25519_PRIV_PEM);
+        let pub_path = write_temp("zpr_test_noise_pub.pem", TEST_X25519_PUB_PEM);
+
+        let priv_key = load_noise_private_key(&priv_path).unwrap();
+        let pub_key = load_noise_public_key(&pub_path).unwrap();
+
+        std::fs::remove_file(&priv_path).ok();
+        std::fs::remove_file(&pub_path).ok();
+
+        assert_eq!(priv_key.len(), NOISE_KEY_LEN);
+        assert_eq!(pub_key.len(), NOISE_KEY_LEN);
+        assert_eq!(derive_public_key(&priv_key), pub_key);
+    }
+
+    #[test]
+    fn test_verify_ed25519_signature() {
+        const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
+
+        let mut seed = [0u8; 32];
+        OsRng.try_fill_bytes(&mut seed).unwrap();
+        let signer = EdSigningKey::from_bytes(&seed);
+        let verifying = signer.verifying_key();
+
+        let name = Name::from_str("CN=ed25519.test").unwrap();
+        let mut serial_bytes = [0u8; 16];
+        OsRng.try_fill_bytes(&mut serial_bytes).unwrap();
+        serial_bytes[0] &= 0x7f;
+        let serial = SerialNumber::new(&serial_bytes).unwrap();
+        let validity = Validity::from_now(Duration::from_hours(24)).unwrap();
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid: ID_ED25519,
+                parameters: None,
+            },
+            subject_public_key: BitString::from_bytes(verifying.as_bytes()).unwrap(),
+        };
+        let builder =
+            CertificateBuilder::new(NoiseCertProfile { name }, serial, validity, spki).unwrap();
+        let built = builder.build::<_, EdSignature>(&signer).unwrap();
+        let cert = Cert {
+            der: built.to_der().unwrap(),
+        };
+
+        let pubkey = cert.public_key().unwrap();
+        // The correct Ed25519 key verifies the signature.
+        assert!(cert.verify(&pubkey).unwrap());
+        // A tampered key does not.
+        let mut other = pubkey.raw_public_key().to_vec();
+        other[0] ^= 0xff;
+        assert!(!cert.verify(&PubKey { key: other }).unwrap());
     }
 }

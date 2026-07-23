@@ -28,14 +28,10 @@ use crate::pki::{Cert, ParseError};
 #[derive(Debug)]
 pub enum CertExchangeError {
     CertificateFormatError,
-    KeyError,
     CertificateParseError,
     InvalidPayloadError,
     ShortPayloadError,
     BufferSizeError,
-
-    #[allow(dead_code)]
-    CertificateVerificationError,
     KeyMismatchError,
 }
 
@@ -78,7 +74,7 @@ impl KmCertExchange {
     /// - [CertExchangeError::BufferSizeError] - the buffer is too short to hold the payload.
     /// - [CertExchangeError::CertificateFormatError] - the certificate is too large to be encoded in the payload.
     pub fn write_payload(&self, buf: &mut impl bytes::BufMut) -> Result<(), CertExchangeError> {
-        let cert_der = self.local_cert.to_der().unwrap();
+        let cert_der = self.local_cert.to_der();
         if cert_der.len() > u16::MAX as usize {
             return Err(CertExchangeError::CertificateFormatError);
         }
@@ -92,7 +88,7 @@ impl KmCertExchange {
             cert_len: sz.into(),
         };
         buf.put(msg.as_bytes());
-        buf.put(cert_der.as_slice());
+        buf.put_slice(cert_der);
         Ok(())
     }
 
@@ -105,10 +101,8 @@ impl KmCertExchange {
     /// - [CertExchangeError::ShortPayloadError] - the payload is too short to be valid.
     /// - [CertExchangeError::InvalidPayloadError] - unable to parse our header from the payload.
     /// - [CertExchangeError::CertificateParseError] - unable to parse the DER encoded certificate from the payload.
-    /// - [CertExchangeError::CertificateVerificationError] - the certificate failed signature verification (not signed by expected authority).
     /// - [CertExchangeError::KeyMismatchError] - the public key in the certificate does not match the `expected_peer_key`.
     /// - [CertExchangeError::CertificateFormatError] - unable to get a public key from the certificate.
-    /// - [CertExchangeError::KeyError] - OpenSSL unable to get the raw public key form.
     pub fn process_payload(
         &self,
         payload: &[u8],
@@ -166,16 +160,8 @@ impl KmCertExchange {
             }
         };
 
-        match initiator_public_key.raw_public_key() {
-            Ok(p) => {
-                if p != *expected_peer_public_key {
-                    return Err(CertExchangeError::KeyMismatchError);
-                }
-            }
-            Err(e) => {
-                error!(target: KEY_MGMT, "unable to get raw public key: {e}");
-                return Err(CertExchangeError::KeyError);
-            }
+        if initiator_public_key.raw_public_key() != expected_peer_public_key {
+            return Err(CertExchangeError::KeyMismatchError);
         }
         let peer_result = if is_verified {
             PeerCertificate::Verified(initiator_cert)
@@ -269,7 +255,7 @@ mod test {
         let keypair = NoiseKeypair::generate();
 
         let self_signed_cert = generate_self_signed_noise_cert("foo.zpl", &keypair).unwrap();
-        let self_signed_cert_pem = self_signed_cert.to_pem().unwrap();
+        let self_signed_cert_pem = self_signed_cert.to_pem();
         let self_signed_cert_pem_str = String::from_utf8(self_signed_cert_pem).unwrap();
 
         let adapter_exchanger =

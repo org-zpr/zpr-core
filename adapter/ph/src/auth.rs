@@ -442,8 +442,8 @@ impl OAuthRsa {
         service_addr: SocketAddr,
         tls_cert: Cert,
     ) -> Result<ZdpAuthCodeBlob, AuthError> {
-        let der = tls_cert.to_der().unwrap();
-        let tls_cert = Certificate::from_der(&der).unwrap();
+        let der = tls_cert.to_der();
+        let tls_cert = Certificate::from_der(der).unwrap();
 
         let nonce_buf = self.preauthorize(service_addr, &tls_cert).await?;
 
