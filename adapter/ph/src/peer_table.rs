@@ -121,13 +121,22 @@ impl PeerState {
     }
 
     /// Creates a "dummy" peer for referencing internal links.
-    pub fn new_internal_peer(link_id: NonZero<LinkId>, peer_id: Option<NonZero<LinkId>>) -> Self {
+    pub fn new_internal_peer<Worker>(
+        link_id: NonZero<LinkId>,
+        peer_id: Option<NonZero<LinkId>>,
+        launch_mgmt_processor_worker: impl FnOnce(
+            mpsc::Receiver<queues::MgmtProcessorMessage>,
+        ) -> Worker,
+    ) -> Self
+    where
+        Worker: Future<Output = ()> + 'static,
+    {
         let mut ps = PeerState::new(
             link_id,
             LinkType::Internal,
             std::net::SocketAddrV6::new(std::net::Ipv6Addr::from_bits(0), 0, 0, 0).into(),
             ScopedIpv6Addr::new(std::net::Ipv6Addr::from_bits(0), 0).into(),
-            |_| std::future::pending(),
+            launch_mgmt_processor_worker,
         );
         ps.link_state_machine.internal_peer_id = peer_id;
         ps
@@ -182,20 +191,36 @@ impl PeerTable {
     /// at startup, before dynamic entries have been added.)
     pub fn insert_internal_peer(&self) -> NonZero<LinkId> {
         let entry = self.vacant_entry().unwrap();
-        let peer = PeerState::new_internal_peer(entry.key(), None);
+        let peer = PeerState::new_internal_peer(entry.key(), None, |_| std::future::pending());
         entry.insert(peer)
     }
 
-    pub fn insert_internal_peer_pair(&self) -> (NonZero<LinkId>, NonZero<LinkId>) {
+    pub fn insert_internal_peer_pair<Worker>(
+        &self,
+        launch_mgmt_processor_worker: impl Fn(
+            NonZero<LinkId>,
+            mpsc::Receiver<queues::MgmtProcessorMessage>,
+        ) -> Worker,
+    ) -> (NonZero<LinkId>, NonZero<LinkId>)
+    where
+        Worker: Future<Output = ()> + 'static,
+    {
         let entry1 = self.vacant_entry().unwrap();
         // we have to "guess" at the next slot, since we can't hold two vacant entries open concurrently
-        let link_id2 = entry1.key().checked_add(1).unwrap();
-        let peer1 = PeerState::new_internal_peer(entry1.key(), Some(link_id2));
-        let link_id1 = entry1.insert(peer1);
+        let link_id1 = entry1.key();
+        let link_id2 = link_id1.checked_add(1).unwrap();
+        let peer1 = PeerState::new_internal_peer(link_id1, Some(link_id2), |q| {
+            launch_mgmt_processor_worker(link_id1, q)
+        });
+        entry1.insert(peer1);
 
         let entry2 = self.vacant_entry().unwrap();
-        let peer2 = PeerState::new_internal_peer(entry2.key(), Some(link_id1));
-        assert_eq!(link_id2, entry2.insert(peer2));
+        assert_eq!(entry2.key(), link_id2);
+        let peer2 = PeerState::new_internal_peer(link_id2, Some(link_id1), |q| {
+            launch_mgmt_processor_worker(link_id2, q)
+        });
+        entry2.insert(peer2);
+
         (link_id1, link_id2)
     }
 

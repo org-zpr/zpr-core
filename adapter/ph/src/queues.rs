@@ -288,6 +288,30 @@ impl MgmtDispatchFactory {
     }
 }
 
+pub struct MgmtHairpinDispatch {
+    sender: mpsc::Sender<Packet>,
+}
+
+impl MgmtHairpinDispatch {
+    pub fn new(sender: mpsc::Sender<Packet>) -> Self {
+        Self { sender }
+    }
+
+    pub fn try_dispatch_mgmt_packet_with_link(
+        &self,
+        packet: Packet,
+    ) -> Result<(), TryEnqueueError<Packet>> {
+        debug_assert_ne!(packet.metadata().ingress_link_id, 0);
+        match self.sender.try_send(packet) {
+            Ok(()) => Ok(()),
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                panic!("mgmt hairpin dispatch channel closed")
+            }
+            Err(mpsc::error::TrySendError::Full(pkt)) => Err(TryEnqueueError::Full(pkt)),
+        }
+    }
+}
+
 pub enum AdapterManagerMessage {
     RequestTetherId(Packet),
 }

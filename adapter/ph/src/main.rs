@@ -239,6 +239,7 @@ fn main() -> ExitCode {
         packet_buffer_socket_pair(topology_config.capture_queue_size).unwrap();
     let (md_inq_factory, md_outq) =
         two_way_queue::two_way_queue(topology_config.mgmt_dispatch_queue_size);
+    let (mhd_inq, mhd_outq) = mpsc::channel(topology_config.mgmt_dispatch_queue_size);
     let (am_inq_factory, am_outq) =
         two_way_queue::two_way_queue(topology_config.adapter_manager_queue_size);
     let (km_sig_inq, km_sig_outq) = mpsc::channel(topology_config.km_signal_queue_size);
@@ -552,6 +553,7 @@ fn main() -> ExitCode {
         elt: adapter_tables::EndpointLookupTable::new(),
         dlt: adapter_tables::DockLookupTable::new(),
         mgmt_dispatch_factory: MgmtDispatchFactory::new(md_inq_factory),
+        mgmt_hairpin_dispatch: MgmtHairpinDispatch::new(mhd_inq),
         adapter_manager_factory: AdapterManagerFactory::new(am_inq_factory),
         km_state: KmState::new(km_inq, km_sig_inq),
         self_noise_keypair: Some(self_noise_keypair),
@@ -600,9 +602,19 @@ fn main() -> ExitCode {
         PhMode::Node => {
             // instantiate the "fake" local actor and dock links
 
-            let (lalid, dlid) = asm.peer_table.insert_internal_peer_pair();
+            let (lalid, dlid) = asm.peer_table.insert_internal_peer_pair(|link_id, q| {
+                mgmt_processor_worker::launch(
+                    mgmt_processor_worker::Config { link_id },
+                    asm.clone(),
+                    q,
+                )
+            });
             assert_eq!(lalid.get(), LOCAL_ACTOR_LINK_ID);
             assert_eq!(dlid.get(), DOCK_LINK_ID);
+
+            // For now, we use ZDPR for flow control on internal mgmt links.
+            tokio::task::spawn_local(zdpr_worker::launch(asm.clone(), lalid.get()));
+            tokio::task::spawn_local(zdpr_worker::launch(asm.clone(), dlid.get()));
 
             // Nodes use the local actor link as the source of bind requests from the
             // internal adapter, which require that the originator has a valid
@@ -624,7 +636,7 @@ fn main() -> ExitCode {
     let mut js = JoinSet::new();
 
     js.spawn_local(signal_worker::launch(asm.clone()));
-    js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
+    js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq, mhd_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
     #[cfg(not(feature = "capnp-ancillary"))]
     js.spawn_local(set_capture_file_worker::launch(

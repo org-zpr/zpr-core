@@ -180,6 +180,7 @@ pub enum LinkStateError {
 pub enum LinkType {
     Internal,
     AdapterToNode,
+    #[allow(dead_code)]
     NodeToNode, // Currently unsupported
     NodeToAdapter,
 }
