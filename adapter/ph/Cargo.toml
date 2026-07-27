@@ -31,7 +31,6 @@ libc = { version = "0.2.183" }
 libnode = { package = "libnode2", path = "../../libnode2" }
 nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll", "uio"] }
 open-enum = { version = "0.5.1" }
-pem = "3"
 pkcs8 = "0.11"
 rand = "0.9.3"
 rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.1", default-features = false }

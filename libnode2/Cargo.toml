@@ -10,7 +10,6 @@ capnp = { workspace = true }
 capnp-rpc = { workspace = true }
 clap = { workspace = true, optional = true }
 thiserror = { workspace = true }
-pem = "3"
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

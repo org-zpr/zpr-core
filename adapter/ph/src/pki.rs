@@ -4,6 +4,7 @@ use base64::prelude::{BASE64_STANDARD, Engine as _};
 use ed25519_dalek::{Signature as EdSignature, SigningKey as EdSigningKey};
 use rand::{TryRngCore, rngs::OsRng};
 use std::fs;
+use std::io::Cursor;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
@@ -30,6 +31,7 @@ use x509_cert::{
 use pkcs8::PrivateKeyInfoRef;
 use x509_parser::certificate::X509Certificate;
 use x509_parser::oid_registry::{OID_PKCS1_SHA256WITHRSA, OID_SIG_ED25519};
+use x509_parser::pem::Pem;
 use x509_parser::prelude::FromDer;
 
 use crate::km_noise::NoiseKeypair;
@@ -222,11 +224,11 @@ pub fn load_cert(path: &Path) -> Result<Cert, ParseError> {
 /// Load a private X22519 key from a PEM file
 pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
     let contents = fs::read_to_string(path)?;
-    let block = pem::parse(contents.as_bytes()).map_err(|e| {
+    let (block, _) = Pem::read(Cursor::new(contents.as_bytes())).map_err(|e| {
         error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
         ParseError::PEMFormatError
     })?;
-    let pki = PrivateKeyInfoRef::try_from(block.contents()).map_err(|e| {
+    let pki = PrivateKeyInfoRef::try_from(block.contents.as_slice()).map_err(|e| {
         error!(target: KEY_MGMT, "error parsing PKCS#8 private key: {e}");
         ParseError::KeyError
     })?;
@@ -249,11 +251,11 @@ pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseE
 /// Load a public X22519 key from a PEM file
 pub fn load_noise_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
     let contents = fs::read_to_string(path)?;
-    let block = pem::parse(contents.as_bytes()).map_err(|e| {
+    let (block, _) = Pem::read(Cursor::new(contents.as_bytes())).map_err(|e| {
         error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
         ParseError::PEMFormatError
     })?;
-    let spki = SubjectPublicKeyInfoOwned::from_der(block.contents()).map_err(|e| {
+    let spki = SubjectPublicKeyInfoOwned::from_der(block.contents.as_slice()).map_err(|e| {
         error!(target: KEY_MGMT, "error parsing SubjectPublicKeyInfo: {e}");
         ParseError::KeyError
     })?;
