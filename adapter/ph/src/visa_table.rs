@@ -273,7 +273,9 @@ impl VisaTable {
         peer_table: &peer_table::PeerTable,
         visa_id: VisaId,
     ) -> Result<(), VisaTableError> {
-        self.revoke_no_rebuild(peer_table, visa_id)?;
+        // The only error from `revoke_no_rebuild` is a HashMap::remove miss. If the visa
+        // is gone we consider it "revoked".
+        let _ = self.revoke_no_rebuild(peer_table, visa_id);
         self.lookup_table = FiveTupleLookupTable::new();
         self.lookup_table.add_hash_to_table(&self.table);
 
