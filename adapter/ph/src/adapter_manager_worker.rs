@@ -4,7 +4,6 @@ use crate::mgmt::{self, core::MgmtSendError, core::PacketStatus};
 use crate::prelude::*;
 use crate::queues::AdapterManagerMessage;
 use crate::two_way_queue;
-use std::num::NonZero;
 use tokio;
 
 pub async fn launch(
@@ -78,47 +77,31 @@ fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
 
     debug!(target: FLOW_MGMT, "{}: Issuing bind request for {five_tuple} (is now set PENDING)", asm.formatted_link_id(dock_link_id));
 
-    match asm.ph_mode {
-        PhMode::Adapter => {
-            let task_asm = asm.clone();
-            tokio::task::spawn_local(async move {
-                // Bind requests are "large", since they contain packet
-                // bodies, and may be manifestly undeliverable by the
-                // network due to MTU or middleware issues.  So we allow
-                // them to deterministically time out, returning an error
-                // to the requestor.
-                match mgmt::requests::send_bind_actor_address_request(
-                    &task_asm,
-                    dock_link_id,
-                    txn_id,
-                    five_tuple.l3_type,
-                    &packet_body,
-                )
-                .limit_retries(config::DEFAULT_ZDPR_RETRY_LIMIT)
-                .await
-                {
-                    Ok(PacketStatus::Acked) => (),
-
-                    Ok(PacketStatus::Canceled) => {
-                        mgmt::adapter::deny_tether(
-                            &task_asm,
-                            &txn,
-                            "Network error issuing bind request",
-                        )
-                        .unwrap();
-                    }
-
-                    Err(MgmtSendError::LinkClosed) => (),
-                }
-            });
-        }
-
-        PhMode::Node => mgmt::dock::bind_actor_address(
-            asm,
-            NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
+    let task_asm = asm.clone();
+    tokio::task::spawn_local(async move {
+        // Bind requests are "large", since they contain packet
+        // bodies, and may be manifestly undeliverable by the
+        // network due to MTU or middleware issues.  So we allow
+        // them to deterministically time out, returning an error
+        // to the requestor.
+        match mgmt::requests::send_bind_actor_address_request(
+            &task_asm,
+            dock_link_id,
             txn_id,
             five_tuple.l3_type,
             &packet_body,
-        ),
-    }
+        )
+        .limit_retries(config::DEFAULT_ZDPR_RETRY_LIMIT)
+        .await
+        {
+            Ok(PacketStatus::Acked) => (),
+
+            Ok(PacketStatus::Canceled) => {
+                mgmt::adapter::deny_tether(&task_asm, &txn, "Network error issuing bind request")
+                    .unwrap();
+            }
+
+            Err(MgmtSendError::LinkClosed) => (),
+        }
+    });
 }

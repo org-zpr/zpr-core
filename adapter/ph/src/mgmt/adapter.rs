@@ -6,7 +6,7 @@
 //! adapter in response to a message from a node, or directly by a node
 //! managing its local adapter.
 
-use super::{dock, txn_mgr};
+use super::txn_mgr;
 use crate::adapter_tables::{DltPep, EltPep};
 use crate::counters::ManagementCounterType;
 use crate::prelude::*;
@@ -52,58 +52,26 @@ pub fn bind_egress_stream(
     match asm.dlt.insert(pep) {
         Ok(tid) => {
             // TODO: maybe tick a counter somewhere?
-            match asm.ph_mode {
-                PhMode::Node => {
-                    // we're a node operating on our internal adapter; "respond" directly to local dock
-                    let dock_peer_state = asm.peer_table.get(LOCAL_ACTOR_LINK_ID).unwrap();
-                    let txn = dock_peer_state
-                        .txn_mgr
-                        .get(txn_id)
-                        .expect("local dock lost transaction");
-                    dock::install_tether(
-                        asm,
-                        NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
-                        &txn,
-                        tid,
-                    )
-                    .expect("local dock rejected tether response");
-                }
-
-                PhMode::Adapter => super::requests::send_bind_egress_stream_success_response(
-                    asm,
-                    dock_link_id.get(),
-                    txn_id,
-                    tid,
-                )
-                .enqueue(),
-            }
+            super::requests::send_bind_egress_stream_success_response(
+                asm,
+                dock_link_id.get(),
+                txn_id,
+                tid,
+            )
+            .enqueue();
         }
 
         Err(()) => {
             // DLT full; respond with error message
             let msg = "DLT full";
             // TODO: maybe tick a counter somewhere?
-
-            match asm.ph_mode {
-                PhMode::Node => {
-                    // we're a node operating on our internal adapter; "respond" directly to local dock
-                    let dock_peer_state = asm.peer_table.get(LOCAL_ACTOR_LINK_ID).unwrap();
-                    let txn = dock_peer_state
-                        .txn_mgr
-                        .get(txn_id)
-                        .expect("local dock lost transaction");
-                    dock::deny_tether(asm, NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(), &txn, msg)
-                        .expect("local dock rejected tether response");
-                }
-
-                PhMode::Adapter => super::requests::send_bind_egress_stream_error_response(
-                    asm,
-                    dock_link_id.get(),
-                    txn_id,
-                    msg,
-                )
-                .enqueue(),
-            }
+            super::requests::send_bind_egress_stream_error_response(
+                asm,
+                dock_link_id.get(),
+                txn_id,
+                msg,
+            )
+            .enqueue();
         }
     }
 }
