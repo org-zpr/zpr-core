@@ -22,15 +22,15 @@ pub fn special_peer_names_from_subject_der(dn_der: &[u8]) -> EnumSet<SpecialPeer
 mod test {
     use super::*;
     use crate::km_noise::NoiseKeypair;
-    use crate::pki::generate_self_signed_noise_cert;
+    use crate::pki::{self, generate_self_signed_noise_cert};
     use zpr::dn::VISA_SERVICE_CN;
 
     #[test]
     fn matches_visa_service_dn() {
         let keypair = NoiseKeypair::generate();
         let cert = generate_self_signed_noise_cert(VISA_SERVICE_CN, &keypair).unwrap();
-        assert_eq!(cert.subject_der().as_slice(), VISA_SERVICE_DN);
-        let names = special_peer_names_from_subject_der(&cert.subject_der());
+        assert_eq!(pki::subject_der(&cert).as_slice(), VISA_SERVICE_DN);
+        let names = special_peer_names_from_subject_der(&pki::subject_der(&cert));
         assert!(names.contains(SpecialPeerName::VisaServiceAdapter));
     }
 
@@ -38,6 +38,6 @@ mod test {
     fn ignores_other_dn() {
         let keypair = NoiseKeypair::generate();
         let cert = generate_self_signed_noise_cert("not-special.zpr", &keypair).unwrap();
-        assert!(special_peer_names_from_subject_der(&cert.subject_der()).is_empty());
+        assert!(special_peer_names_from_subject_der(&pki::subject_der(&cert)).is_empty());
     }
 }

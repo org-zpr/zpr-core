@@ -1,19 +1,22 @@
-//! RSA signinging helpers using aws-lc-rs
+//! RSA signing helpers using aws-lc-rs
 
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
-use std::io::Cursor;
-use x509_parser::pem::Pem;
+use x509_cert::der::pem;
+
+use crate::pki::first_pem_block;
 
 //Wrapped potential errors
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 //Parses to create RSA key pair
 pub fn load_rsa_key(pem_bytes: &[u8]) -> Result<RsaKeyPair, BoxError> {
-    let (block, _) = Pem::read(Cursor::new(pem_bytes))?;
-    let key = match block.label.as_str() {
-        "RSA PRIVATE KEY" => RsaKeyPair::from_der(block.contents.as_slice())?,
-        "PRIVATE KEY" => RsaKeyPair::from_pkcs8(block.contents.as_slice())?,
+    let text = std::str::from_utf8(pem_bytes)?;
+    let pem_block = first_pem_block(text).ok_or("no PEM block found")?;
+    let (label, der) = pem::decode_vec(pem_block.as_bytes())?;
+    let key = match label {
+        "RSA PRIVATE KEY" => RsaKeyPair::from_der(&der)?,
+        "PRIVATE KEY" => RsaKeyPair::from_pkcs8(&der)?,
         other => return Err(format!("unsupported PEM tag: {other}").into()),
     };
     Ok(key)

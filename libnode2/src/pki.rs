@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
-use x509_parser::certificate::X509Certificate;
-use x509_parser::prelude::FromDer;
+use x509_cert::Certificate;
+use x509_cert::der::{Decode, pem};
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
@@ -19,14 +19,26 @@ pub enum ParseError {
     IOError(#[from] std::io::Error),
 }
 
+/// Isolate the first PEM block
+pub fn first_pem_block(text: &str) -> Option<&str> {
+    let begin = text.find("-----BEGIN ")?;
+    let rest = &text[begin..];
+    let end = rest.find("-----END ")?;
+    let line_end = rest[end..]
+        .find('\n')
+        .map(|i| end + i + 1)
+        .unwrap_or(rest.len());
+    Some(&rest[..line_end])
+}
+
 /// Get the CN from DER-encoded certificate
 pub fn get_cn_from_cert(der: &[u8]) -> Option<String> {
-    let (_, cert) = X509Certificate::from_der(der).ok()?;
-    cert.subject()
-        .iter_common_name()
-        .next()
-        .and_then(|attr| attr.as_str().ok())
-        .map(|s| s.to_string())
+    let cert = Certificate::from_der(der).ok()?;
+    cert.tbs_certificate()
+        .subject()
+        .common_name()
+        .ok()?
+        .map(|cn| cn.value().to_string())
 }
 
 /// Load a certificate from a file.
@@ -36,9 +48,9 @@ pub fn load_cert(path: &Path) -> Result<Vec<u8>, ParseError> {
         Err(e) => return Err(ParseError::IOError(e)),
     };
     let cert_pem_data = extract_cert_pem_data(&contents)?;
-    let (_, pem) = x509_parser::pem::parse_x509_pem(cert_pem_data.as_bytes())
+    let (_, der) = pem::decode_vec(cert_pem_data.as_bytes())
         .map_err(|e| ParseError::PEMFormatError(e.to_string()))?;
-    Ok(pem.contents)
+    Ok(der)
 }
 
 /// Look for first instance of "-----BEGIN CERTIFICATE-----" and return that up to and

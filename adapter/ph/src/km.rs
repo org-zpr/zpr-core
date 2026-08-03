@@ -8,7 +8,7 @@
 //! of a [KeyManagerStateMachine] which does the actual work of creating and
 //! parsing key management ZDP messages.
 
-use crate::pki::Cert;
+use crate::pki;
 use crate::prelude::*;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use bytes::Bytes;
@@ -21,6 +21,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
+use x509_cert::Certificate;
 
 #[derive(Debug, Error)]
 #[allow(dead_code)]
@@ -89,21 +90,35 @@ pub enum DecryptionError {
 /// The key exchange process always swaps certificates, but they may or may not
 /// be signed by our trusted CA. In particular, adapters may create self-signed
 /// certificates.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum PeerCertificate {
-    Verified(Cert),
-    Unverified(Cert),
+    Verified(Certificate),
+    Unverified(Certificate),
+}
+
+/// only prints subject name instead of the whole cert for simpler debug output
+impl fmt::Debug for PeerCertificate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let state = match self {
+            PeerCertificate::Verified(_) => "Verified",
+            PeerCertificate::Unverified(_) => "Unverified",
+        };
+        f.debug_struct("PeerCertificate")
+            .field("state", &state)
+            .field("subject", &pki::subject_name(self.get_cert()).to_string())
+            .finish()
+    }
 }
 
 impl PeerCertificate {
-    pub fn get_cert(&self) -> &Cert {
+    pub fn get_cert(&self) -> &Certificate {
         match self {
             PeerCertificate::Verified(cert) => cert,
             PeerCertificate::Unverified(cert) => cert,
         }
     }
     pub fn common_name(&self) -> Option<String> {
-        self.get_cert().common_name()
+        pki::common_name(self.get_cert())
     }
 }
 

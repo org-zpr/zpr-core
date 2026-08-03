@@ -18,12 +18,13 @@
 //!
 
 use tracing::{error, warn};
+use x509_cert::Certificate;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use crate::km::PeerCertificate;
 use crate::logging::targets::KEY_MGMT;
-use crate::pki::{Cert, ParseError};
+use crate::pki::{self, ParseError};
 
 #[derive(Debug)]
 pub enum CertExchangeError {
@@ -46,14 +47,14 @@ struct CertExchgHdr {
 /// and the certificate for our trusted signing authority.
 #[derive(Clone)]
 pub struct KmCertExchange {
-    local_cert: Cert,
-    authority_cert: Option<Cert>,
+    local_cert: Certificate,
+    authority_cert: Option<Certificate>,
 }
 
 impl KmCertExchange {
     /// - `cert` - the certificate of the initiator.
     /// - `authority_cert` - the certificate of the authority that is expected to have signed the responders certificate.
-    pub fn new(cert: Cert, authority_cert: Option<Cert>) -> Self {
+    pub fn new(cert: Certificate, authority_cert: Option<Certificate>) -> Self {
         KmCertExchange {
             local_cert: cert,
             authority_cert,
@@ -63,8 +64,8 @@ impl KmCertExchange {
     /// Like [KmCertExchange::new] but takes the contents of the various PEM files.
     #[allow(dead_code)]
     pub fn new_from_pem(cert_pem: &str, authority_cert_pem: &str) -> Result<Self, ParseError> {
-        let cert = Cert::from_pem(cert_pem.as_bytes())?;
-        let authority_cert = Cert::from_pem(authority_cert_pem.as_bytes())?;
+        let cert = pki::from_pem(cert_pem.as_bytes())?;
+        let authority_cert = pki::from_pem(authority_cert_pem.as_bytes())?;
         Ok(KmCertExchange::new(cert, Some(authority_cert)))
     }
 
@@ -74,7 +75,8 @@ impl KmCertExchange {
     /// - [CertExchangeError::BufferSizeError] - the buffer is too short to hold the payload.
     /// - [CertExchangeError::CertificateFormatError] - the certificate is too large to be encoded in the payload.
     pub fn write_payload(&self, buf: &mut impl bytes::BufMut) -> Result<(), CertExchangeError> {
-        let cert_der = self.local_cert.to_der();
+        let cert_der =
+            pki::to_der(&self.local_cert).map_err(|_| CertExchangeError::CertificateFormatError)?;
         if cert_der.len() > u16::MAX as usize {
             return Err(CertExchangeError::CertificateFormatError);
         }
@@ -88,7 +90,7 @@ impl KmCertExchange {
             cert_len: sz.into(),
         };
         buf.put(msg.as_bytes());
-        buf.put_slice(cert_der);
+        buf.put_slice(&cert_der);
         Ok(())
     }
 
@@ -126,7 +128,7 @@ impl KmCertExchange {
         }
 
         let cert_offset = std::mem::size_of::<CertExchgHdr>();
-        let initiator_cert = match Cert::from_der(&payload[cert_offset..]) {
+        let initiator_cert = match pki::from_der(&payload[cert_offset..cert_offset + cert_len]) {
             Ok(c) => c,
             Err(e) => {
                 error!(target: KEY_MGMT, "error constructing cert from DER data: {e}");
@@ -135,8 +137,7 @@ impl KmCertExchange {
         };
 
         let is_verified = if let Some(authority_cert) = &self.authority_cert {
-            let authority_pkey = authority_cert.public_key().unwrap(); // TODO: check this unwrap in ctor
-            match initiator_cert.verify(&authority_pkey) {
+            match pki::verify(&initiator_cert, pki::public_key(authority_cert)) {
                 Ok(true) => true,
                 Ok(false) => {
                     warn!(target: KEY_MGMT, "cert failed signature verification");
@@ -151,16 +152,11 @@ impl KmCertExchange {
             false
         };
 
-        // Extract the public key from the cert and check it against expected
-        let initiator_public_key = match initiator_cert.public_key() {
-            Ok(p) => p,
-            Err(e) => {
-                error!(target: KEY_MGMT, "error extracting public key from cert: {e}");
-                return Err(CertExchangeError::CertificateFormatError);
-            }
-        };
-
-        if initiator_public_key.raw_public_key() != expected_peer_public_key {
+        if pki::public_key(&initiator_cert)
+            .subject_public_key
+            .raw_bytes()
+            != expected_peer_public_key
+        {
             return Err(CertExchangeError::KeyMismatchError);
         }
         let peer_result = if is_verified {
@@ -222,7 +218,7 @@ mod test {
         };
 
         // Node emits the initiator cert on success:
-        let adapter_cert = Cert::from_pem(ADAPTER_CERT_DATA.as_bytes()).unwrap();
+        let adapter_cert = pki::from_pem(ADAPTER_CERT_DATA.as_bytes()).unwrap();
         assert_eq!(PeerCertificate::Verified(adapter_cert), i_cert);
     }
 
@@ -255,8 +251,7 @@ mod test {
         let keypair = NoiseKeypair::generate();
 
         let self_signed_cert = generate_self_signed_noise_cert("foo.zpl", &keypair).unwrap();
-        let self_signed_cert_pem = self_signed_cert.to_pem();
-        let self_signed_cert_pem_str = String::from_utf8(self_signed_cert_pem).unwrap();
+        let self_signed_cert_pem_str = pki::to_pem(&self_signed_cert).unwrap();
 
         let adapter_exchanger =
             KmCertExchange::new_from_pem(&self_signed_cert_pem_str, CA_CERT_DATA).unwrap();

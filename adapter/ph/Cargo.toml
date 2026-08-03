@@ -54,7 +54,6 @@ zpr = { workspace = true }
 zpr-ext = { workspace = true, features = ["bytes", "tokio", "socket2", "zerocopy"] }
 zpr-utils = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-utils-v0.2.0"}
 x509-cert = { version = "0.3.0", features = ["builder"] }
-x509-parser = "0.18"
 ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "alloc"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

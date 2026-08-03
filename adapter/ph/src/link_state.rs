@@ -4,7 +4,7 @@ use crate::km::{PeerCertificate, ZPIPair};
 use crate::km_multiplexor;
 use crate::mgmt;
 use crate::mgmt::core::{MgmtSendError, PacketStatus};
-use crate::pki::Cert;
+use crate::pki;
 use crate::prelude::*;
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
@@ -584,7 +584,7 @@ impl LinkStateWrapper {
             let require_ca_signature = asm.config.get().ca_file.is_some();
             let (cert, is_verified) = match peer_cert {
                 PeerCertificate::Unverified(cert) => {
-                    warn!(target: LINK_STATE, "{} has unverified name {:?}", asm.formatted_link_id(link_id), cert.common_name());
+                    warn!(target: LINK_STATE, "{} has unverified name {}", asm.formatted_link_id(link_id), pki::subject_name(cert));
                     if require_ca_signature {
                         // If this node has been configured with a CA certificate for checking these things
                         // then these rules kick in:
@@ -611,13 +611,14 @@ impl LinkStateWrapper {
                     (cert, false)
                 }
                 PeerCertificate::Verified(cert) => {
-                    info!(target: LINK_STATE, "{} has verified name {:?}", asm.formatted_link_id(link_id), cert.common_name());
+                    info!(target: LINK_STATE, "{} has verified name {}", asm.formatted_link_id(link_id), pki::subject_name(cert));
                     (cert, true)
                 }
             };
 
             if !is_verified {
-                for name in special_peers::special_peer_names_from_subject_der(&cert.subject_der())
+                for name in
+                    special_peers::special_peer_names_from_subject_der(&pki::subject_der(cert))
                 {
                     warn!(
                         target: LINK_STATE,
@@ -626,7 +627,8 @@ impl LinkStateWrapper {
                 }
             } else {
                 // assign special-peer name if this peer is special
-                for name in special_peers::special_peer_names_from_subject_der(&cert.subject_der())
+                for name in
+                    special_peers::special_peer_names_from_subject_der(&pki::subject_der(cert))
                 {
                     match asm.peer_table.assign_special_name(name, link_id) {
                         Ok(()) => {
@@ -1359,7 +1361,7 @@ impl LinkStateWrapper {
         }
         let service_addr = asa_addrs[0];
 
-        let tls_cert = Cert::from_pem(auth::HARD_CODED_BAS_TLS_CERT_PEM.as_bytes()).unwrap();
+        let tls_cert = pki::from_pem(auth::HARD_CODED_BAS_TLS_CERT_PEM.as_bytes()).unwrap();
         let task_asm = asm.clone();
 
         tokio::task::spawn_local(async move {
