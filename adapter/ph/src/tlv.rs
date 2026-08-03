@@ -7,6 +7,7 @@ use zpr_utils::net_defs::IpAddress;
 
 const SOCKADDR_LEN_V4: u8 = 6; // 4 bytes for IPv4 + 2 bytes for port
 const SOCKADDR_LEN_V6: u8 = 18; // 16 bytes for IPv6 + 2 bytes for port
+const X25519_KEY_LEN: u8 = 32; // 32 bytes for X25519 key
 
 #[derive(Debug, Error)]
 pub enum TlvError {
@@ -28,6 +29,7 @@ impl DataType {
     pub const ASA: TlvType = 4; // Authentication Service SocketAddress
     pub const STATIC_ADDR: TlvType = 5; // Static Address - used for static address requests from an adapter
     pub const WINDOW_SIZE: TlvType = 6;
+    pub const A2A_DH_PUBKEY: TlvType = 7; // Actor to Actor Diffie-Hellman Key
 }
 
 /// TlvEncoding is a designed to be an easy way to create and write TLV data
@@ -111,6 +113,7 @@ impl TlvEncoding {
             TlvValue::Ipv6Addr(v) => put_ipv6addr(buf, self.tlv_type, v),
             TlvValue::Ipv4Addr(v) => put_ipv4addr(buf, self.tlv_type, v),
             TlvValue::SocketAddr(v) => put_socketaddr(buf, self.tlv_type, v),
+            TlvValue::X25519PubKey(v) => put_x25519_pub_key(buf, self.tlv_type, v),
         }
     }
 }
@@ -123,6 +126,7 @@ pub enum TlvValue {
     Ipv6Addr(Ipv6Addr),
     Ipv4Addr(Ipv4Addr),
     SocketAddr(SocketAddr),
+    X25519PubKey(x25519_dalek::PublicKey),
 }
 
 impl std::fmt::Display for TlvValue {
@@ -134,6 +138,7 @@ impl std::fmt::Display for TlvValue {
             TlvValue::Ipv6Addr(v) => write!(f, "{v}"),
             TlvValue::Ipv4Addr(v) => write!(f, "{v}"),
             TlvValue::SocketAddr(v) => write!(f, "{v}"),
+            TlvValue::X25519PubKey(v) => write!(f, "{v:?}"),
         }
     }
 }
@@ -196,6 +201,15 @@ fn put_ipv4addr(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: &Ipv4Addr
     };
     buf.put_slice(&hdr.as_bytes());
     buf.put_slice(&value.octets());
+}
+
+fn put_x25519_pub_key(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: &x25519_dalek::PublicKey) {
+    let hdr = TLVHdr {
+        tlv_type,
+        tlv_length: X25519_KEY_LEN,
+    };
+    buf.put_slice(&hdr.as_bytes());
+    buf.put_slice(value.as_bytes());
 }
 
 fn put_socketaddr(
@@ -302,6 +316,19 @@ pub fn parse_from_buf(
                         return Err(TlvError::BadStructure); // Invalid length for ASA
                     }
                 }
+            }
+            DataType::A2A_DH_PUBKEY => {
+                if tlv_length != X25519_KEY_LEN {
+                    return Err(TlvError::BadStructure);
+                }
+                let mut key_bytes = [0u8; X25519_KEY_LEN as usize];
+                buf.copy_to_slice(&mut key_bytes);
+                tlv_map
+                    .entry(tlv_type)
+                    .or_insert_with(Vec::new)
+                    .push(TlvValue::X25519PubKey(x25519_dalek::PublicKey::from(
+                        key_bytes,
+                    )));
             }
             DataType::WINDOW_SIZE => {
                 if tlv_length != 2 {
