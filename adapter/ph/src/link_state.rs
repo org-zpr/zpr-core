@@ -642,7 +642,8 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            mgmt::requests::send_hello_request(asm, self.id).enqueue();
+            let pub_key = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
+            mgmt::requests::send_hello_request(asm, self.id, pub_key).enqueue();
             self.set_timeout(asm, &mut locked_fsm, config::LINK_HELLO_TIMEOUT);
             debug!(
                 target: LINK_STATE,

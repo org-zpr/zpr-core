@@ -29,7 +29,7 @@ impl DataType {
     pub const ASA: TlvType = 4; // Authentication Service SocketAddress
     pub const STATIC_ADDR: TlvType = 5; // Static Address - used for static address requests from an adapter
     pub const WINDOW_SIZE: TlvType = 6;
-    pub const A2A_DH_PUBKEY: TlvType = 7; // Actor to Actor Diffie-Hellman Key
+    pub const A2A_DH_PUBKEY: TlvType = 7; // Actor to Actor Diffie-Hellman Public Key
 }
 
 /// TlvEncoding is a designed to be an easy way to create and write TLV data
@@ -101,6 +101,14 @@ impl TlvEncoding {
         TlvEncoding {
             tlv_type: DataType::WINDOW_SIZE,
             value: TlvValue::U16(window_size),
+        }
+    }
+
+    /// Actor to Actor Diffie-Hellman Public Key
+    pub fn new_a2a_dh_pubkey(pub_key: x25519_dalek::PublicKey) -> TlvEncoding {
+        TlvEncoding {
+            tlv_type: DataType::A2A_DH_PUBKEY,
+            value: TlvValue::X25519PubKey(pub_key),
         }
     }
 
@@ -203,7 +211,11 @@ fn put_ipv4addr(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: &Ipv4Addr
     buf.put_slice(&value.octets());
 }
 
-fn put_x25519_pub_key(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: &x25519_dalek::PublicKey) {
+fn put_x25519_pub_key(
+    buf: &mut dyn bytes::BufMut,
+    tlv_type: TlvType,
+    value: &x25519_dalek::PublicKey,
+) {
     let hdr = TLVHdr {
         tlv_type,
         tlv_length: X25519_KEY_LEN,
@@ -697,6 +709,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_bad_x25519_pub_key_length() {
+        let mut buf = BytesMut::new();
+
+        // Claim 16 bytes for a key that must be 32
+        buf.put_u8(DataType::A2A_DH_PUBKEY);
+        buf.put_u8(16);
+        buf.put_slice(&[0xabu8; 16]);
+
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader);
+
+        assert!(matches!(result, Err(TlvError::BadStructure)));
+    }
+
+    #[test]
     fn test_empty_buffer() {
         let buf = BytesMut::new();
         let mut buf_reader = buf.as_ref();
@@ -805,6 +832,33 @@ mod tests {
         match &values[0] {
             TlvValue::SocketAddr(addr) => assert_eq!(*addr, test_addr),
             _ => panic!("Expected SocketAddr value for ASA"),
+        }
+    }
+
+    #[test]
+    fn test_put_and_parse_x25519_pub_key() {
+        let mut buf = BytesMut::new();
+        let secret = x25519_dalek::ReusableSecret::random();
+        let test_key = x25519_dalek::PublicKey::from(&secret);
+
+        // Write the TLV
+        put_x25519_pub_key(&mut buf, DataType::A2A_DH_PUBKEY, &test_key);
+
+        // Check the wire structure before parsing it back
+        assert_eq!(buf.as_ref()[0], DataType::A2A_DH_PUBKEY);
+        assert_eq!(buf.as_ref()[1], X25519_KEY_LEN);
+        assert_eq!(buf.len(), 2 + X25519_KEY_LEN as usize);
+
+        // Parse it back
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader).unwrap();
+
+        assert_eq!(result.len(), 1);
+        let values = result.get(&DataType::A2A_DH_PUBKEY).unwrap();
+        assert_eq!(values.len(), 1);
+        match &values[0] {
+            TlvValue::X25519PubKey(key) => assert_eq!(*key, test_key),
+            _ => panic!("Expected X25519PubKey value for A2A_DH_PUBKEY"),
         }
     }
 
