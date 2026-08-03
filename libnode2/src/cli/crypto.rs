@@ -2,7 +2,6 @@
 
 use crate::rsa_sign::{load_rsa_key, sign_rsa_key};
 use aws_lc_rs::signature::RsaKeyPair;
-use rand::{TryRngCore, rngs::OsRng};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,7 +17,7 @@ pub fn build_self_signed_blob(
     private_key: &RsaKeyPair,
 ) -> Result<SelfSignedBlob, Box<dyn std::error::Error>> {
     let mut challenge = vec![0u8; 32];
-    OsRng.try_fill_bytes(&mut challenge)?;
+    aws_lc_rs::rand::fill(&mut challenge)?;
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)

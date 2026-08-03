@@ -152,7 +152,6 @@ where
 mod test {
 
     use super::*;
-    use rand::Rng;
     use serial_test::{parallel, serial};
     use std::env;
     use std::fs;
@@ -172,13 +171,14 @@ mod test {
 
     impl TempFile {
         fn new_toml(contents: &str) -> TempFile {
-            let mut rng = rand::rng();
             let tstamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
             let dir = env::temp_dir();
-            let num: u32 = rng.random();
+            let mut buf = [0u8; 4];
+            aws_lc_rs::rand::fill(&mut buf).unwrap();
+            let num = u32::from_be_bytes(buf);
             let path = dir.join(format!("org_zpr_ph_test_main_{}_{}.toml", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
             TempFile {

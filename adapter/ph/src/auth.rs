@@ -13,7 +13,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-use rand::{TryRngCore, rngs::OsRng};
 use reqwest::StatusCode;
 use reqwest::header;
 use reqwest::redirect::Policy;
@@ -279,9 +278,7 @@ impl ZdpInitAuthenticationPayload {
             .as_secs() as u64;
         let be_time = ctime.to_be_bytes();
         let mut nonce = [0u8; 8];
-        OsRng
-            .try_fill_bytes(&mut nonce)
-            .expect("failed to generate random bytes for nonce");
+        aws_lc_rs::rand::fill(&mut nonce).expect("failed to generate random bytes for nonce");
         let mut hasher = blake3::Hasher::new_keyed(&key);
         hasher.update(&nonce);
         hasher.update(&be_time);

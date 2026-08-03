@@ -1,7 +1,6 @@
 //! Collection of PKI related utility functions.
 use aws_lc_rs::signature::{self, UnparsedPublicKey};
 use ed25519_dalek::{Signature as EdSignature, SigningKey as EdSigningKey};
-use rand::{TryRngCore, rngs::OsRng};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
@@ -292,7 +291,7 @@ pub fn generate_self_signed_noise_cert(
     let name = Name::from_str(&format!("CN={cn}"))?;
 
     let mut serial_bytes = [0u8; 16];
-    OsRng.try_fill_bytes(&mut serial_bytes)?;
+    aws_lc_rs::rand::fill(&mut serial_bytes)?;
     serial_bytes[0] &= 0x7f;
     let serial = SerialNumber::new(&serial_bytes)?;
 
@@ -307,7 +306,7 @@ pub fn generate_self_signed_noise_cert(
     };
 
     let mut seed = [0u8; 32];
-    OsRng.try_fill_bytes(&mut seed)?;
+    aws_lc_rs::rand::fill(&mut seed)?;
 
     let signer = EdSigningKey::from_bytes(&seed);
 
@@ -397,13 +396,13 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
         const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 
         let mut seed = [0u8; 32];
-        OsRng.try_fill_bytes(&mut seed).unwrap();
+        aws_lc_rs::rand::fill(&mut seed).unwrap();
         let signer = EdSigningKey::from_bytes(&seed);
         let verifying = signer.verifying_key();
 
         let name = Name::from_str("CN=ed25519.test").unwrap();
         let mut serial_bytes = [0u8; 16];
-        OsRng.try_fill_bytes(&mut serial_bytes).unwrap();
+        aws_lc_rs::rand::fill(&mut serial_bytes).unwrap();
         serial_bytes[0] &= 0x7f;
         let serial = SerialNumber::new(&serial_bytes).unwrap();
         let validity = Validity::from_now(Duration::from_hours(24)).unwrap();

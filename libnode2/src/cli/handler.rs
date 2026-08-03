@@ -4,7 +4,6 @@
 //! processes lifecycle events, user commands, and incoming VSS messages until
 //! the user disconnects.
 
-use rand::{TryRngCore, rngs::OsRng};
 use std::net::{IpAddr, Ipv4Addr};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::AbortHandle;
@@ -168,7 +167,7 @@ pub async fn run_handler(
                             };
 
                             let mut rand_octets = [0u8; 3];
-                            OsRng.try_fill_bytes(&mut rand_octets).expect("OS RNG Failed");
+                            aws_lc_rs::rand::fill(&mut rand_octets).expect("OS RNG Failed");
                             let substrate_addr = IpAddr::V4(Ipv4Addr::new(
                                 10, rand_octets[0], rand_octets[1], rand_octets[2],
                             ));

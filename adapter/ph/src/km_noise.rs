@@ -40,7 +40,6 @@ use crate::prelude::*;
 use base64::prelude::*;
 use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
-use rand::{TryRngCore, rngs::OsRng};
 use std::fmt::{self, Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
@@ -409,9 +408,7 @@ impl KeyManagerStateMachine for KmNoise {
                 return Err(KmError::ConfigurationError);
             }
         };
-        OsRng
-            .try_fill_bytes(&mut self.recv_hmac_key)
-            .expect("OS RNG Failed"); // generate an HMAC key
+        aws_lc_rs::rand::fill(&mut self.recv_hmac_key).expect("OS RNG Failed"); // generate an HMAC key
         self.send_hmac_key = None;
         if self.initiate {
             let rpk = self.peer_pub_key.as_ref().unwrap();
