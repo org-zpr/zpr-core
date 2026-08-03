@@ -556,6 +556,7 @@ fn main() -> ExitCode {
         km_state: KmState::new(km_inq, km_sig_inq),
         self_noise_keypair: Some(self_noise_keypair),
         peer_noise_keypair,
+        a2a_dh_keypair: x25519_dalek::ReusableSecret::random(),
         certx: Some(certx),
         system_start_time,
         address_pool: std::sync::Mutex::new(None),

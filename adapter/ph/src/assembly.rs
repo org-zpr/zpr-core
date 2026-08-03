@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
+use x25519_dalek::ReusableSecret;
 use zpr::vsapi_types::AuthServicesList;
 use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 
@@ -88,6 +89,7 @@ pub struct Assembly {
 
     pub self_noise_keypair: Option<NoiseKeypair>,
     pub peer_noise_keypair: Option<NoiseKeypair>,
+    pub a2a_dh_keypair: ReusableSecret,
     pub certx: Option<KmCertExchange>,
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
@@ -538,6 +540,7 @@ pub mod test {
             km_state,
             self_noise_keypair: None,
             peer_noise_keypair: None,
+            a2a_dh_keypair: ReusableSecret::random(),
             certx: None,
             system_start_time: std::time::Instant::now(),
             address_pool: std::sync::Mutex::new(None),
