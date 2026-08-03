@@ -125,7 +125,7 @@ pub struct VSConn {
     cmd_rx: mpsc::Receiver<VS2Command>,
     vs_addr: SocketAddr,
     node_cn: String,
-    node_private_key: Arc<RsaKeyPair>,
+    node_private_key: RsaKeyPair,
     life_tx: broadcast::Sender<VSConnLifecycleEvent>,
     connect_fn: ConnectFn,
 }
@@ -194,7 +194,7 @@ impl VSConn {
         buffer_size: usize,
         vs_addr: SocketAddr,
         node_cn: String,
-        node_private_key: Arc<RsaKeyPair>,
+        node_private_key: RsaKeyPair,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
         let (life_tx, _) = broadcast::channel(LIFECYCLE_EVENT_BUFFER_SIZE);
@@ -663,12 +663,7 @@ impl VSConn {
                     alg
                 )));
             }
-            sign_payload(
-                timestamp,
-                &self.node_cn,
-                chal_data,
-                self.node_private_key.clone(),
-            )
+            sign_payload(timestamp, &self.node_cn, chal_data, &self.node_private_key)
         };
 
         // Now authenticate with the gate.
@@ -1032,14 +1027,14 @@ fn sign_payload(
     timestamp: u64,
     cn: &str,
     challenge_data: &[u8],
-    private_key: Arc<RsaKeyPair>,
+    private_key: &RsaKeyPair,
 ) -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(&timestamp.to_be_bytes());
     data.extend_from_slice(cn.as_bytes());
     data.extend_from_slice(challenge_data);
 
-    sign_rsa_key(&private_key, &data)
+    sign_rsa_key(private_key, &data)
 }
 
 /// Wrap a Cap'n Proto RPC future with a timeout, mapping errors to VSApiError.
@@ -1138,7 +1133,7 @@ mod tests {
         fn new_for_test(
             vs_addr: SocketAddr,
             node_cn: String,
-            node_private_key: Arc<RsaKeyPair>,
+            node_private_key: RsaKeyPair,
             connect_fn: ConnectFn,
         ) -> Self {
             let (cmd_tx, cmd_rx) = mpsc::channel(16);
@@ -1155,8 +1150,8 @@ mod tests {
         }
     }
 
-    fn test_key() -> Arc<RsaKeyPair> {
-        Arc::new(RsaKeyPair::generate(KeySize::Rsa2048).unwrap())
+    fn test_key() -> RsaKeyPair {
+        RsaKeyPair::generate(KeySize::Rsa2048).unwrap()
     }
 
     /// Connect function that always fails immediately with ConnectionRefused.

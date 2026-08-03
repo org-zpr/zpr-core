@@ -326,8 +326,10 @@ impl RsaBootstrapAuth {
     /// The visa service (policy) must be configured with the corresponding public key.
     pub fn new(cn: &str, rsa_keyfile: &Path) -> Result<Self, AuthError> {
         let pemdata = std::fs::read(rsa_keyfile)?;
-        let pkey = load_rsa_key(&pemdata)
-            .map_err(|e| AuthError::OpenSSLError(format!("Failed to load RSA key: {}", e)))?;
+        let pkey = Arc::new(
+            load_rsa_key(&pemdata)
+                .map_err(|e| AuthError::OpenSSLError(format!("Failed to load RSA key: {}", e)))?,
+        );
         Ok(RsaBootstrapAuth {
             pkey,
             cn: cn.to_string(),

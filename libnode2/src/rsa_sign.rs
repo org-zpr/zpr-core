@@ -3,21 +3,20 @@
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use std::io::Cursor;
-use std::sync::Arc;
 use x509_parser::pem::Pem;
 
 //Wrapped potential errors
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 //Parses to create RSA key pair
-pub fn load_rsa_key(pem_bytes: &[u8]) -> Result<Arc<RsaKeyPair>, BoxError> {
+pub fn load_rsa_key(pem_bytes: &[u8]) -> Result<RsaKeyPair, BoxError> {
     let (block, _) = Pem::read(Cursor::new(pem_bytes))?;
     let key = match block.label.as_str() {
         "RSA PRIVATE KEY" => RsaKeyPair::from_der(block.contents.as_slice())?,
         "PRIVATE KEY" => RsaKeyPair::from_pkcs8(block.contents.as_slice())?,
         other => return Err(format!("unsupported PEM tag: {other}").into()),
     };
-    Ok(Arc::new(key))
+    Ok(key)
 }
 
 //Signs RSA key pair padded with aws_lc_rs::rand random bytes

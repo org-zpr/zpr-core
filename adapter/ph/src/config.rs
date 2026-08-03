@@ -3,6 +3,7 @@
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{self, Path, PathBuf};
+use std::sync::Arc;
 use zpr::packet_info::{KM_ID_NOISE, KM_ID_NULL, KmId};
 
 use admin_api::get_data_home;
@@ -296,7 +297,7 @@ impl Config {
                     e
                 ))
             })?;
-            self.rsaoauth = Some(OAuthRsa::new(&cn, priv_key));
+            self.rsaoauth = Some(OAuthRsa::new(&cn, Arc::new(priv_key)));
         }
         Ok(())
     }

@@ -5,7 +5,6 @@ use aws_lc_rs::signature::RsaKeyPair;
 use rand::{TryRngCore, rngs::OsRng};
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zpr::vsapi_types::{ChallengeAlg, SelfSignedBlob};
 
@@ -45,7 +44,7 @@ pub fn build_self_signed_blob(
 /// Load an RSA private key from a PEM file.
 pub fn load_private_key(
     keyfile: &Path,
-) -> Result<Arc<RsaKeyPair>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<RsaKeyPair, Box<dyn std::error::Error + Send + Sync>> {
     let key_data = fs::read(keyfile)?;
     Ok(load_rsa_key(&key_data)?)
 }
