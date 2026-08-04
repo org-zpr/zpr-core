@@ -1,9 +1,21 @@
 # zpr-core
 Core ZPR components
 
-We are currently working towards Milestone 4.
+We are currently working towards Milestone 6.
 - See the [current iteration and backlog](https://github.com/orgs/org-zpr/projects/1/views/3).
-- See the [roadmap](https://github.com/orgs/org-zpr/projects/3/views/6).
+- See the [roadmap](https://github.com/orgs/org-zpr/projects/3/views/8).
+
+
+
+> **Pre-Release / Beta Notice**
+>
+> This repository is in active, early-stage development.
+>
+> - **Breaking changes may occur at any time** without prior notice or deprecation periods.
+> - The full suite of end to end security features are not yet implemented.
+> - Do **not** rely on these binaries for production systems until a stable release is announced.
+>
+> Feedback and contributions are welcome.
 
 
 ## Build Notes

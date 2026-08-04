@@ -311,6 +311,7 @@ impl FastpathWorker {
             EltEntry::Active(pep) => {
                 // compute A2A MAC
                 // TODO: use actual A2A SAID & keyed hash
+                // See https://github.com/org-zpr/zpr-core/issues/1349
                 let a2a_said: A2aSaid = 0;
                 let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
                 let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];

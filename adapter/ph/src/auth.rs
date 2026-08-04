@@ -492,6 +492,7 @@ impl OAuthRsa {
         service_addr: SocketAddr,
         tls_cert: &Certificate,
     ) -> Result<Vec<u8>, AuthError> {
+        // See https://github.com/org-zpr/zpr-core/issues/861
         let cb = reqwest::ClientBuilder::new()
             .add_root_certificate(tls_cert.clone())
             .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
