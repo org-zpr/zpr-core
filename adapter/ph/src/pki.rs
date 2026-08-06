@@ -137,17 +137,25 @@ pub fn verify(cert: &Certificate, key: &SubjectPublicKeyInfoOwned) -> Result<boo
         ParseError::DecodeError
     })?;
     let sig = cert.signature().raw_bytes();
-    let alg = &cert.signature_algorithm().oid;
+    let sig_alg = &cert.signature_algorithm().oid;
+    let key_alg = &key.algorithm.oid;
     let raw_key = key.subject_public_key.raw_bytes();
-
-    if *alg == OID_SHA256_WITH_RSA {
+    if *key_alg == OID_RSA_ENCRYPTION {
+        if *sig_alg != OID_SHA256_WITH_RSA {
+            error!(target: KEY_MGMT, "signature algorithm {sig_alg} is not valid for an RSA issuer key");
+            return Err(ParseError::KeyError);
+        }
         let vk = UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA256, raw_key);
         Ok(vk.verify(&tbs, sig).is_ok())
-    } else if *alg == OID_ED25519 {
+    } else if *key_alg == OID_ED25519 {
+        if *sig_alg != OID_ED25519 {
+            error!(target: KEY_MGMT, "signature algorithm {sig_alg} is not valid for an Ed25519 issuer key");
+            return Err(ParseError::KeyError);
+        }
         let vk = UnparsedPublicKey::new(&signature::ED25519, raw_key);
         Ok(vk.verify(&tbs, sig).is_ok())
     } else {
-        error!(target: KEY_MGMT, "unsupported certificate signature algorithm: {alg}");
+        error!(target: KEY_MGMT, "unsupported issuer public key algorithm: {key_alg}");
         Err(ParseError::KeyError)
     }
 }
@@ -254,7 +262,8 @@ pub fn get_cn_from_cert(cert: &Certificate) -> Option<String> {
     common_name(cert)
 }
 
-const ID_X25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
+const OID_X25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
+const OID_RSA_ENCRYPTION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
 const OID_SHA256_WITH_RSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
 const OID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 
@@ -299,7 +308,7 @@ pub fn generate_self_signed_noise_cert(
 
     let spki = SubjectPublicKeyInfoOwned {
         algorithm: AlgorithmIdentifierOwned {
-            oid: ID_X25519,
+            oid: OID_X25519,
             parameters: None,
         },
         subject_public_key: BitString::from_bytes(&keypair.public)?,
