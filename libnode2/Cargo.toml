@@ -5,16 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+aws-lc-rs = "1.17"
 capnp = { workspace = true }
 capnp-rpc = { workspace = true }
 clap = { workspace = true, optional = true }
-openssl = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 zpr = { workspace = true }
+rand = "0.9.3"
+x509-parser = "0.18"
 
 crossterm = { version = "0.29", optional = true } # lnt
 ratatui = { version = "0.30", optional = true } # lnt

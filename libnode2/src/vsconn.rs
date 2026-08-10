@@ -1,15 +1,13 @@
 use zpr::vsapi::v1 as vsapi2;
 use zpr::vsapi_types::ApiResponseError;
 
+use aws_lc_rs::signature::RsaKeyPair;
 use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use openssl::hash::MessageDigest;
-use openssl::pkey::{PKey, Private};
-use openssl::sign::Signer;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
@@ -20,6 +18,7 @@ use tracing::*;
 
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
+use crate::rsa_sign::sign_rsa_key;
 use zpr::vsapi_types::{
     ConnectRequest, ConnectType, Connection, DisconnectNotice, Param, VSConnectRequest, Visa,
     VisaDecision, VisaOp, VisaRequest, VisaResponse, pname,
@@ -126,7 +125,7 @@ pub struct VSConn {
     cmd_rx: mpsc::Receiver<VS2Command>,
     vs_addr: SocketAddr,
     node_cn: String,
-    node_private_key: PKey<Private>,
+    node_private_key: Arc<RsaKeyPair>,
     life_tx: broadcast::Sender<VSConnLifecycleEvent>,
     connect_fn: ConnectFn,
 }
@@ -195,7 +194,7 @@ impl VSConn {
         buffer_size: usize,
         vs_addr: SocketAddr,
         node_cn: String,
-        node_private_key: PKey<Private>,
+        node_private_key: Arc<RsaKeyPair>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
         let (life_tx, _) = broadcast::channel(LIFECYCLE_EVENT_BUFFER_SIZE);
@@ -1033,17 +1032,14 @@ fn sign_payload(
     timestamp: u64,
     cn: &str,
     challenge_data: &[u8],
-    private_key: PKey<Private>,
+    private_key: Arc<RsaKeyPair>,
 ) -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(&timestamp.to_be_bytes());
     data.extend_from_slice(cn.as_bytes());
     data.extend_from_slice(challenge_data);
 
-    let mut signer = Signer::new(MessageDigest::sha256(), &private_key).unwrap();
-    signer.update(&data).unwrap();
-    let signature = signer.sign_to_vec().unwrap();
-    signature
+    sign_rsa_key(&private_key, &data)
 }
 
 /// Wrap a Cap'n Proto RPC future with a timeout, mapping errors to VSApiError.
@@ -1133,6 +1129,7 @@ fn tls_connect() -> TlsConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aws_lc_rs::rsa::KeySize;
 
     impl VSConn {
         /// Construct a VSConn with a custom connect function.
@@ -1141,7 +1138,7 @@ mod tests {
         fn new_for_test(
             vs_addr: SocketAddr,
             node_cn: String,
-            node_private_key: PKey<Private>,
+            node_private_key: Arc<RsaKeyPair>,
             connect_fn: ConnectFn,
         ) -> Self {
             let (cmd_tx, cmd_rx) = mpsc::channel(16);
@@ -1158,9 +1155,8 @@ mod tests {
         }
     }
 
-    fn test_key() -> PKey<Private> {
-        let rsa = openssl::rsa::Rsa::generate(1024).unwrap();
-        PKey::from_rsa(rsa).unwrap()
+    fn test_key() -> Arc<RsaKeyPair> {
+        Arc::new(RsaKeyPair::generate(KeySize::Rsa2048).unwrap())
     }
 
     /// Connect function that always fails immediately with ConnectionRefused.

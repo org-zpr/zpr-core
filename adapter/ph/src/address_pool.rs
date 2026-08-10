@@ -1,5 +1,5 @@
 use ipnet::Ipv6Net;
-use openssl::rand::rand_bytes;
+use rand::{TryRngCore, rngs::OsRng};
 use std::collections::HashSet;
 use std::net::Ipv6Addr;
 use thiserror::Error;
@@ -69,7 +69,7 @@ impl AddressPool {
         addr_bytes[..6].copy_from_slice(&base_addr.segments()[..6]);
 
         let mut buf = [0u8; 8];
-        rand_bytes(&mut buf).unwrap();
+        OsRng.try_fill_bytes(&mut buf).expect("OS RNG Failed");
         let mut this_id = u64::from_be_bytes(buf) & MAX_AAA_ID;
         while !self.active.insert(this_id) {
             this_id = (this_id.wrapping_add(1)) % MAX_AAA_ID;

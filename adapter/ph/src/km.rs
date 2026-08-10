@@ -8,10 +8,10 @@
 //! of a [KeyManagerStateMachine] which does the actual work of creating and
 //! parsing key management ZDP messages.
 
+use crate::pki::Cert;
 use crate::prelude::*;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use bytes::Bytes;
-use openssl::x509::{X509, X509NameRef};
 use std::fmt;
 use std::fmt::Debug;
 use std::future::Future;
@@ -91,22 +91,19 @@ pub enum DecryptionError {
 /// certificates.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PeerCertificate {
-    Verified(X509),
-    Unverified(X509),
+    Verified(Cert),
+    Unverified(Cert),
 }
 
 impl PeerCertificate {
-    pub fn get_cert(&self) -> &X509 {
+    pub fn get_cert(&self) -> &Cert {
         match self {
             PeerCertificate::Verified(cert) => cert,
             PeerCertificate::Unverified(cert) => cert,
         }
     }
-    pub fn subject_name(&self) -> &X509NameRef {
-        match self {
-            PeerCertificate::Verified(cert) => cert.subject_name(),
-            PeerCertificate::Unverified(cert) => cert.subject_name(),
-        }
+    pub fn common_name(&self) -> Option<String> {
+        self.get_cert().common_name()
     }
 }
 
@@ -200,7 +197,7 @@ impl fmt::Debug for KmTransportSA {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let cert_str = match &self.peer_cert {
             Some(c) => {
-                format!("{:?}", c.subject_name())
+                format!("{:?}", c.common_name())
             }
             None => "None".to_string(),
         };

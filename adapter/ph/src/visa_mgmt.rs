@@ -140,12 +140,7 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
     let cn: String;
 
     if let Some(ref peer_cert) = sa.peer_cert {
-        cn = peer_cert
-            .subject_name()
-            .entries_by_nid(openssl::nid::Nid::COMMONNAME)
-            .next()
-            .and_then(|entry| Some(entry.data().as_utf8().ok()?.to_owned()))
-            .unwrap_or_default();
+        cn = peer_cert.common_name().unwrap_or_default();
     } else {
         cn = String::new();
     }

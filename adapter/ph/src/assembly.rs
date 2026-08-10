@@ -84,6 +84,7 @@ pub struct Assembly {
     pub dlt: adapter_tables::DockLookupTable,
 
     pub mgmt_dispatch_factory: MgmtDispatchFactory,
+    pub mgmt_hairpin_dispatch: MgmtHairpinDispatch,
     pub adapter_manager_factory: AdapterManagerFactory,
     pub km_state: KmState,
 
@@ -335,7 +336,10 @@ impl Assembly {
         interface_addr: &ScopedIpAddr,
         link_type: LinkType,
     ) -> Result<NonZero<LinkId>, PeerInsertError> {
-        assert!(link_type != LinkType::NodeToNode);
+        assert!(matches!(
+            link_type,
+            LinkType::NodeToAdapter | LinkType::AdapterToNode
+        ));
         debug!(target: PEER_MGMT, "Starting tether with {adapter_addr} connected to {interface_addr}");
         let peer_id = self.add_peer(link_type, adapter_addr, interface_addr)?;
 
@@ -429,6 +433,7 @@ pub mod test {
         pub elt: Option<adapter_tables::EndpointLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub mgmt_dispatch_factory: Option<MgmtDispatchFactory>,
+        pub mgmt_hairpin_dispatch: Option<MgmtHairpinDispatch>,
         pub adapter_manager_factory: Option<AdapterManagerFactory>,
         pub km_state: Option<KmState>,
         pub system_start_time: Option<std::time::Instant>,
@@ -497,6 +502,10 @@ pub mod test {
             let (md_inq_factory, _md_outq) = two_way_queue::two_way_queue(1);
             MgmtDispatchFactory::new(md_inq_factory)
         });
+        let mgmt_hairpin_dispatch = builder.mgmt_hairpin_dispatch.unwrap_or_else(|| {
+            let (mhd_inq, _mhd_outq) = mpsc::channel(1);
+            MgmtHairpinDispatch::new(mhd_inq)
+        });
         let adapter_manager_factory = builder.adapter_manager_factory.unwrap_or_else(|| {
             let (am_inq_factory, _am_outq) = two_way_queue::two_way_queue(1);
             AdapterManagerFactory::new(am_inq_factory)
@@ -536,6 +545,7 @@ pub mod test {
             elt,
             dlt,
             mgmt_dispatch_factory,
+            mgmt_hairpin_dispatch,
             adapter_manager_factory,
             km_state,
             self_noise_keypair: None,

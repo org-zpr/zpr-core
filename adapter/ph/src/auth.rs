@@ -2,20 +2,18 @@
 //! when we need to join a ZPRnet but there are no authentication services
 //! attached yet.  Also includes other "auth" related functionality.
 
+use aws_lc_rs::signature::RsaKeyPair;
+use libnode::rsa_sign::{load_rsa_key, sign_rsa_key};
+
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-use openssl::hash::MessageDigest;
-use openssl::pkey::{PKey, Private};
-use openssl::rand::rand_bytes;
-use openssl::rsa::Padding;
-use openssl::sign::Signer;
-use openssl::x509::X509;
-
+use rand::{TryRngCore, rngs::OsRng};
 use reqwest::StatusCode;
 use reqwest::header;
 use reqwest::redirect::Policy;
@@ -27,7 +25,7 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::pki::get_cn_from_cert;
+use crate::pki::{Cert, get_cn_from_cert};
 
 /// When a node signs a challenge for an adapter it uses this sort of key.
 pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
@@ -181,7 +179,7 @@ pub enum AuthError {
 
 #[derive(Debug, Clone)]
 pub struct RsaBootstrapAuth {
-    pkey: PKey<Private>,
+    pkey: Arc<RsaKeyPair>,
     cn: String,
 }
 
@@ -190,7 +188,7 @@ pub struct RsaBootstrapAuth {
 #[derive(Debug, Clone)]
 pub struct OAuthRsa {
     client_id: String,
-    private_key: PKey<Private>,
+    private_key: Arc<RsaKeyPair>,
 }
 
 impl ZdpAuthCodeBlob {
@@ -215,7 +213,7 @@ impl ZdpSelfSignedBlob {
     ///   - The blob is not older than `MAX_BLOB_AGE_SECONDS`.
     pub fn verify_blob_challenge(
         &self,
-        peer_cert: &X509,
+        peer_cert: &Cert,
         key: &[u8; AUTH_KEY_SIZE_BYTES],
     ) -> Result<(), AuthError> {
         if let Some(link_cn) = get_cn_from_cert(peer_cert) {
@@ -279,7 +277,9 @@ impl ZdpInitAuthenticationPayload {
             .as_secs() as u64;
         let be_time = ctime.to_be_bytes();
         let mut nonce = [0u8; 8];
-        rand_bytes(&mut nonce).expect("failed to generate random bytes for nonce");
+        OsRng
+            .try_fill_bytes(&mut nonce)
+            .expect("failed to generate random bytes for nonce");
         let mut hasher = blake3::Hasher::new_keyed(&key);
         hasher.update(&nonce);
         hasher.update(&be_time);
@@ -326,7 +326,7 @@ impl RsaBootstrapAuth {
     /// The visa service (policy) must be configured with the corresponding public key.
     pub fn new(cn: &str, rsa_keyfile: &Path) -> Result<Self, AuthError> {
         let pemdata = std::fs::read(rsa_keyfile)?;
-        let pkey = PKey::private_key_from_pem(&pemdata)
+        let pkey = load_rsa_key(&pemdata)
             .map_err(|e| AuthError::OpenSSLError(format!("Failed to load RSA key: {}", e)))?;
         Ok(RsaBootstrapAuth {
             pkey,
@@ -357,31 +357,12 @@ impl RsaBootstrapAuth {
             .unwrap()
             .as_secs() as u64;
 
-        let mut signer = Signer::new(MessageDigest::sha256(), &self.pkey)
-            .map_err(|e| AuthError::OpenSSLError(format!("Failed to create signer: {}", e)))?;
+        let mut data = Vec::new();
+        data.extend_from_slice(&ts.to_be_bytes());
+        data.extend_from_slice(self.cn.as_bytes());
+        data.extend_from_slice(&challenge);
 
-        // Presumably this is PKCS1 v1.5 padding
-        signer
-            .set_rsa_padding(Padding::PKCS1)
-            .map_err(|e| AuthError::OpenSSLError(format!("Failed to set padding: {}", e)))?;
-
-        let ts_bytes = ts.to_be_bytes();
-        signer
-            .update(&ts_bytes)
-            .map_err(|e| AuthError::OpenSSLError(format!("Failed to update signer: {}", e)))?;
-
-        let cn_bytes = self.cn.clone().into_bytes();
-        signer
-            .update(&cn_bytes)
-            .map_err(|e| AuthError::OpenSSLError(format!("Failed to update signer: {}", e)))?;
-
-        signer
-            .update(&challenge)
-            .map_err(|e| AuthError::OpenSSLError(format!("Failed to update signer: {}", e)))?;
-
-        let signature = signer
-            .sign_to_vec()
-            .map_err(|e| AuthError::OpenSSLError(format!("Failed to sign: {}", e)))?;
+        let signature = sign_rsa_key(&self.pkey, &data);
 
         let sig_str = BASE64_STANDARD.encode(&signature);
 
@@ -445,7 +426,7 @@ impl OAuthRsa {
     /// Create a new OAuthRsa object.
     /// - `client_id` is the adapter CN
     /// - `private_key` is the RSA private key used to sign the nonce
-    pub fn new(client_id: &str, private_key: PKey<Private>) -> Self {
+    pub fn new(client_id: &str, private_key: Arc<RsaKeyPair>) -> Self {
         OAuthRsa {
             client_id: client_id.to_string(),
             private_key,
@@ -459,18 +440,14 @@ impl OAuthRsa {
     pub async fn authenticate(
         &self,
         service_addr: SocketAddr,
-        tls_cert: X509,
+        tls_cert: Cert,
     ) -> Result<ZdpAuthCodeBlob, AuthError> {
-        let der = tls_cert.to_der().unwrap();
-        let tls_cert = Certificate::from_der(&der).unwrap();
+        let der = tls_cert.to_der();
+        let tls_cert = Certificate::from_der(der).unwrap();
 
         let nonce_buf = self.preauthorize(service_addr, &tls_cert).await?;
 
-        // TODO: Get rid of all the unwraps
-        let mut signer = Signer::new(MessageDigest::sha256(), &self.private_key).unwrap();
-        signer.set_rsa_padding(Padding::PKCS1).unwrap();
-        signer.update(&nonce_buf).unwrap();
-        let signature = signer.sign_to_vec().unwrap();
+        let signature = sign_rsa_key(&self.private_key, &nonce_buf);
 
         let auth_code = self
             .authorize(service_addr, &tls_cert, &nonce_buf, &signature)
@@ -587,7 +564,7 @@ impl OAuthRsa {
 #[cfg(test)]
 mod test {
     use super::*;
-    use openssl::sign::Verifier;
+    use aws_lc_rs::signature::{KeyPair, RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
     use std::path::PathBuf;
 
     #[test]
@@ -637,20 +614,17 @@ mod test {
                 assert_eq!(challenge_buffer[i + 16], payload.hmac[i]);
             }
         }
-
         let sig_data = BASE64_STANDARD.decode(&blob.sig).unwrap();
 
-        let mut verifier = Verifier::new(MessageDigest::sha256(), &bs.pkey).unwrap();
-        verifier.set_rsa_padding(Padding::PKCS1).unwrap();
-        {
-            let ts_bytes = blob.ts.to_be_bytes();
-            verifier.update(&ts_bytes).unwrap();
+        let mut data = Vec::new();
+        data.extend_from_slice(&blob.ts.to_be_bytes());
+        data.extend_from_slice(blob.cn.as_bytes());
+        data.extend_from_slice(&challenge_buffer);
 
-            let cn_bytes = blob.cn.clone().into_bytes();
-            verifier.update(&cn_bytes).unwrap();
-
-            verifier.update(&challenge_buffer).unwrap();
-        }
-        assert!(verifier.verify(&sig_data).unwrap());
+        let public_key =
+            UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, bs.pkey.public_key().as_ref());
+        public_key
+            .verify(&data, &sig_data)
+            .expect("signature verification failed");
     }
 }

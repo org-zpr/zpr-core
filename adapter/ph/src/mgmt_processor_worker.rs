@@ -1,3 +1,8 @@
+//! The management process worker pulls management messages
+//! (that is, excluding ZDPR control messages) for a specific link,
+//! pulled from that link's management processor queue, and
+//! handles them via the management handlers.
+
 use crate::counters::ManagementCounterType;
 use crate::link_state::LinkEvent;
 use crate::mgmt;

@@ -109,20 +109,18 @@ fn send_zdpr_common(
     // TODO: just allocate this on the stack, pending #985.
     let mut packet = new_tiny_heap_packet();
 
-    let mgmt_hdr = packet.alloc_zeroed_header::<zdp::ZdpMgmtHeader>();
-    mgmt_hdr.sequence_number = sequence_number.into();
-
+    let _mgmt_hdr = packet.alloc_zeroed_header::<zdp::ZdpMgmtHeader>();
     let base_hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     base_hdr.packet_type = packet_type;
 
-    // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
-    // In that case, just ignore the error; act as if the packet was dropped
-    // by the substrate due to congestion.
-    let _ = asm
-        .mgmt_substrate_egress
-        .try_enqueue_packet(link_id, &mut packet);
+    build_and_egress_packets(
+        asm,
+        link_id,
+        std::iter::once((sequence_number, &mut packet)),
+    );
 }
 
+#[derive(Debug)]
 pub enum MgmtSendError {
     LinkClosed,
 }
@@ -622,6 +620,12 @@ pub fn build_and_egress_packets<'a>(
 ) {
     let mut dropped_backpressure = 0;
 
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return;
+    };
+    let internal_peer_id = peer_state.link_state_machine.internal_peer_id;
+    drop(peer_state);
+
     packets.for_each(|(seq_num, packet)| {
         let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::mut_from_prefix(
             &mut packet.body_mut()[std::mem::size_of::<zdp::ZdpBaseHeader>()..],
@@ -629,14 +633,27 @@ pub fn build_and_egress_packets<'a>(
         .unwrap();
         mgmt_hdr.sequence_number = seq_num.into();
 
-        // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
-        // In that case, just ignore the error; act as if the packet was dropped
-        // by the substrate due to congestion.
-        if !asm
-            .mgmt_substrate_egress
-            .try_enqueue_packet(link_id, packet)
-        {
-            dropped_backpressure += 1;
+        if let Some(internal_peer_id) = internal_peer_id {
+            // We are hairpinning this packet.
+            let mut packet = Packet::new_with_existing_metadata(packet.buffer().clone());
+            packet.metadata_mut().ingress_link_id = internal_peer_id.get();
+            if !asm
+                .mgmt_hairpin_dispatch
+                .try_dispatch_mgmt_packet_with_link(packet)
+                .is_ok()
+            {
+                dropped_backpressure += 1;
+            }
+        } else {
+            // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
+            // In that case, just ignore the error; act as if the packet was dropped
+            // by the substrate due to congestion.
+            if !asm
+                .mgmt_substrate_egress
+                .try_enqueue_packet(link_id, packet)
+            {
+                dropped_backpressure += 1;
+            }
         }
     });
 

@@ -1,7 +1,8 @@
-use openssl::x509::X509;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
+use x509_parser::certificate::X509Certificate;
+use x509_parser::prelude::FromDer;
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
@@ -18,33 +19,26 @@ pub enum ParseError {
     IOError(#[from] std::io::Error),
 }
 
-/// Get the CN value as a string out of the certificate. If not found or any
-/// other issue, returns None.
-pub fn get_cn_from_cert(cert: &X509) -> Option<String> {
-    let entry_ref_opt = cert
-        .subject_name()
-        .entries_by_nid(openssl::nid::Nid::COMMONNAME)
-        .next();
-    if let Some(entry_ref) = entry_ref_opt {
-        let sslstr_res = entry_ref.data().as_utf8();
-        if let Ok(sslstr) = sslstr_res {
-            return Some(sslstr.to_string());
-        }
-    }
-    None
+/// Get the CN from DER-encoded certificate
+pub fn get_cn_from_cert(der: &[u8]) -> Option<String> {
+    let (_, cert) = X509Certificate::from_der(der).ok()?;
+    cert.subject()
+        .iter_common_name()
+        .next()
+        .and_then(|attr| attr.as_str().ok())
+        .map(|s| s.to_string())
 }
 
 /// Load a certificate from a file.
-pub fn load_cert(path: &Path) -> Result<X509, ParseError> {
+pub fn load_cert(path: &Path) -> Result<Vec<u8>, ParseError> {
     let contents = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => return Err(ParseError::IOError(e)),
     };
     let cert_pem_data = extract_cert_pem_data(&contents)?;
-    match X509::from_pem(cert_pem_data.as_bytes()) {
-        Ok(cert) => Ok(cert),
-        Err(e) => Err(ParseError::PEMFormatError(e.to_string())),
-    }
+    let (_, pem) = x509_parser::pem::parse_x509_pem(cert_pem_data.as_bytes())
+        .map_err(|e| ParseError::PEMFormatError(e.to_string()))?;
+    Ok(pem.contents)
 }
 
 /// Look for first instance of "-----BEGIN CERTIFICATE-----" and return that up to and

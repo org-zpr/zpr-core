@@ -1,17 +1,38 @@
 //! Collection of PKI related utility functions.
-
+use aws_lc_rs::signature::{self, UnparsedPublicKey};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
+use ed25519_dalek::{Signature as EdSignature, SigningKey as EdSigningKey};
+use rand::{TryRngCore, rngs::OsRng};
 use std::fs;
+use std::io::Cursor;
 use std::path::Path;
-
-use openssl::asn1::Asn1Time;
-use openssl::bn::{BigNum, MsbOption};
-use openssl::hash::MessageDigest;
-use openssl::pkey::{Id, PKey};
-use openssl::rsa::Rsa;
-use openssl::x509::{X509, X509Name, extension::KeyUsage};
-
+use std::str::FromStr;
+use std::time::Duration;
 use thiserror::Error;
 use tracing::error;
+use x509_cert::{
+    builder::{Builder, CertificateBuilder, profile::BuilderProfile},
+    certificate::TbsCertificate,
+    der::{
+        Decode, Encode,
+        asn1::{BitString, OctetStringRef},
+        oid::ObjectIdentifier,
+    },
+    ext::{
+        Extension,
+        pkix::{KeyUsage, KeyUsages},
+    },
+    name::Name,
+    serial_number::SerialNumber,
+    spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned, SubjectPublicKeyInfoRef},
+    time::Validity,
+};
+
+use pkcs8::PrivateKeyInfoRef;
+use x509_parser::certificate::X509Certificate;
+use x509_parser::oid_registry::{OID_PKCS1_SHA256WITHRSA, OID_SIG_ED25519};
+use x509_parser::pem::Pem;
+use x509_parser::prelude::FromDer;
 
 use crate::km_noise::NoiseKeypair;
 use crate::logging::targets::KEY_MGMT; // TODO: eliminate logging from this module
@@ -30,11 +51,136 @@ pub enum ParseError {
     #[error("PEM format error")]
     PEMFormatError,
 
+    #[error("Certificate decode error")]
+    DecodeError,
+
     #[error("Key Error")]
     KeyError,
 
     #[error("I/O error {0}")]
     IOError(#[from] std::io::Error),
+}
+
+///Public key extracted from a certificate.
+pub struct PubKey {
+    key: Vec<u8>,
+}
+
+impl PubKey {
+    pub fn raw_public_key(&self) -> &[u8] {
+        &self.key
+    }
+}
+
+// An X.509 certificate, stored as its DER encoding.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Cert {
+    der: Vec<u8>,
+}
+
+impl std::fmt::Debug for Cert {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cert")
+            .field("cn", &self.common_name())
+            .finish()
+    }
+}
+
+impl Cert {
+    /// Construct from DER bytes
+    pub fn from_der(der: &[u8]) -> Result<Cert, ParseError> {
+        X509Certificate::from_der(der).map_err(|e| {
+            error!(target: KEY_MGMT, "error parsing DER certificate: {e}");
+            ParseError::DecodeError
+        })?;
+        Ok(Cert { der: der.to_vec() })
+    }
+
+    /// Construct from PEM bytes
+    pub fn from_pem(pem: &[u8]) -> Result<Cert, ParseError> {
+        let (_, pem) = x509_parser::pem::parse_x509_pem(pem).map_err(|e| {
+            error!(target: KEY_MGMT, "error parsing PEM certificate: {e}");
+            ParseError::PEMFormatError
+        })?;
+        Cert::from_der(&pem.contents)
+    }
+
+    /// The DER encoding of the certificate.
+    pub fn to_der(&self) -> &[u8] {
+        &self.der
+    }
+
+    /// The PEM encoding of the certificate. (Used in tests)
+    #[allow(dead_code)]
+    pub fn to_pem(&self) -> Vec<u8> {
+        let b64 = BASE64_STANDARD.encode(&self.der);
+        let mut out = String::with_capacity(b64.len() + 64);
+        out.push_str(PEM_BEGIN_CERTIFICATE);
+        out.push('\n');
+        for chunk in b64.as_bytes().chunks(64) {
+            out.push_str(std::str::from_utf8(chunk).unwrap());
+            out.push('\n');
+        }
+        out.push_str(PEM_END_CERTIFICATE);
+        out.push('\n');
+        out.into_bytes()
+    }
+
+    /// The certificate subject's Common Name
+    pub fn common_name(&self) -> Option<String> {
+        let (_, cert) = X509Certificate::from_der(&self.der).ok()?;
+        cert.subject()
+            .iter_common_name()
+            .next()
+            .and_then(|attr| attr.as_str().ok())
+            .map(|s| s.to_string())
+    }
+
+    /// The DER encoding of the subject distinguished name
+    pub fn subject_der(&self) -> Vec<u8> {
+        match X509Certificate::from_der(&self.der) {
+            Ok((_, cert)) => cert.subject().as_raw().to_vec(),
+            Err(e) => {
+                error!(target: KEY_MGMT, "error extracting subject DN: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Extract the certificate's public key.
+    pub fn public_key(&self) -> Result<PubKey, ParseError> {
+        let (_, cert) = X509Certificate::from_der(&self.der).map_err(|e| {
+            error!(target: KEY_MGMT, "error parsing certificate: {e}");
+            ParseError::DecodeError
+        })?;
+        let key = cert.public_key().subject_public_key.data.to_vec();
+        Ok(PubKey { key })
+    }
+
+    /// Verify this certificate's signature against the presumed issuer's
+    /// public key
+    pub fn verify(&self, key: &PubKey) -> Result<bool, ParseError> {
+        let (_, cert) = X509Certificate::from_der(&self.der).map_err(|e| {
+            error!(target: KEY_MGMT, "error parsing certificate for verify: {e}");
+            ParseError::DecodeError
+        })?;
+
+        let tbs = cert.tbs_certificate.as_ref();
+        let sig = cert.signature_value.data.as_ref();
+        let alg = &cert.signature_algorithm.algorithm;
+
+        if *alg == OID_PKCS1_SHA256WITHRSA {
+            let vk =
+                UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA256, key.key.as_slice());
+            Ok(vk.verify(tbs, sig).is_ok())
+        } else if *alg == OID_SIG_ED25519 {
+            let vk = UnparsedPublicKey::new(&signature::ED25519, key.key.as_slice());
+            Ok(vk.verify(tbs, sig).is_ok())
+        } else {
+            error!(target: KEY_MGMT, "unsupported certificate signature algorithm: {alg}");
+            Err(ParseError::KeyError)
+        }
+    }
 }
 
 /// Look for first instance of "-----BEGIN CERTIFICATE-----" and return that up to and
@@ -69,153 +215,131 @@ fn extract_cert_pem_data(textdata: &str) -> Result<String, ParseError> {
 }
 
 /// Load a certificate from a file.
-pub fn load_cert(path: &Path) -> Result<X509, ParseError> {
-    let contents = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => return Err(ParseError::IOError(e)),
-    };
+pub fn load_cert(path: &Path) -> Result<Cert, ParseError> {
+    let contents = fs::read_to_string(path)?;
     let cert_pem_data = extract_cert_pem_data(&contents)?;
-    match X509::from_pem(cert_pem_data.as_bytes()) {
-        Ok(cert) => Ok(cert),
-        Err(e) => {
-            error!(target: KEY_MGMT, "error constructing cert from PEM data: {e}");
-            Err(ParseError::PEMFormatError)
-        }
-    }
+    Cert::from_pem(cert_pem_data.as_bytes())
 }
 
 /// Load a private X22519 key from a PEM file
 pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
-    let contents = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => return Err(ParseError::IOError(e)),
-    };
-
-    let pk = match PKey::private_key_from_pem(&contents.as_bytes()) {
-        Ok(k) => k,
-        Err(e) => {
-            error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
-            return Err(ParseError::PEMFormatError);
-        }
-    };
-
-    match pk.raw_private_key() {
-        Ok(k) => {
-            let mut key = [0u8; NOISE_KEY_LEN];
-            key.copy_from_slice(&k);
-            Ok(key)
-        }
-        Err(e) => {
-            error!(target: KEY_MGMT, "error extracting raw key: {e}");
-            Err(ParseError::KeyError)
-        }
+    let contents = fs::read_to_string(path)?;
+    let (block, _) = Pem::read(Cursor::new(contents.as_bytes())).map_err(|e| {
+        error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
+        ParseError::PEMFormatError
+    })?;
+    let pki = PrivateKeyInfoRef::try_from(block.contents.as_slice()).map_err(|e| {
+        error!(target: KEY_MGMT, "error parsing PKCS#8 private key: {e}");
+        ParseError::KeyError
+    })?;
+    let inner = <&OctetStringRef>::from_der(pki.private_key.as_bytes()).map_err(|e| {
+        error!(target: KEY_MGMT, "error decoding CurvePrivateKey: {e}");
+        ParseError::KeyError
+    })?;
+    let raw = inner.as_bytes();
+    if raw.len() != NOISE_KEY_LEN {
+        error!(
+            target: KEY_MGMT,
+            "private key has wrong length (got {}, expected {NOISE_KEY_LEN})",
+            raw.len(),
+        );
+        return Err(ParseError::KeyError);
     }
+    Ok(<[u8; NOISE_KEY_LEN]>::try_from(raw).unwrap())
 }
 
 /// Load a public X22519 key from a PEM file
 pub fn load_noise_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
-    let contents = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => return Err(ParseError::IOError(e)),
-    };
-
-    let pk = match PKey::public_key_from_pem(&contents.as_bytes()) {
-        Ok(k) => k,
-        Err(e) => {
-            error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
-            return Err(ParseError::PEMFormatError);
-        }
-    };
-
-    match pk.raw_public_key() {
-        Ok(k) => {
-            if k.len() != NOISE_KEY_LEN {
-                error!(
-                    target: KEY_MGMT,
-                    "public key in cert is incorrect length (got {} bytes, expected {NOISE_KEY_LEN})",
-                    k.len(),
-                );
-                return Err(ParseError::KeyError);
-            }
-            let key = <[u8; NOISE_KEY_LEN]>::try_from(k).unwrap();
-            Ok(key)
-        }
-        Err(e) => {
-            error!(target: KEY_MGMT, "error extracting raw key: {e}");
-            Err(ParseError::KeyError)
-        }
+    let contents = fs::read_to_string(path)?;
+    let (block, _) = Pem::read(Cursor::new(contents.as_bytes())).map_err(|e| {
+        error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
+        ParseError::PEMFormatError
+    })?;
+    let spki = SubjectPublicKeyInfoOwned::from_der(block.contents.as_slice()).map_err(|e| {
+        error!(target: KEY_MGMT, "error parsing SubjectPublicKeyInfo: {e}");
+        ParseError::KeyError
+    })?;
+    let raw = spki.subject_public_key.raw_bytes();
+    if raw.len() != NOISE_KEY_LEN {
+        error!(
+            target: KEY_MGMT,
+            "public key in cert is incorrect length (got {} bytes, expected {NOISE_KEY_LEN})",
+            raw.len(),
+        );
+        return Err(ParseError::KeyError);
     }
+    Ok(<[u8; NOISE_KEY_LEN]>::try_from(raw).unwrap())
 }
 
 /// Get the CN value as a string out of the certificate. If not found or any
 /// other issue, returns None.
-pub fn get_cn_from_cert(cert: &X509) -> Option<String> {
-    let entry_ref_opt = cert
-        .subject_name()
-        .entries_by_nid(openssl::nid::Nid::COMMONNAME)
-        .next();
-    if let Some(entry_ref) = entry_ref_opt {
-        let sslstr_res = entry_ref.data().as_utf8();
-        if let Ok(sslstr) = sslstr_res {
-            return Some(sslstr.to_string());
-        }
+pub fn get_cn_from_cert(cert: &Cert) -> Option<String> {
+    cert.common_name()
+}
+
+const ID_X25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
+
+struct NoiseCertProfile {
+    name: Name,
+}
+
+impl BuilderProfile for NoiseCertProfile {
+    fn get_issuer(&self, _subject: &Name) -> Name {
+        self.name.clone()
     }
-    None
+    fn get_subject(&self) -> Name {
+        self.name.clone()
+    }
+
+    fn build_extensions(
+        &self,
+        _spk: SubjectPublicKeyInfoRef<'_>,
+        _issuer_spk: SubjectPublicKeyInfoRef<'_>,
+        _tbs: &TbsCertificate,
+    ) -> x509_cert::builder::Result<Vec<Extension>> {
+        Ok(Vec::new())
+    }
 }
 
 pub fn generate_self_signed_noise_cert(
     cn: &str,
     keypair: &NoiseKeypair,
-) -> Result<X509, Box<dyn std::error::Error>> {
+) -> Result<Cert, Box<dyn std::error::Error>> {
     if cn.is_empty() {
         return Err("CN (common name) must be non-empty".into());
     }
-    // Generate a new RSA private key
-    let rsa = Rsa::generate(2048)?;
-    let pkey = PKey::from_rsa(rsa)?;
 
-    // Create an X509 certificate builder
-    let mut builder = X509::builder()?;
+    let name = Name::from_str(&format!("CN={cn}"))?;
 
-    // Set the version of the certificate (V3)
-    builder.set_version(2)?;
+    let mut serial_bytes = [0u8; 16];
+    OsRng.try_fill_bytes(&mut serial_bytes)?;
+    serial_bytes[0] &= 0x7f;
+    let serial = SerialNumber::new(&serial_bytes)?;
 
-    // Set the serial number
-    let mut serial = BigNum::new()?;
-    serial.rand(128, MsbOption::MAYBE_ZERO, true)?;
-    let serial_asn1 = serial.to_asn1_integer()?;
-    builder.set_serial_number(&serial_asn1)?;
+    let validity = Validity::from_now(Duration::from_hours(365 * 24))?;
 
-    // Set the issuer name (for a self-signed cert, this is also the subject)
-    let mut name = X509Name::builder()?;
-    name.append_entry_by_text("CN", cn)?; // Common Name (e.g., domain name or IP)
-    let name = name.build();
-    builder.set_subject_name(&name)?;
-    builder.set_issuer_name(&name)?; // Self-signed
+    let spki = SubjectPublicKeyInfoOwned {
+        algorithm: AlgorithmIdentifierOwned {
+            oid: ID_X25519,
+            parameters: None,
+        },
+        subject_public_key: BitString::from_bytes(&keypair.public)?,
+    };
 
-    // Set the validity period
-    let not_before = Asn1Time::days_from_now(0)?;
-    let not_after = Asn1Time::days_from_now(365)?; // Valid for 1 year
-    builder.set_not_before(&not_before)?;
-    builder.set_not_after(&not_after)?;
+    let mut seed = [0u8; 32];
+    OsRng.try_fill_bytes(&mut seed)?;
 
-    let x_key_usage = KeyUsage::new()
-        .digital_signature()
-        .key_encipherment()
-        .build()?;
-    builder.append_extension(x_key_usage)?;
+    let signer = EdSigningKey::from_bytes(&seed);
 
-    // Set the public key
-    let ssl_pubkey = PKey::public_key_from_raw_bytes(&keypair.public, Id::X25519)?;
-    builder.set_pubkey(&ssl_pubkey)?;
+    let mut builder = CertificateBuilder::new(NoiseCertProfile { name }, serial, validity, spki)?;
 
-    // Sign the certificate with the private key
-    builder.sign(&pkey, MessageDigest::sha256())?;
+    let key_usage = KeyUsage(KeyUsages::DigitalSignature | KeyUsages::KeyEncipherment);
+    builder.add_extension((false, &key_usage))?;
 
-    // Build the certificate
-    let cert = builder.build();
+    let cert = builder.build::<_, EdSignature>(&signer)?;
+    let der = cert.to_der()?;
 
-    Ok(cert)
+    Ok(Cert { der })
 }
 
 #[cfg(test)]
@@ -247,7 +371,7 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
 -----END CERTIFICATE-----
 "#;
 
-        let cert = X509::from_pem(cert_pem_data.as_bytes()).unwrap();
+        let cert = Cert::from_pem(cert_pem_data.as_bytes()).unwrap();
         let cns = get_cn_from_cert(&cert);
         assert!(cns.is_some());
         let cns = cns.unwrap();
@@ -260,5 +384,70 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
         let self_signed_cert = generate_self_signed_noise_cert("foo.zpr", &keypair).unwrap();
         let cn = get_cn_from_cert(&self_signed_cert).unwrap();
         assert_eq!(cn, "foo.zpr".to_string());
+    }
+
+    const TEST_X25519_PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VuBCIEINjp9Br1Ykn9R6D2sCUkOUMJKSEZXMX5JPR65vb6+yl6\n-----END PRIVATE KEY-----\n";
+    const TEST_X25519_PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VuAyEAFlTnsuk9He+ISGuIRgE37erOxcR3HhV3fFJt4NSyUH4=\n-----END PUBLIC KEY-----\n";
+
+    fn write_temp(name: &str, contents: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_load_noise_keys_roundtrip() {
+        use crate::km_noise::derive_public_key;
+
+        let priv_path = write_temp("zpr_test_noise_priv.pem", TEST_X25519_PRIV_PEM);
+        let pub_path = write_temp("zpr_test_noise_pub.pem", TEST_X25519_PUB_PEM);
+
+        let priv_key = load_noise_private_key(&priv_path).unwrap();
+        let pub_key = load_noise_public_key(&pub_path).unwrap();
+
+        std::fs::remove_file(&priv_path).ok();
+        std::fs::remove_file(&pub_path).ok();
+
+        assert_eq!(priv_key.len(), NOISE_KEY_LEN);
+        assert_eq!(pub_key.len(), NOISE_KEY_LEN);
+        assert_eq!(derive_public_key(&priv_key), pub_key);
+    }
+
+    #[test]
+    fn test_verify_ed25519_signature() {
+        const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
+
+        let mut seed = [0u8; 32];
+        OsRng.try_fill_bytes(&mut seed).unwrap();
+        let signer = EdSigningKey::from_bytes(&seed);
+        let verifying = signer.verifying_key();
+
+        let name = Name::from_str("CN=ed25519.test").unwrap();
+        let mut serial_bytes = [0u8; 16];
+        OsRng.try_fill_bytes(&mut serial_bytes).unwrap();
+        serial_bytes[0] &= 0x7f;
+        let serial = SerialNumber::new(&serial_bytes).unwrap();
+        let validity = Validity::from_now(Duration::from_hours(24)).unwrap();
+        let spki = SubjectPublicKeyInfoOwned {
+            algorithm: AlgorithmIdentifierOwned {
+                oid: ID_ED25519,
+                parameters: None,
+            },
+            subject_public_key: BitString::from_bytes(verifying.as_bytes()).unwrap(),
+        };
+        let builder =
+            CertificateBuilder::new(NoiseCertProfile { name }, serial, validity, spki).unwrap();
+        let built = builder.build::<_, EdSignature>(&signer).unwrap();
+        let cert = Cert {
+            der: built.to_der().unwrap(),
+        };
+
+        let pubkey = cert.public_key().unwrap();
+        // The correct Ed25519 key verifies the signature.
+        assert!(cert.verify(&pubkey).unwrap());
+        // A tampered key does not.
+        let mut other = pubkey.raw_public_key().to_vec();
+        other[0] ^= 0xff;
+        assert!(!cert.verify(&PubKey { key: other }).unwrap());
     }
 }
