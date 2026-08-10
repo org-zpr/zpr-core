@@ -3,7 +3,6 @@
 //! attached yet.  Also includes other "auth" related functionality.
 
 use aws_lc_rs::signature::RsaKeyPair;
-use libnode::rsa_sign::{load_rsa_key, sign_rsa_key};
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -24,6 +23,7 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use x509_cert::Certificate as X509Certificate;
+use zpr_utils::rsa_sign::{load_rsa_key, sign_rsa_key};
 
 use crate::pki;
 

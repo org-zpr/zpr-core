@@ -28,6 +28,7 @@ tracing-subscriber = "0.3.20"
 x509-cert = "0.3.0"
 zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.20.0", features = ["vsapi", "policy"] }
 zpr-ext = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-ext-v0.5.3" }
+zpr-utils = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-utils-v0.2.1" }
 
 [profile.release]
 panic = "abort"

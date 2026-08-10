@@ -15,10 +15,11 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_rustls::TlsConnector;
 use tokio_util::compat::*;
 use tracing::*;
+use zpr_utils::rsa_sign::sign_rsa_key;
 
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
-use crate::rsa_sign::sign_rsa_key;
+
 use zpr::vsapi_types::{
     ConnectRequest, ConnectType, Connection, DisconnectNotice, Param, VSConnectRequest, Visa,
     VisaDecision, VisaOp, VisaRequest, VisaResponse, pname,

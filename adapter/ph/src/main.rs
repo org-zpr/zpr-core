@@ -517,7 +517,7 @@ fn main() -> ExitCode {
             .expect("nodes require auth_private_key for visa service authentication");
         let auth_key_pem = fs::read_to_string(auth_key_path)
             .unwrap_or_else(|e| panic!("failed to read auth_private_key {auth_key_path:?}: {e}"));
-        let auth_private_key = libnode::rsa_sign::load_rsa_key(auth_key_pem.as_bytes())
+        let auth_private_key = zpr_utils::rsa_sign::load_rsa_key(auth_key_pem.as_bytes())
             .unwrap_or_else(|e| panic!("failed to parse auth_private_key {auth_key_path:?}: {e}"));
 
         vsconn = Some(libnode::vsconn::VSConn::new(

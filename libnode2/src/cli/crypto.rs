@@ -1,11 +1,10 @@
 //! Cryptographic helpers used by lntest for key loading and self-signed blob construction.
-
-use crate::rsa_sign::{load_rsa_key, sign_rsa_key};
 use aws_lc_rs::signature::RsaKeyPair;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zpr::vsapi_types::{ChallengeAlg, SelfSignedBlob};
+use zpr_utils::rsa_sign::{load_rsa_key, sign_rsa_key};
 
 /// Build a [SelfSignedBlob] signed with the given private key.
 ///

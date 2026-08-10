@@ -2208,8 +2208,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tui-input",
- "x509-cert",
  "zpr 0.20.0",
+ "zpr-utils",
 ]
 
 [[package]]
@@ -5370,10 +5370,12 @@ dependencies = [
 
 [[package]]
 name = "zpr-utils"
-version = "0.2.0"
-source = "git+https://github.com/org-zpr/zpr-utils.git?tag=zpr-utils-v0.2.0#f6066a19974cebd22d90fee8d410b8f798c378e6"
+version = "0.2.1"
+source = "git+https://github.com/org-zpr/zpr-utils.git?tag=zpr-utils-v0.2.1#5787849d761a58a88044b277a344e6fe23bf1b0d"
 dependencies = [
+ "aws-lc-rs",
  "internet-checksum",
+ "pem-rfc7468",
  "zerocopy",
  "zpr 0.8.1",
 ]
