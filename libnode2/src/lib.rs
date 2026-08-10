@@ -1,7 +1,6 @@
 pub mod claims;
 pub mod error;
 pub mod logging;
-pub mod pki;
 pub mod rsa_sign;
 pub mod vsconn;
 pub mod vss;

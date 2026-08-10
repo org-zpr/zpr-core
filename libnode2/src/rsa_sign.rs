@@ -4,16 +4,12 @@ use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use x509_cert::der::pem;
 
-use crate::pki::first_pem_block;
-
 //Wrapped potential errors
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 //Parses to create RSA key pair
 pub fn load_rsa_key(pem_bytes: &[u8]) -> Result<RsaKeyPair, BoxError> {
-    let text = std::str::from_utf8(pem_bytes)?;
-    let pem_block = first_pem_block(text).ok_or("no PEM block found")?;
-    let (label, der) = pem::decode_vec(pem_block.as_bytes())?;
+    let (label, der) = pem::decode_vec(pem_bytes)?;
     let key = match label {
         "RSA PRIVATE KEY" => RsaKeyPair::from_der(&der)?,
         "PRIVATE KEY" => RsaKeyPair::from_pkcs8(&der)?,
