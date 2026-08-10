@@ -55,7 +55,8 @@ pub enum ParseError {
 
 /// Construct from DER bytes
 pub fn from_der(der: &[u8]) -> Result<Certificate, ParseError> {
-    Certificate::from_der(der).map_err(|e| ParseError::DecodeError(e.to_string()))
+    Certificate::from_der(der)
+        .map_err(|e| ParseError::DecodeError(format!("cannot parse certificate: {e}")))
 }
 
 /// Construct from PEM bytes
@@ -71,13 +72,14 @@ pub fn from_pem(pem_data: &[u8]) -> Result<Certificate, ParseError> {
 /// The DER encoding of the certificate.
 pub fn to_der(cert: &Certificate) -> Result<Vec<u8>, ParseError> {
     cert.to_der()
-        .map_err(|e| ParseError::DecodeError(e.to_string()))
+        .map_err(|e| ParseError::DecodeError(format!("cannot encode certificate: {e}")))
 }
 
 /// The PEM encoding of the certificate. (Used in tests)
 #[allow(dead_code)]
 pub fn to_pem(cert: &Certificate) -> Result<String, ParseError> {
-    EncodePem::to_pem(cert, LineEnding::LF).map_err(|e| ParseError::DecodeError(e.to_string()))
+    EncodePem::to_pem(cert, LineEnding::LF)
+        .map_err(|e| ParseError::DecodeError(format!("cannot encode certificate as PEM: {e}")))
 }
 
 /// The certificate subject's Common Name
@@ -99,7 +101,7 @@ pub fn subject_der(cert: &Certificate) -> Result<Vec<u8>, ParseError> {
     cert.tbs_certificate()
         .subject()
         .to_der()
-        .map_err(|e| ParseError::DecodeError(e.to_string()))
+        .map_err(|e| ParseError::DecodeError(format!("cannot encode subject DN: {e}")))
 }
 
 /// Extract the certificate's public key.
@@ -113,7 +115,7 @@ pub fn verify(cert: &Certificate, key: &SubjectPublicKeyInfoOwned) -> Result<boo
     let tbs = cert
         .tbs_certificate()
         .to_der()
-        .map_err(|e| ParseError::DecodeError(e.to_string()))?;
+        .map_err(|e| ParseError::DecodeError(format!("cannot re-encode TBS certificate: {e}")))?;
     let sig = cert.signature().raw_bytes();
     let sig_alg = &cert.signature_algorithm().oid;
     let key_alg = &key.algorithm.oid;
@@ -183,8 +185,8 @@ pub fn load_cert(path: &Path) -> Result<Certificate, ParseError> {
 /// Load a private X22519 key from a PEM file
 pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
     let contents = fs::read(path)?;
-    let (_, der) =
-        pem::decode_vec(&contents).map_err(|e| ParseError::PEMFormatError(e.to_string()))?;
+    let (_, der) = pem::decode_vec(&contents)
+        .map_err(|e| ParseError::PEMFormatError(format!("cannot read key from PEM data: {e}")))?;
     let pki = PrivateKeyInfoRef::try_from(der.as_slice())
         .map_err(|e| ParseError::KeyError(format!("cannot parse PKCS#8 private key: {e}")))?;
     let inner = <&OctetStringRef>::from_der(pki.private_key.as_bytes())
