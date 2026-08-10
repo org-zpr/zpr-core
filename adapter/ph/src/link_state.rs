@@ -14,6 +14,7 @@ use crate::zdp::{self, ResponseCode, TerminateReason};
 
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
+use std::num::NonZero;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -179,6 +180,7 @@ pub enum LinkStateError {
 pub enum LinkType {
     Internal,
     AdapterToNode,
+    #[allow(dead_code)]
     NodeToNode, // Currently unsupported
     NodeToAdapter,
 }
@@ -316,6 +318,9 @@ pub struct LinkStateWrapper {
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
     pub locked_data: Mutex<LinkData>,
+    /// Internal links _may_ be associated with another internal link
+    /// representing its remote side.
+    pub internal_peer_id: Option<NonZero<LinkId>>,
 }
 
 impl LinkStateWrapper {
@@ -333,6 +338,7 @@ impl LinkStateWrapper {
             link_type: new_link_type,
             locked_fsm: Mutex::new(lsm),
             locked_data: Mutex::new(LinkData::new()),
+            internal_peer_id: None,
         }
     }
 
@@ -640,7 +646,8 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            mgmt::requests::send_hello_request(asm, self.id).enqueue();
+            let pub_key = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
+            mgmt::requests::send_hello_request(asm, self.id, pub_key).enqueue();
             self.set_timeout(asm, &mut locked_fsm, config::LINK_HELLO_TIMEOUT);
             debug!(
                 target: LINK_STATE,

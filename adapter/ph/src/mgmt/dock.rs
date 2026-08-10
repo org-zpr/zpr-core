@@ -12,8 +12,8 @@
 // node->node links, we don't make the distinction (so some terminology
 // choices are weird).
 
+use super::requests;
 use super::txn_mgr::{TxnHandle, TxnId};
-use super::{adapter, requests};
 use crate::classifier;
 use crate::counters::ManagementCounterType;
 use crate::defs::FiveTuple;
@@ -359,22 +359,8 @@ fn requested_visa_granted(
         .awaiting_next_hop_bind_table
         .insert(egress_bind_txn, (ingress_link_id, txn_id));
 
-    if egress_link_id.get() == LOCAL_ACTOR_LINK_ID {
-        adapter::bind_egress_stream(
-            asm,
-            NonZero::new(DOCK_LINK_ID).unwrap(),
-            egress_bind_txn_id,
-            tc,
-        );
-    } else {
-        requests::send_bind_egress_stream_request(
-            asm,
-            egress_link_id.get(),
-            egress_bind_txn_id,
-            tc,
-        )
+    requests::send_bind_egress_stream_request(asm, egress_link_id.get(), egress_bind_txn_id, tc)
         .enqueue();
-    }
 }
 
 /// Notify the bind-request state machine that the visa it requested
@@ -488,25 +474,14 @@ fn requested_tether_granted(
     let ingress_tether_id = ingress_tether_entry.insert(pep);
 
     // Send a success response to the requestor with the tether ID.
-
-    if ingress_peer_state.is_internal() {
-        let adapter_peer_state = asm.peer_table.get(DOCK_LINK_ID).unwrap();
-        let txn = adapter_peer_state
-            .txn_mgr
-            .get(txn_id)
-            .expect("local adapter lost transaction");
-        adapter::install_tether(asm, &txn, ingress_tether_id, tc)
-            .expect("local adapter rejected tether response");
-    } else {
-        requests::send_bind_actor_address_success_response(
-            asm,
-            ingress_link_id.get(),
-            txn_id,
-            ingress_tether_id,
-            tc,
-        )
-        .enqueue();
-    }
+    requests::send_bind_actor_address_success_response(
+        asm,
+        ingress_link_id.get(),
+        txn_id,
+        ingress_tether_id,
+        tc,
+    )
+    .enqueue();
 }
 
 /// Common functionality for exiting the bind request state machine with an error.
@@ -562,23 +537,8 @@ fn bind_actor_address_reject(
     }
 
     // Send an error response to the requestor.
-
-    if ingress_peer_state.is_internal() {
-        let adapter_peer_state = asm.peer_table.get(DOCK_LINK_ID).unwrap();
-        let txn = adapter_peer_state
-            .txn_mgr
-            .get(txn_id)
-            .expect("local adapter lost transaction");
-        adapter::deny_tether(asm, &txn, reason).expect("local adapter rejected tether response");
-    } else {
-        requests::send_bind_actor_address_error_response(
-            asm,
-            ingress_link_id.get(),
-            txn_id,
-            reason,
-        )
+    requests::send_bind_actor_address_error_response(asm, ingress_link_id.get(), txn_id, reason)
         .enqueue();
-    }
 }
 
 #[derive(Debug)]
@@ -742,9 +702,5 @@ pub fn unbind_stream(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, stre
     }
 
     // Issue unbind request to next hop
-    if pft_pep.next_hop.0 == LOCAL_ACTOR_LINK_ID {
-        adapter::unbind_stream(asm, NonZero::new(DOCK_LINK_ID).unwrap(), stream_id);
-    } else {
-        requests::send_unbind_egress_stream_request(asm, pft_pep.next_hop.0, stream_id).enqueue();
-    }
+    requests::send_unbind_egress_stream_request(asm, pft_pep.next_hop.0, stream_id).enqueue();
 }

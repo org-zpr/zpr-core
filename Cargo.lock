@@ -642,7 +642,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
  "windows-sys 0.61.2",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -934,7 +933,6 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
  "curve25519-dalek-derive",
- "digest 0.11.3",
  "fiat-crypto 0.3.0",
  "rustc_version",
  "subtle",
@@ -2743,8 +2741,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
- "x509-cert",
- "x509-parser",
+ "x25519-dalek",
  "zerocopy",
  "zpr 0.20.0",
  "zpr-ext",
@@ -5184,17 +5181,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
-name = "x509-cert"
-version = "0.3.0"
+name = "x25519-dalek"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "105ef4642d9cb137ef83d623d0e4bf08b8adf69e9918ca904a174adb6d3d038b"
+checksum = "e7e8131a03190127fb2263afc72b322ecadae46b6ff8c6f399ff5d02f5559af6"
 dependencies = [
- "const-oid",
- "der",
- "sha1",
- "signature",
- "spki",
- "tls_codec",
+ "curve25519-dalek 5.0.0",
+ "getrandom 0.4.2",
+ "rand_core 0.10.1",
+ "zeroize",
 ]
 
 [[package]]

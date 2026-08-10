@@ -16,6 +16,7 @@ use crate::zdp;
 use std::net::SocketAddr;
 use std::num::NonZero;
 use thiserror::Error;
+use zpr::packet_info::DOCK_LINK_ID;
 use zpr_ext::zerocopy::FromBytesExt;
 use zpr_utils::net_defs::IpAddress;
 
@@ -590,8 +591,9 @@ pub async fn handle_bind_actor_address_request(
     txn_id: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
-    if !matches!(asm.ph_mode, PhMode::Node) {
-        error!(target: ZDP, "{}: received BindActorAddress message on adapter", asm.formatted_link_id(pkt.metadata().ingress_link_id));
+    // must not come from a dock
+    if pkt.metadata().ingress_link_id == DOCK_LINK_ID {
+        error!(target: ZDP, "{}: received BindActorAddress message on dock link", asm.formatted_link_id(pkt.metadata().ingress_link_id));
         return Err(HandleMgmtError::MessageNotPermitted);
     }
 
@@ -627,8 +629,9 @@ pub async fn handle_bind_egress_stream_request(
     txn_id: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
-    if !matches!(asm.ph_mode, PhMode::Adapter) {
-        error!(target: ZDP, "{}: received BindEgressStream message on node", asm.formatted_link_id(pkt.metadata().ingress_link_id));
+    // must come from an dock
+    if pkt.metadata().ingress_link_id != DOCK_LINK_ID {
+        error!(target: ZDP, "{}: received BindEgressStream message on non-dock link", asm.formatted_link_id(pkt.metadata().ingress_link_id));
         return Err(HandleMgmtError::MessageNotPermitted);
     }
 
