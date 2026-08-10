@@ -26,7 +26,6 @@ use serde_json::Value;
 use x509_cert::Certificate as X509Certificate;
 
 use crate::pki;
-use crate::pki::get_cn_from_cert;
 
 /// When a node signs a challenge for an adapter it uses this sort of key.
 pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
@@ -217,7 +216,7 @@ impl ZdpSelfSignedBlob {
         peer_cert: &X509Certificate,
         key: &[u8; AUTH_KEY_SIZE_BYTES],
     ) -> Result<(), AuthError> {
-        if let Some(link_cn) = get_cn_from_cert(peer_cert) {
+        if let Some(link_cn) = pki::common_name(peer_cert) {
             if link_cn != self.cn {
                 return Err(AuthError::FormatError(format!(
                     "CN mismatch: expected {link_cn} found {}",

@@ -75,8 +75,9 @@ impl KmCertExchange {
     /// - [CertExchangeError::BufferSizeError] - the buffer is too short to hold the payload.
     /// - [CertExchangeError::CertificateFormatError] - the certificate is too large to be encoded in the payload.
     pub fn write_payload(&self, buf: &mut impl bytes::BufMut) -> Result<(), CertExchangeError> {
-        let cert_der =
-            pki::to_der(&self.local_cert).map_err(|_| CertExchangeError::CertificateFormatError)?;
+        let cert_der = pki::to_der(&self.local_cert)
+            .inspect_err(|e| error!(target: KEY_MGMT, "cannot encode local certificate: {e}"))
+            .map_err(|_| CertExchangeError::CertificateFormatError)?;
         if cert_der.len() > u16::MAX as usize {
             return Err(CertExchangeError::CertificateFormatError);
         }

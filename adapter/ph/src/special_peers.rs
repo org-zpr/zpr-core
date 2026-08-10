@@ -29,8 +29,9 @@ mod test {
     fn matches_visa_service_dn() {
         let keypair = NoiseKeypair::generate();
         let cert = generate_self_signed_noise_cert(VISA_SERVICE_CN, &keypair).unwrap();
-        assert_eq!(pki::subject_der(&cert).as_slice(), VISA_SERVICE_DN);
-        let names = special_peer_names_from_subject_der(&pki::subject_der(&cert));
+        let subject_der = pki::subject_der(&cert).unwrap();
+        assert_eq!(subject_der.as_slice(), VISA_SERVICE_DN);
+        let names = special_peer_names_from_subject_der(&subject_der);
         assert!(names.contains(SpecialPeerName::VisaServiceAdapter));
     }
 
@@ -38,6 +39,6 @@ mod test {
     fn ignores_other_dn() {
         let keypair = NoiseKeypair::generate();
         let cert = generate_self_signed_noise_cert("not-special.zpr", &keypair).unwrap();
-        assert!(special_peer_names_from_subject_der(&pki::subject_der(&cert)).is_empty());
+        assert!(special_peer_names_from_subject_der(&pki::subject_der(&cert).unwrap()).is_empty());
     }
 }

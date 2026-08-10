@@ -14,8 +14,7 @@ use serde::Deserialize;
 use crate::assembly::PhMode;
 use crate::auth::{OAuthRsa, RsaBootstrapAuth};
 use crate::batch_io;
-use crate::pki;
-use crate::pki::{NOISE_KEY_LEN, load_cert, load_noise_private_key};
+use crate::pki::{NOISE_KEY_LEN, common_name, load_cert, load_noise_private_key};
 
 use crate::main_args::{ArgsError, CommonArgs};
 
@@ -727,7 +726,7 @@ fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
 pub fn get_noise_cn(certificate_file: &Path) -> Result<String, ArgsError> {
     let cert = load_cert(certificate_file)
         .map_err(|e| ArgsError::ParseError(format!("failed to load noise certificate: {e:?}")))?;
-    pki::get_cn_from_cert(&cert).ok_or(ArgsError::ParseError(
+    common_name(&cert).ok_or(ArgsError::ParseError(
         "failed to get CN from certificate".to_string(),
     ))
 }

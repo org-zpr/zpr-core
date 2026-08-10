@@ -616,10 +616,16 @@ impl LinkStateWrapper {
                 }
             };
 
+            let subject_der = match pki::subject_der(cert) {
+                Ok(der) => der,
+                Err(e) => {
+                    warn!(target: LINK_STATE, "{} cannot encode certificate subject DN: {e}", asm.formatted_link_id(link_id));
+                    Vec::new()
+                }
+            };
+
             if !is_verified {
-                for name in
-                    special_peers::special_peer_names_from_subject_der(&pki::subject_der(cert))
-                {
+                for name in special_peers::special_peer_names_from_subject_der(&subject_der) {
                     warn!(
                         target: LINK_STATE,
                         "{} presented unverified certificate claiming special peer name {name:?}; ignoring", asm.formatted_link_id(link_id)
@@ -627,9 +633,7 @@ impl LinkStateWrapper {
                 }
             } else {
                 // assign special-peer name if this peer is special
-                for name in
-                    special_peers::special_peer_names_from_subject_der(&pki::subject_der(cert))
-                {
+                for name in special_peers::special_peer_names_from_subject_der(&subject_der) {
                     match asm.peer_table.assign_special_name(name, link_id) {
                         Ok(()) => {
                             info!(target: LINK_STATE, "{} assigned special name {name:?}", asm.formatted_link_id(link_id))

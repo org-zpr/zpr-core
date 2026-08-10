@@ -6,7 +6,6 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::error;
 use x509_cert::{
     Certificate,
     builder::{Builder, CertificateBuilder, profile::BuilderProfile},
@@ -27,11 +26,8 @@ use x509_cert::{
     time::Validity,
 };
 
-use libnode::pki::first_pem_block;
-use pkcs8::PrivateKeyInfoRef;
-
 use crate::km_noise::NoiseKeypair;
-use crate::logging::targets::KEY_MGMT; // TODO: eliminate logging from this module
+use pkcs8::PrivateKeyInfoRef;
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
@@ -44,14 +40,14 @@ pub enum ParseError {
     #[error("PEM certificate not found in text data")]
     PEMCertNotFound,
 
-    #[error("PEM format error")]
-    PEMFormatError,
+    #[error("PEM format error: {0}")]
+    PEMFormatError(String),
 
-    #[error("Certificate decode error")]
-    DecodeError,
+    #[error("certificate decode error: {0}")]
+    DecodeError(String),
 
-    #[error("Key Error")]
-    KeyError,
+    #[error("key error: {0}")]
+    KeyError(String),
 
     #[error("I/O error {0}")]
     IOError(#[from] std::io::Error),
@@ -59,44 +55,29 @@ pub enum ParseError {
 
 /// Construct from DER bytes
 pub fn from_der(der: &[u8]) -> Result<Certificate, ParseError> {
-    Certificate::from_der(der).map_err(|e| {
-        error!(target: KEY_MGMT, "error parsing DER certificate: {e}");
-        ParseError::DecodeError
-    })
+    Certificate::from_der(der).map_err(|e| ParseError::DecodeError(e.to_string()))
 }
 
 /// Construct from PEM bytes
 pub fn from_pem(pem_data: &[u8]) -> Result<Certificate, ParseError> {
-    let text = std::str::from_utf8(pem_data).map_err(|e| {
-        error!(target: KEY_MGMT, "certificate PEM data is not valid UTF-8: {e}");
-        ParseError::PEMFormatError
-    })?;
-    let block = first_pem_block(text).ok_or_else(|| {
-        error!(target: KEY_MGMT, "no PEM block found in certificate data");
-        ParseError::PEMCertNotFound
-    })?;
-    let (_, der) = pem::decode_vec(block.as_bytes()).map_err(|e| {
-        error!(target: KEY_MGMT, "error parsing PEM certificate: {e}");
-        ParseError::PEMFormatError
-    })?;
+    let text = std::str::from_utf8(pem_data)
+        .map_err(|e| ParseError::PEMFormatError(format!("data is not valid UTF-8: {e}")))?;
+    let block = extract_cert_pem_data(text)?;
+    let (_, der) =
+        pem::decode_vec(block.as_bytes()).map_err(|e| ParseError::PEMFormatError(e.to_string()))?;
     from_der(&der)
 }
 
 /// The DER encoding of the certificate.
 pub fn to_der(cert: &Certificate) -> Result<Vec<u8>, ParseError> {
-    cert.to_der().map_err(|e| {
-        error!(target: KEY_MGMT, "error encoding certificate: {e}");
-        ParseError::DecodeError
-    })
+    cert.to_der()
+        .map_err(|e| ParseError::DecodeError(e.to_string()))
 }
 
 /// The PEM encoding of the certificate. (Used in tests)
 #[allow(dead_code)]
 pub fn to_pem(cert: &Certificate) -> Result<String, ParseError> {
-    EncodePem::to_pem(cert, LineEnding::LF).map_err(|e| {
-        error!(target: KEY_MGMT, "error encoding certificate as PEM: {e}");
-        ParseError::DecodeError
-    })
+    EncodePem::to_pem(cert, LineEnding::LF).map_err(|e| ParseError::DecodeError(e.to_string()))
 }
 
 /// The certificate subject's Common Name
@@ -114,14 +95,11 @@ pub fn subject_name(cert: &Certificate) -> &Name {
 }
 
 /// The DER encoding of the subject distinguished name
-pub fn subject_der(cert: &Certificate) -> Vec<u8> {
-    match cert.tbs_certificate().subject().to_der() {
-        Ok(der) => der,
-        Err(e) => {
-            error!(target: KEY_MGMT, "error encoding subject DN: {e}");
-            Vec::new()
-        }
-    }
+pub fn subject_der(cert: &Certificate) -> Result<Vec<u8>, ParseError> {
+    cert.tbs_certificate()
+        .subject()
+        .to_der()
+        .map_err(|e| ParseError::DecodeError(e.to_string()))
 }
 
 /// Extract the certificate's public key.
@@ -132,31 +110,34 @@ pub fn public_key(cert: &Certificate) -> &SubjectPublicKeyInfoOwned {
 /// Verify a certificate's signature against the presumed issuer's
 /// public key
 pub fn verify(cert: &Certificate, key: &SubjectPublicKeyInfoOwned) -> Result<bool, ParseError> {
-    let tbs = cert.tbs_certificate().to_der().map_err(|e| {
-        error!(target: KEY_MGMT, "error re-encoding TBS certificate: {e}");
-        ParseError::DecodeError
-    })?;
+    let tbs = cert
+        .tbs_certificate()
+        .to_der()
+        .map_err(|e| ParseError::DecodeError(e.to_string()))?;
     let sig = cert.signature().raw_bytes();
     let sig_alg = &cert.signature_algorithm().oid;
     let key_alg = &key.algorithm.oid;
     let raw_key = key.subject_public_key.raw_bytes();
     if *key_alg == OID_RSA_ENCRYPTION {
         if *sig_alg != OID_SHA256_WITH_RSA {
-            error!(target: KEY_MGMT, "signature algorithm {sig_alg} is not valid for an RSA issuer key");
-            return Err(ParseError::KeyError);
+            return Err(ParseError::KeyError(format!(
+                "signature algorithm {sig_alg} is not valid for an RSA issuer key"
+            )));
         }
         let vk = UnparsedPublicKey::new(&signature::RSA_PKCS1_2048_8192_SHA256, raw_key);
         Ok(vk.verify(&tbs, sig).is_ok())
     } else if *key_alg == OID_ED25519 {
         if *sig_alg != OID_ED25519 {
-            error!(target: KEY_MGMT, "signature algorithm {sig_alg} is not valid for an Ed25519 issuer key");
-            return Err(ParseError::KeyError);
+            return Err(ParseError::KeyError(format!(
+                "signature algorithm {sig_alg} is not valid for an Ed25519 issuer key"
+            )));
         }
         let vk = UnparsedPublicKey::new(&signature::ED25519, raw_key);
         Ok(vk.verify(&tbs, sig).is_ok())
     } else {
-        error!(target: KEY_MGMT, "unsupported issuer public key algorithm: {key_alg}");
-        Err(ParseError::KeyError)
+        Err(ParseError::KeyError(format!(
+            "unsupported issuer public key algorithm: {key_alg}"
+        )))
     }
 }
 
@@ -187,79 +168,50 @@ fn extract_cert_pem_data(textdata: &str) -> Result<String, ParseError> {
     if !reading {
         Err(ParseError::PEMCertNotFound)
     } else {
-        Err(ParseError::PEMFormatError)
+        Err(ParseError::PEMFormatError(
+            "certificate PEM block is not terminated".to_string(),
+        ))
     }
 }
 
 /// Load a certificate from a file.
 pub fn load_cert(path: &Path) -> Result<Certificate, ParseError> {
     let contents = fs::read_to_string(path)?;
-    let cert_pem_data = extract_cert_pem_data(&contents)?;
-    from_pem(cert_pem_data.as_bytes())
+    from_pem(contents.as_bytes())
 }
 
 /// Load a private X22519 key from a PEM file
 pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
-    let contents = fs::read_to_string(path)?;
-    let block = first_pem_block(&contents).ok_or_else(|| {
-        error!(target: KEY_MGMT, "no PEM block found in key file");
-        ParseError::PEMFormatError
-    })?;
-    let (_, der) = pem::decode_vec(block.as_bytes()).map_err(|e| {
-        error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
-        ParseError::PEMFormatError
-    })?;
-    let pki = PrivateKeyInfoRef::try_from(der.as_slice()).map_err(|e| {
-        error!(target: KEY_MGMT, "error parsing PKCS#8 private key: {e}");
-        ParseError::KeyError
-    })?;
-    let inner = <&OctetStringRef>::from_der(pki.private_key.as_bytes()).map_err(|e| {
-        error!(target: KEY_MGMT, "error decoding CurvePrivateKey: {e}");
-        ParseError::KeyError
-    })?;
+    let contents = fs::read(path)?;
+    let (_, der) =
+        pem::decode_vec(&contents).map_err(|e| ParseError::PEMFormatError(e.to_string()))?;
+    let pki = PrivateKeyInfoRef::try_from(der.as_slice())
+        .map_err(|e| ParseError::KeyError(format!("cannot parse PKCS#8 private key: {e}")))?;
+    let inner = <&OctetStringRef>::from_der(pki.private_key.as_bytes())
+        .map_err(|e| ParseError::KeyError(format!("cannot decode CurvePrivateKey: {e}")))?;
     let raw = inner.as_bytes();
-    if raw.len() != NOISE_KEY_LEN {
-        error!(
-            target: KEY_MGMT,
+    <[u8; NOISE_KEY_LEN]>::try_from(raw).map_err(|_| {
+        ParseError::KeyError(format!(
             "private key has wrong length (got {}, expected {NOISE_KEY_LEN})",
-            raw.len(),
-        );
-        return Err(ParseError::KeyError);
-    }
-    Ok(<[u8; NOISE_KEY_LEN]>::try_from(raw).unwrap())
+            raw.len()
+        ))
+    })
 }
 
 /// Load a public X22519 key from a PEM file
 pub fn load_noise_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
-    let contents = fs::read_to_string(path)?;
-    let block = first_pem_block(&contents).ok_or_else(|| {
-        error!(target: KEY_MGMT, "no PEM block found in key file");
-        ParseError::PEMFormatError
-    })?;
-    let (_, der) = pem::decode_vec(block.as_bytes()).map_err(|e| {
-        error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
-        ParseError::PEMFormatError
-    })?;
-    let spki = SubjectPublicKeyInfoOwned::from_der(&der).map_err(|e| {
-        error!(target: KEY_MGMT, "error parsing SubjectPublicKeyInfo: {e}");
-        ParseError::KeyError
-    })?;
+    let contents = fs::read(path)?;
+    let (_, der) = pem::decode_vec(&contents)
+        .map_err(|e| ParseError::PEMFormatError(format!("cannot read key from PEM data: {e}")))?;
+    let spki = SubjectPublicKeyInfoOwned::from_der(&der)
+        .map_err(|e| ParseError::KeyError(format!("cannot parse SubjectPublicKeyInfo: {e}")))?;
     let raw = spki.subject_public_key.raw_bytes();
-    if raw.len() != NOISE_KEY_LEN {
-        error!(
-            target: KEY_MGMT,
-            "public key in cert is incorrect length (got {} bytes, expected {NOISE_KEY_LEN})",
-            raw.len(),
-        );
-        return Err(ParseError::KeyError);
-    }
-    Ok(<[u8; NOISE_KEY_LEN]>::try_from(raw).unwrap())
-}
-
-/// Get the CN value as a string out of the certificate. If not found or any
-/// other issue, returns None.
-pub fn get_cn_from_cert(cert: &Certificate) -> Option<String> {
-    common_name(cert)
+    <[u8; NOISE_KEY_LEN]>::try_from(raw).map_err(|_| {
+        ParseError::KeyError(format!(
+            "public key has wrong length (got {} bytes, expected {NOISE_KEY_LEN})",
+            raw.len()
+        ))
+    })
 }
 
 const OID_X25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
@@ -359,7 +311,7 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
     #[test]
     fn test_extract_cert_pem_data() {
         let cert = from_pem(TEST_CERT_PEM.as_bytes()).unwrap();
-        let cns = get_cn_from_cert(&cert);
+        let cns = common_name(&cert);
         assert!(cns.is_some());
         let cns = cns.unwrap();
         assert_eq!(cns, "bas.zpr.org".to_string());
@@ -369,7 +321,7 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
     fn test_that_self_signed_cert_encodes_cn() {
         let keypair = NoiseKeypair::generate();
         let self_signed_cert = generate_self_signed_noise_cert("foo.zpr", &keypair).unwrap();
-        let cn = get_cn_from_cert(&self_signed_cert).unwrap();
+        let cn = common_name(&self_signed_cert).unwrap();
         assert_eq!(cn, "foo.zpr".to_string());
     }
 
@@ -402,8 +354,6 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
 
     #[test]
     fn test_verify_ed25519_signature() {
-        const ID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
-
         let mut seed = [0u8; 32];
         aws_lc_rs::rand::fill(&mut seed).unwrap();
         let signer = EdSigningKey::from_bytes(&seed);
@@ -417,7 +367,7 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
         let validity = Validity::from_now(Duration::from_hours(24)).unwrap();
         let spki = SubjectPublicKeyInfoOwned {
             algorithm: AlgorithmIdentifierOwned {
-                oid: ID_ED25519,
+                oid: OID_ED25519,
                 parameters: None,
             },
             subject_public_key: BitString::from_bytes(verifying.as_bytes()).unwrap(),
