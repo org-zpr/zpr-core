@@ -117,7 +117,7 @@ pub fn install_tether(
 
     // Confirm this TC matches our initial packet.
     if !tc.classify_5t(&five_tuple) {
-        error!(target: FLOW_MGMT, "Bind of {five_tuple} falied: node supplied TC incompatible with initial packet: {tc}");
+        error!(target: FLOW_MGMT, "Bind of {five_tuple} failed: node supplied TC incompatible with initial packet: {tc}");
         asm.elt.remove(&five_tuple).unwrap();
         return Ok(());
     }
