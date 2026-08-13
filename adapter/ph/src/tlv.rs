@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use thiserror::Error;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+use zpr::write_to::WriteTo as _;
 use zpr_utils::net_defs::IpAddress;
 
 const SOCKADDR_LEN_V4: u8 = 6; // 4 bytes for IPv4 + 2 bytes for port
@@ -30,6 +31,7 @@ impl DataType {
     pub const STATIC_ADDR: TlvType = 5; // Static Address - used for static address requests from an adapter
     pub const WINDOW_SIZE: TlvType = 6;
     pub const A2A_DH_PUBKEY: TlvType = 7; // Actor to Actor Diffie-Hellman Public Key
+    pub const BOOTSTRAP_VISA: TlvType = 8;
 }
 
 /// TlvEncoding is a designed to be an easy way to create and write TLV data
@@ -112,6 +114,14 @@ impl TlvEncoding {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn new_bootstrap_visa(visa: zpr::vsapi_types::Visa) -> TlvEncoding {
+        TlvEncoding {
+            tlv_type: DataType::BOOTSTRAP_VISA,
+            value: TlvValue::Visa(visa),
+        }
+    }
+
     /// Write this encoding to the buffer, advancing the buffer position.
     pub fn put(&self, buf: &mut dyn bytes::BufMut) {
         match &self.value {
@@ -122,6 +132,7 @@ impl TlvEncoding {
             TlvValue::Ipv4Addr(v) => put_ipv4addr(buf, self.tlv_type, v),
             TlvValue::SocketAddr(v) => put_socketaddr(buf, self.tlv_type, v),
             TlvValue::X25519PubKey(v) => put_x25519_pub_key(buf, self.tlv_type, v),
+            TlvValue::Visa(v) => put_visa(buf, self.tlv_type, v),
         }
     }
 }
@@ -135,6 +146,7 @@ pub enum TlvValue {
     Ipv4Addr(Ipv4Addr),
     SocketAddr(SocketAddr),
     X25519PubKey(x25519_dalek::PublicKey),
+    Visa(zpr::vsapi_types::Visa),
 }
 
 impl std::fmt::Display for TlvValue {
@@ -147,6 +159,7 @@ impl std::fmt::Display for TlvValue {
             TlvValue::Ipv4Addr(v) => write!(f, "{v}"),
             TlvValue::SocketAddr(v) => write!(f, "{v}"),
             TlvValue::X25519PubKey(v) => write!(f, "{v:?}"),
+            TlvValue::Visa(v) => write!(f, "{v:?}"),
         }
     }
 }
@@ -251,6 +264,23 @@ fn put_socketaddr(
     }
 }
 
+fn put_visa(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, visa: &zpr::vsapi_types::Visa) {
+    let mut builder = capnp::message::TypedBuilder::<zpr::vsapi::v1::visa::Owned>::new_default();
+    let mut builder_root = builder.init_root();
+    visa.write_to(&mut builder_root);
+
+    let mut msg_buf = Vec::new();
+    capnp::serialize_packed::write_message(&mut msg_buf, builder.borrow_inner()).unwrap();
+    assert!(msg_buf.len() <= u8::MAX as usize);
+
+    let hdr = TLVHdr {
+        tlv_type,
+        tlv_length: msg_buf.len() as u8,
+    };
+    buf.put_slice(&hdr.as_bytes());
+    buf.put_slice(&msg_buf);
+}
+
 /// Parse TLV data out of a buffer, advancing the internal position.  Only known
 /// TLV types are parsed, unknown are skipped.
 /// Null entries (type 0) are skipped over and not returned.
@@ -351,6 +381,29 @@ pub fn parse_from_buf(
                     .entry(tlv_type)
                     .or_insert_with(Vec::new)
                     .push(TlvValue::U16(value));
+            }
+            DataType::BOOTSTRAP_VISA => {
+                let mut msg_buf = Vec::new();
+                msg_buf.resize(tlv_length as usize, 0);
+                buf.copy_to_slice(&mut msg_buf);
+                let Ok(reader) = capnp::serialize_packed::read_message(
+                    msg_buf.as_slice(),
+                    capnp::message::ReaderOptions::new(),
+                ) else {
+                    return Err(TlvError::BadStructure);
+                };
+                let typed_reader =
+                    capnp::message::TypedReader::<_, zpr::vsapi::v1::visa::Owned>::new(reader);
+                let Ok(reader_root) = typed_reader.get() else {
+                    return Err(TlvError::BadStructure);
+                };
+                let Ok(visa) = reader_root.try_into() else {
+                    return Err(TlvError::BadStructure);
+                };
+                tlv_map
+                    .entry(tlv_type)
+                    .or_insert_with(Vec::new)
+                    .push(TlvValue::Visa(visa));
             }
             _ => {
                 // For unknown types, just skip the value.
