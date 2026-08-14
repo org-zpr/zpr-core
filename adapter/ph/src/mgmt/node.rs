@@ -455,12 +455,26 @@ fn requested_visa_granted(
         }
     }
 
+    // Never forward a bind back out the link it arrived on: that's a forwarding
+    // loop, and each round trip burns a transaction ID on both nodes until the
+    // ID space is exhausted.  Signals a bad visa next_hop or a bad route.
+    if egress_link_id == ingress_link_id {
+        error!(target: FLOW_MGMT,
+            "{}: visa {visa_id} next hop routes back to the requesting link; denying bind",
+            asm.formatted_link_id(ingress_link_id.get()));
+        return requested_visa_denied(asm, ingress_link_id, txn_id);
+    }
+
     // Open a transaction on the egress link and move into AwaitingNextHopBind state.
 
-    let egress_bind_txn = egress_peer_state
-        .txn_mgr
-        .try_open()
-        .expect("FIXME TODO: bind backpressure #1176");
+    // Out of transaction IDs on the egress link -> deny, don't block (#1176).
+    // Real backpressure (queue and retry) only matters if we ever legitimately
+    // have 64K binds in flight on one link.
+    let Some(egress_bind_txn) = egress_peer_state.txn_mgr.try_open() else {
+        error!(target: FLOW_MGMT, "{}: no free transaction IDs; denying bind",
+            asm.formatted_link_id(egress_link_id.get()));
+        return requested_visa_denied(asm, ingress_link_id, txn_id);
+    };
 
     let Some(ingress_peer_state) = asm.peer_table.get(ingress_link_id.get()) else {
         // requestor went away, bail!
