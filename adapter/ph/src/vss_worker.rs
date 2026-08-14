@@ -153,30 +153,38 @@ fn process_topology(asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyRespons
     for (i, link) in links.into_iter().enumerate() {
         info!(target: VSS_RPC, "[link {i}]-> {:?}", link.peer);
         let peer_addr = SocketAddr::from(link.peer.clone());
+
+        // A node binds to the wildcard address, so resolve the dock address we
+        // would actually use for this peer *before* the peer table lookup:
+        // existing peers are keyed on the real dock address, and looking up with
+        // the unspecified address misses them and creates a duplicate.
+        if self_addr.ip().is_unspecified() {
+            let temp_socket = socket2::Socket::new(
+                socket2::Domain::for_address(peer_addr),
+                socket2::Type::DGRAM,
+                None,
+            )
+            .unwrap();
+            temp_socket
+                .connect(&socket2::SockAddr::from(peer_addr))
+                .expect(&format!("unable to connect to peer_addr ({})", peer_addr));
+
+            self_addr = temp_socket
+                .local_addr()
+                .unwrap()
+                .as_socket()
+                .unwrap()
+                .scoped_ip();
+            info!(target: VSS_RPC, "assigned substrate address {self_addr}");
+        }
+
         match asm.peer_table.lookup_peer(&peer_addr, &self_addr) {
             Some(link_id) => {
+                // The peer beat us to it and tethered inbound; it sends its own
+                // bootstrap visas with its hello, so link.visas is redundant here.
                 info!(target:VSS_RPC, "Link already exists as {link_id}");
             }
             None => {
-                if self_addr.ip().is_unspecified() {
-                    let temp_socket = socket2::Socket::new(
-                        socket2::Domain::for_address(peer_addr),
-                        socket2::Type::DGRAM,
-                        None,
-                    )
-                    .unwrap();
-                    temp_socket
-                        .connect(&socket2::SockAddr::from(peer_addr))
-                        .expect(&format!("unable to connect to peer_addr ({})", peer_addr));
-
-                    self_addr = temp_socket
-                        .local_addr()
-                        .unwrap()
-                        .as_socket()
-                        .unwrap()
-                        .scoped_ip();
-                    info!(target: VSS_RPC, "assigned substrate address {self_addr}");
-                }
                 if asm
                     .start_tether(&peer_addr, &self_addr, PeerMode::Node, true, link.visas)
                     .ok()
