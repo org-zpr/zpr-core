@@ -105,10 +105,10 @@ impl TlvEncoding {
     }
 
     /// Actor to Actor Diffie-Hellman Public Key
-    pub fn new_a2a_dh_pubkey(pub_key: x25519_dalek::PublicKey) -> TlvEncoding {
+    pub fn new_a2a_dh_pubkey(pubkey: x25519_dalek::PublicKey) -> TlvEncoding {
         TlvEncoding {
             tlv_type: DataType::A2A_DH_PUBKEY,
-            value: TlvValue::X25519PubKey(pub_key),
+            value: TlvValue::X25519PubKey(pubkey),
         }
     }
 
@@ -121,7 +121,7 @@ impl TlvEncoding {
             TlvValue::Ipv6Addr(v) => put_ipv6addr(buf, self.tlv_type, v),
             TlvValue::Ipv4Addr(v) => put_ipv4addr(buf, self.tlv_type, v),
             TlvValue::SocketAddr(v) => put_socketaddr(buf, self.tlv_type, v),
-            TlvValue::X25519PubKey(v) => put_x25519_pub_key(buf, self.tlv_type, v),
+            TlvValue::X25519PubKey(v) => put_x25519_pubkey(buf, self.tlv_type, v),
         }
     }
 }
@@ -211,7 +211,7 @@ fn put_ipv4addr(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: &Ipv4Addr
     buf.put_slice(&value.octets());
 }
 
-fn put_x25519_pub_key(
+fn put_x25519_pubkey(
     buf: &mut dyn bytes::BufMut,
     tlv_type: TlvType,
     value: &x25519_dalek::PublicKey,
@@ -709,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bad_x25519_pub_key_length() {
+    fn test_parse_bad_x25519_pubkey_length() {
         let mut buf = BytesMut::new();
 
         // Claim 16 bytes for a key that must be 32
@@ -836,13 +836,13 @@ mod tests {
     }
 
     #[test]
-    fn test_put_and_parse_x25519_pub_key() {
+    fn test_put_and_parse_x25519_pubkey() {
         let mut buf = BytesMut::new();
         let secret = x25519_dalek::ReusableSecret::random();
         let test_key = x25519_dalek::PublicKey::from(&secret);
 
         // Write the TLV
-        put_x25519_pub_key(&mut buf, DataType::A2A_DH_PUBKEY, &test_key);
+        put_x25519_pubkey(&mut buf, DataType::A2A_DH_PUBKEY, &test_key);
 
         // Check the wire structure before parsing it back
         assert_eq!(buf.as_ref()[0], DataType::A2A_DH_PUBKEY);

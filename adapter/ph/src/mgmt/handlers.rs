@@ -378,10 +378,10 @@ fn process_a2a_dh_pubkey_tlv(
 ) -> HandleMgmtResult {
     for entry in tlv_value {
         match entry {
-            tlv::TlvValue::X25519PubKey(public_key) => {
+            tlv::TlvValue::X25519PubKey(pubkey) => {
                 info!(target: ZDP, "{}: Applying A2A_DH_PUBKEY from {message_name}", asm.formatted_link_id(link_id));
                 asm.peer_table.inspect(link_id, |ps| {
-                    *ps.a2a_dh_pubkey.lock().unwrap() = Some(*public_key);
+                    *ps.a2a_dh_pubkey.lock().unwrap() = Some(*pubkey);
                 });
             }
             _ => {
