@@ -61,6 +61,7 @@ pub struct NodeConnect {
     /// Connect will fail if this does not match policy.
     pub zpr_addr: IpAddr,
     pub state: StateFlag,
+    pub a2a_dh_pubkey: x25519_dalek::PublicKey,
 }
 
 #[derive(Debug)]
@@ -616,7 +617,10 @@ impl VSConn {
         let vs_cr = VSConnectRequest {
             cn: self.node_cn.clone(),
             ctype: req.connect_type(),
-            params: Some(vec![Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr)]),
+            params: Some(vec![
+                Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr),
+                Param::new_x25519_pubkey(pname::A2A_DH_PUBKEY.into(), req.a2a_dh_pubkey),
+            ]),
         };
 
         debug!(target: VS_RPC, "VS-API -> connect (type = {:?})", vs_cr.ctype);

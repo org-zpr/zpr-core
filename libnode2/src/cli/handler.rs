@@ -40,9 +40,13 @@ pub async fn run_handler(
     info!("allowing VSConn to start up...");
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
+    let mut a2a_key_bytes = [0u8; 32];
+    aws_lc_rs::rand::fill(&mut a2a_key_bytes).expect("OS RNG Failed");
+
     let request = NodeConnect {
         zpr_addr: node_zpr_addr,
         state: StateFlag::NoState,
+        a2a_dh_pubkey: x25519_dalek::PublicKey::from(a2a_key_bytes),
     };
 
     info!("requesting a connect");

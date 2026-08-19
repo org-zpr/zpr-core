@@ -17,6 +17,10 @@ pub async fn launch(
 ) {
     // When launched, we have no state with the VS.
     let mut state = StateFlag::NoState;
+
+    //derive pubkey from a2a_dh_keypair
+    let a2a_dh_pubkey = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
+
     // TODO: The new visa service supports a "reconnect" signal. That is not yet exposed by libnode2
     loop {
         // This acts as a gate -- waiting for runloop to start.
@@ -27,6 +31,7 @@ pub async fn launch(
             let req = NodeConnect {
                 zpr_addr: node_zpr_addr,
                 state,
+                a2a_dh_pubkey,
             };
 
             // Race the connect call against lifecycle events. We use a bool here because
