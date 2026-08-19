@@ -158,9 +158,6 @@ pub struct Config {
     /// Required for node, optional for adapter - the ZPR address (no port) of the adapter.
     pub zpr_addr: Vec<IpAddr>,
 
-    /// Required for adapter - the path to the PEM file containing the nodes noise public key (not a certificate).
-    pub node_public_key_file: Option<PathBuf>,
-
     /// Ignored for node, optional for adapter - Only set if the adapter is configured for bootstrap authentication.
     pub bootstrap: Option<RsaBootstrapAuth>,
 
@@ -356,14 +353,6 @@ impl Config {
                 if self.node_addr.is_none() {
                     return Err("node_addr".arg_missing());
                 }
-                if self.node_public_key_file.is_none() {
-                    return Err("node_public_key_file".arg_missing());
-                } else {
-                    check_file_exists(
-                        "node public key file",
-                        &self.node_public_key_file.as_ref().unwrap(),
-                    )?;
-                }
                 if self.certificate_file.is_none() && self.name.is_empty() {
                     return Err("name (required when certificate_file is absent)".arg_missing());
                 }
@@ -452,13 +441,6 @@ impl Config {
         }
         if let Some(node_addr) = &config.node_addr {
             self.node_addr = Some(*node_addr);
-        }
-        if let Some(node_public_key_file) = &config.node_public_key_file {
-            if node_public_key_file.is_relative() {
-                self.node_public_key_file = Some(base_dir.join(node_public_key_file));
-            } else {
-                self.node_public_key_file = Some(node_public_key_file.clone());
-            }
         }
 
         if let Some(bootstrap_key_file) = &config.bootstrap_key {
@@ -597,7 +579,6 @@ impl Default for Config {
             logging: Vec::new(),
             node_addr: None,
             zpr_addr: Vec::new(),
-            node_public_key_file: None,
             bootstrap: None,
             rsaoauth: None,
             bootstrap_key_path: None,
@@ -649,7 +630,6 @@ pub struct GlobalConfigSection {
 pub struct AdapterConfigSection {
     pub name: Option<String>,
     pub node_addr: Option<SocketAddr>,
-    pub node_public_key_file: Option<PathBuf>,
     pub bootstrap_key: Option<PathBuf>,
 }
 
@@ -739,7 +719,6 @@ mod test {
     fn test_deserialize_adapter_config() {
         let toml_str = r#"
             node_addr = "10.0.0.1:5000"
-            node_public_key_file = "node_pubkey.pem"
             bootstrap_key = "rsa_key.pem"
             "#;
         let _config: AdapterConfigSection = toml::from_str(toml_str).unwrap();

@@ -182,7 +182,6 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --bootstrap-key actorvs-rsa.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
-  --node-public-key-file node.pubkey \
   --zpr-addr "$VS_ZPR_ADDR" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
 
 sleep 5
@@ -199,8 +198,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --bootstrap-key actor1-rsa.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
-  --zpr-addr "$A_ZPR_ADDR" \
-  --node-public-key-file node.pubkey 2>&1 | tee adapter1.log | prefix_log zpr-a &
+  --zpr-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -214,8 +212,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --bootstrap-key actor2-rsa.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
-  --zpr-addr "$B_ZPR_ADDR" \
-  --node-public-key-file node.pubkey 2>&1 | tee adapter2.log | prefix_log zpr-b &
+  --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
@@ -230,7 +227,6 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --bootstrap-key actor3-rsa.key \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C":12345 \
-    --node-public-key-file node.pubkey \
     --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
 fi
 

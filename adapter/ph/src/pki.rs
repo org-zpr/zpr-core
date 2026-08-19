@@ -200,6 +200,7 @@ pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseE
     })
 }
 
+#[cfg(test)]
 /// Load a public X22519 key from a PEM file
 pub fn load_noise_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
     let contents = fs::read(path)?;

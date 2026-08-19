@@ -527,7 +527,6 @@ impl LinkStateWrapper {
                     link_id,
                     ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
                     asm.self_noise_keypair.clone().unwrap(),
-                    asm.peer_noise_keypair.clone().unwrap().public,
                     asm.certx.clone().unwrap(),
                 )
                 .unwrap();

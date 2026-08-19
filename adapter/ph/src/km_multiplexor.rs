@@ -194,7 +194,6 @@ pub async fn launch_message_worker(
 ///
 ///
 /// - `link_id` is the link to the peer, in this case better be a link to a node.
-/// - `peer_noise_key` is the public noise key for the node/dock.
 ///
 /// Note that the link must already have a peer_table entry.
 ///
@@ -205,16 +204,9 @@ pub fn add_adapter_link(
     link_id: LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: NoiseKeypair,
-    peer_noise_key: [u8; 32],
     certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
-    let noise = match KmNoise::new(
-        true,
-        Some(peer_noise_key.into()),
-        Some(local_noise_key),
-        recv_zpis,
-        certx,
-    ) {
+    let noise = match KmNoise::new(true, Some(local_noise_key), recv_zpis, certx) {
         Ok(n) => n,
         Err(e) => {
             return Err(KmSetupError::InitializationError(e));
@@ -237,7 +229,7 @@ pub fn add_node_link(
     local_noise_key: NoiseKeypair,
     certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
-    let noise = match KmNoise::new(false, None, Some(local_noise_key), recv_zpis, certx) {
+    let noise = match KmNoise::new(false, Some(local_noise_key), recv_zpis, certx) {
         Ok(n) => n,
         Err(e) => return Err(KmSetupError::InitializationError(e)),
     };
@@ -351,16 +343,17 @@ mod test {
 
     #[tokio::test]
     async fn test_km_multiplexor_updates_assembly_state() {
-        let node_kp = NoiseKeypair::new(
+        let adapter_kp = NoiseKeypair::new(
             BASE64_STANDARD
-                .decode(NODE_NOISE_KEY)
+                .decode(ADAPTER_NOISE_KEY)
                 .unwrap()
                 .try_into()
                 .unwrap(),
         );
-        let adapter_kp = NoiseKeypair::new(
+
+        let node_kp = NoiseKeypair::new(
             BASE64_STANDARD
-                .decode(ADAPTER_NOISE_KEY)
+                .decode(NODE_NOISE_KEY)
                 .unwrap()
                 .try_into()
                 .unwrap(),
@@ -417,7 +410,6 @@ mod test {
                     adapter_link_id,
                     ZPIPair::new(1, 2),
                     adapter_kp,
-                    node_kp.public.clone(),
                     adapter_exchanger,
                 )
                 .unwrap();
@@ -434,7 +426,7 @@ mod test {
                     Ok(resp) => match resp {
                         Some(KmLinkMsg { link_id, msg }) => {
                             assert_eq!(link_id, adapter_link_id);
-                            assert_eq!(msg.len(), 913); // should be a KM payload
+                            assert_eq!(msg.len(), 32);
                             handshake_req = msg;
                         }
                         None => panic!("Expected KMLinkMessage message"),
@@ -451,14 +443,8 @@ mod test {
                 }
 
                 // Pretend to be a node and send back a valid reply.
-                let mut responder = KmNoise::new(
-                    false,
-                    None,
-                    Some(node_kp),
-                    ZPIPair::new(3, 4),
-                    node_exchanger,
-                )
-                .unwrap();
+                let mut responder =
+                    KmNoise::new(false, Some(node_kp), ZPIPair::new(3, 4), node_exchanger).unwrap();
                 match responder.reset() {
                     Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
                     Ok(None) => {} // good
@@ -482,6 +468,28 @@ mod test {
                 handle_inbound_km_msg(&asm, adapter_link_id, &handshake_reply).unwrap();
 
                 yield_now().await;
+
+                // The adapter should now reply.
+                let handshake_req2: Bytes;
+                match timeout(Duration::from_secs(2), km_rx.recv()).await {
+                    Ok(resp) => match resp {
+                        Some(KmLinkMsg { link_id, msg }) => {
+                            assert_eq!(link_id, adapter_link_id);
+                            assert_eq!(msg.len(), 881); // should be a KM payload
+                            handshake_req2 = msg;
+                        }
+                        None => panic!("Expected KMLinkMessage message"),
+                    },
+                    Err(_) => panic!("Timed out waiting for KM message"),
+                }
+
+                match responder.handle_message(&handshake_req2, KM_ID_NOISE) {
+                    Ok(Some(_)) => panic!("unexpected additional handshake message from responder"),
+                    Ok(None) => {} // good
+                    Err(e) => {
+                        panic!("responder handle_message failed on handshake-req: {:?}", e);
+                    }
+                };
 
                 // The KM on the link will process the message and transition to established-state.
                 // It will send two signals - SaIdChange followed by SaEstablished.  Both signals

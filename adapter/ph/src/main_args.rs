@@ -144,10 +144,6 @@ pub enum Command {
         #[arg(long, short = 'N', value_name = "ADDR:PORT", value_parser = parse_socket_addr_or_scoped_ip_addr)]
         node_addr: Option<SocketAddr>,
 
-        /// PEM file holding the nodes noise public key
-        #[arg(long, short = 'b', value_name = "PATH")]
-        node_public_key_file: Option<PathBuf>, // noise public key for node (only specified when starting an adapter)
-
         /// PEM file holding the boostrap RSA private key
         #[arg(long, value_name = "PATH")]
         bootstrap_key: Option<PathBuf>,
