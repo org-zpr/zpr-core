@@ -2208,7 +2208,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tui-input",
- "zpr 0.20.0",
+ "x25519-dalek",
+ "zpr 0.22.1",
  "zpr-utils",
 ]
 
@@ -2743,7 +2744,7 @@ dependencies = [
  "x25519-dalek",
  "x509-cert",
  "zerocopy",
- "zpr 0.20.0",
+ "zpr 0.22.1",
  "zpr-ext",
  "zpr-utils",
 ]
@@ -5334,8 +5335,8 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.20.0"
-source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.20.0#76b909ebce8d865b99fd6659ffda7b560423f120"
+version = "0.22.1"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.22.1#017b7b5881dc934fce1a374cf8a4bfc32e7df7ba"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -5352,6 +5353,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "url",
+ "x25519-dalek",
  "zerocopy",
 ]
 

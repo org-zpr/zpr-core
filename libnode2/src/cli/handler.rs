@@ -172,11 +172,15 @@ pub async fn run_handler(
                                 10, rand_octets[0], rand_octets[1], rand_octets[2],
                             ));
 
+                            let mut a2a_key_bytes = [0u8; 32];
+                            aws_lc_rs::rand::fill(&mut a2a_key_bytes).expect("OS RNG Failed");
+
                             let connect_req = ConnectRequest {
                                 blobs: vec![AuthBlob::SS(blob)],
                                 claims,
                                 substrate_addr,
                                 dock_interface: 0,
+                                a2a_dh_public_key: zpr::vsapi_types::PublicKey::new(&a2a_key_bytes),
                             };
 
                             match handle.authorize_connect(connect_req).await {

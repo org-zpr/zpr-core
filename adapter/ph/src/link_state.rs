@@ -837,6 +837,10 @@ impl LinkStateWrapper {
         blob: String,
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
+        let a2a_dh_public_key = asm
+            .peer_table
+            .inspect(link_id, |ps| *ps.a2a_dh_pubkey.lock().unwrap())
+            .flatten();
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (self.link_type, locked_fsm.state) {
@@ -899,7 +903,13 @@ impl LinkStateWrapper {
             "About to build connect request"
         );
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
-        match visa_mgmt::build_connect_request(asm, link_id, requested_addr, &d_blob) {
+        match visa_mgmt::build_connect_request(
+            asm,
+            link_id,
+            requested_addr,
+            &d_blob,
+            a2a_dh_public_key,
+        ) {
             Ok(Some(conn_req)) => {
                 drop(locked_fsm);
                 Ok(visa_mgmt::authorize_connect(asm, link_id, conn_req))
