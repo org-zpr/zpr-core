@@ -131,7 +131,7 @@ impl TlvEncoding {
             TlvValue::Ipv6Addr(v) => put_ipv6addr(buf, self.tlv_type, v),
             TlvValue::Ipv4Addr(v) => put_ipv4addr(buf, self.tlv_type, v),
             TlvValue::SocketAddr(v) => put_socketaddr(buf, self.tlv_type, v),
-            TlvValue::X25519PubKey(v) => put_x25519_pub_key(buf, self.tlv_type, v),
+            TlvValue::X25519PubKey(v) => put_x25519_pubkey(buf, self.tlv_type, v),
             TlvValue::Visa(v) => put_visa(buf, self.tlv_type, v),
         }
     }
