@@ -503,6 +503,7 @@ fn requested_visa_granted(
                 egress_link_id.get(),
                 egress_bind_txn_id,
                 tc,
+                None,
             )
             .enqueue();
         }
@@ -652,6 +653,7 @@ fn requested_tether_granted(
             txn_id,
             ingress_tether_id,
             tc,
+            None,
         )
         .enqueue(),
     }
