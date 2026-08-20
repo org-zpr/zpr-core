@@ -2,32 +2,32 @@ name: Rust-adapter
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     paths:
-      - 'adapter/ph/**'
-      - 'adapter/cli/**'
-      - 'zpr-ext/**'
-      - 'cslab/**'
-      - 'cbpf-rs/**'
-      - 'libnode2/**'
-      - 'integration-test/**'
-      - 'zpr/**'
-      - '.github/workflows/adapter.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+      - "adapter/ph/**"
+      - "adapter/cli/**"
+      - "zpr-ext/**"
+      - "cslab/**"
+      - "cbpf-rs/**"
+      - "libnode2/**"
+      - "integration-test/**"
+      - "zpr/**"
+      - ".github/workflows/adapter.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
   pull_request:
     paths:
-      - 'adapter/ph/**'
-      - 'adapter/cli/**'
-      - 'zpr-ext/**'
-      - 'cslab/**'
-      - 'cbpf-rs/**'
-      - 'libnode2/**'
-      - 'integration-test/**'
-      - 'zpr/**'
-      - '.github/workflows/adapter.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+      - "adapter/ph/**"
+      - "adapter/cli/**"
+      - "zpr-ext/**"
+      - "cslab/**"
+      - "cbpf-rs/**"
+      - "libnode2/**"
+      - "integration-test/**"
+      - "zpr/**"
+      - ".github/workflows/adapter.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -36,7 +36,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: true
-  VISA_SERVICE_RELEASE: v0.15.0
+  VISA_SERVICE_RELEASE: v0.16.0
 
 jobs:
   # Build and upload ph
@@ -44,10 +44,10 @@ jobs:
     name: PH
     uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.3
     with:
-      name: 'ph'
-      path: './adapter/ph'
+      name: "ph"
+      path: "./adapter/ph"
       package: true
-      package-path: './target/debug/ph'
+      package-path: "./target/debug/ph"
       needs-capnp: true
     secrets: inherit
 
@@ -56,10 +56,10 @@ jobs:
     name: PH CLI
     uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.3
     with:
-      name: 'ph-cli'
-      path: './adapter/cli'
+      name: "ph-cli"
+      path: "./adapter/cli"
       package: true
-      package-path: './target/debug/ph-cli'
+      package-path: "./target/debug/ph-cli"
       runs-on: "['ubuntu-latest']"
       needs-libpcap: true
       needs-capnp: true
@@ -71,8 +71,8 @@ jobs:
     needs: [build-ph]
     uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.3
     with:
-      name: 'ph'
-      path: './adapter/ph'
+      name: "ph"
+      path: "./adapter/ph"
       needs-capnp: true
     secrets: inherit
 
@@ -82,8 +82,8 @@ jobs:
     needs: [build-ph-cli]
     uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.3
     with:
-      name: 'ph-cli'
-      path: './adapter/cli'
+      name: "ph-cli"
+      path: "./adapter/cli"
       runs-on: "['ubuntu-latest']"
       needs-libpcap: true
       needs-capnp: true
@@ -98,67 +98,67 @@ jobs:
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v7
-    # Necessary to run before rust-cache
-    - run: rustup toolchain install stable --profile minimal
-    - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
-      with:
-        workspaces: |
-          adapter/ph
-          adapter/cli
-          zpr-ext
-          cslab
-          cbpf-rs
+      - uses: actions/checkout@v7
+      # Necessary to run before rust-cache
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          workspaces: |
+            adapter/ph
+            adapter/cli
+            zpr-ext
+            cslab
+            cbpf-rs
 
-    # see <https://github.com/docker-library/golang/issues/452>
-    - name: Set workspace as safe
-      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # see <https://github.com/docker-library/golang/issues/452>
+      - name: Set workspace as safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-    - name: Setup Git credentials
-      timeout-minutes: 1
-      run: |
-        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
-        chmod +x "$HOME/.git-askpass"
-        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
-        go env -w GOPRIVATE="github.com/org-zpr/*"
+      - name: Setup Git credentials
+        timeout-minutes: 1
+        run: |
+          echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+          chmod +x "$HOME/.git-askpass"
+          echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+          go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v8
-      with:
-        pattern: ph-*${{ matrix.os }}
-        merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ph-*${{ matrix.os }}
+          merge-multiple: true
 
-    - name: Build
-      timeout-minutes: 10
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        tar -xvf ph.tar
-        tar -xvf ph-cli.tar
+      - name: Build
+        timeout-minutes: 10
+        env:
+          ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+        run: |
+          tar -xvf ph.tar
+          tar -xvf ph-cli.tar
 
-    - name: Download Asset
-      uses: robinraju/release-downloader@v1
-      with:
-        repository: 'org-zpr/zpr-visaservice'
-        tag: ${{ env.VISA_SERVICE_RELEASE }}
-        fileName: 'release-linux-x86_64.tar.gz'
-        extract: true
-        out-file-path: 'integration-test'
-        token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      - name: Download Asset
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "org-zpr/zpr-visaservice"
+          tag: ${{ env.VISA_SERVICE_RELEASE }}
+          fileName: "release-linux-x86_64.tar.gz"
+          extract: true
+          out-file-path: "integration-test"
+          token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
 
-    - name: Set env
-      run: |
-        echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
-    - name: install valkey
-      run: |
-        sudo apt-get update
-        sudo apt install -y valkey
-        sudo systemctl stop valkey-server
-        sudo systemctl disable valkey-server
+      - name: Set env
+        run: |
+          echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
+      - name: install valkey
+        run: |
+          sudo apt-get update
+          sudo apt install -y valkey
+          sudo systemctl stop valkey-server
+          sudo systemctl disable valkey-server
 
-    - name: One Node v6 Test
-      timeout-minutes: 10
-      run: |
-        ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server integration-test/one-node-v6-test.sh
+      - name: One Node v6 Test
+        timeout-minutes: 10
+        run: |
+          ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server integration-test/one-node-v6-test.sh
 
   capture-integration-test:
     name: Run Capture Test
@@ -168,65 +168,65 @@ jobs:
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v7
-    # Necessary to run before rust-cache
-    - run: rustup toolchain install stable --profile minimal
-    - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
-      with:
-        workspaces: |
-          adapter/ph
-          adapter/cli
-          zpr-ext
-          cslab
-          cbpf-rs
+      - uses: actions/checkout@v7
+      # Necessary to run before rust-cache
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        with:
+          workspaces: |
+            adapter/ph
+            adapter/cli
+            zpr-ext
+            cslab
+            cbpf-rs
 
-    # see <https://github.com/docker-library/golang/issues/452>
-    - name: Set workspace as safe
-      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # see <https://github.com/docker-library/golang/issues/452>
+      - name: Set workspace as safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-    - name: Setup Git credentials
-      timeout-minutes: 1
-      run: |
-        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
-        chmod +x "$HOME/.git-askpass"
-        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
-        go env -w GOPRIVATE="github.com/org-zpr/*"
+      - name: Setup Git credentials
+        timeout-minutes: 1
+        run: |
+          echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+          chmod +x "$HOME/.git-askpass"
+          echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+          go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v8
-      with:
-        pattern: ph-*${{ matrix.os }}
-        merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ph-*${{ matrix.os }}
+          merge-multiple: true
 
-    - name: Build
-      timeout-minutes: 10
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        tar -xvf ph.tar
-        tar -xvf ph-cli.tar  
+      - name: Build
+        timeout-minutes: 10
+        env:
+          ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+        run: |
+          tar -xvf ph.tar
+          tar -xvf ph-cli.tar
 
-    - name: Download Asset
-      uses: robinraju/release-downloader@v1
-      with:
-        repository: 'org-zpr/zpr-visaservice'
-        tag: ${{ env.VISA_SERVICE_RELEASE }}
-        fileName: 'release-linux-x86_64.tar.gz'
-        extract: true
-        out-file-path: 'integration-test'
-        token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      - name: Download Asset
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "org-zpr/zpr-visaservice"
+          tag: ${{ env.VISA_SERVICE_RELEASE }}
+          fileName: "release-linux-x86_64.tar.gz"
+          extract: true
+          out-file-path: "integration-test"
+          token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
 
-    - name: install valkey
-      run: |
-        sudo apt-get update
-        sudo apt install -y valkey
-        sudo systemctl stop valkey-server
-        sudo systemctl disable valkey-server
+      - name: install valkey
+        run: |
+          sudo apt-get update
+          sudo apt install -y valkey
+          sudo systemctl stop valkey-server
+          sudo systemctl disable valkey-server
 
-    - name: Set env
-      run: |
-        echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
+      - name: Set env
+        run: |
+          echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
 
-    - name: Capture Test
-      timeout-minutes: 10
-      run: |
-        ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server integration-test/capture-test.sh
+      - name: Capture Test
+        timeout-minutes: 10
+        run: |
+          ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server integration-test/capture-test.sh
