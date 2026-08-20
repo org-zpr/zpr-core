@@ -172,16 +172,21 @@ pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
 
 /// Insert visa into table.
 pub fn insert_visa(
-    asm: &Arc<Assembly>,
+    asm: &Assembly,
     visa: vsapi_types::Visa,
 ) -> Result<VisaId, visa_table::VisaTableError> {
     if visa.visa_type != vsapi_types::VisaType::Full {
         panic!("Forward only visas not yet supported")
     }
-    let addr = visa.dock_pep.clone().unwrap().dest_addr;
-    if asm.find_egress_link(addr.into()).is_none() {
+    let dest_addr = visa.dock_pep.as_ref().unwrap().dest_addr;
+    let next_hop = visa
+        .fwd_pep
+        .as_ref()
+        .map(|p| p.next_hop)
+        .unwrap_or(dest_addr);
+    if asm.find_egress_link(next_hop.into()).is_none() {
         asm.counters.management[ManagementCounterType::VisaRequestError].increment();
-        return Err(visa_table::VisaTableError::DestNotFound(addr.into()));
+        return Err(visa_table::VisaTableError::DestNotFound(next_hop.into()));
     }
     let visa_id = asm.visa_table.write().unwrap().insert_visa(visa)?;
     Ok(visa_id)
@@ -190,10 +195,14 @@ pub fn insert_visa(
 /// Given a visa ID, look up the visa in our table to find the destination address
 /// then use that to find an egress link.
 pub fn get_egress_link_for_visa(
-    asm: &Arc<Assembly>,
+    asm: &Assembly,
     visa_id: VisaId,
 ) -> Result<NonZero<LinkId>, visa_table::VisaTableError> {
-    let addr = asm.visa_table.read().unwrap().get_visa_dest_addr(visa_id)?;
+    let addr = asm
+        .visa_table
+        .read()
+        .unwrap()
+        .get_visa_next_hop_addr(visa_id)?;
     let Some(link_id) = asm.find_egress_link(addr) else {
         return Err(visa_table::VisaTableError::DestNotFound(addr));
     };
@@ -201,7 +210,7 @@ pub fn get_egress_link_for_visa(
 }
 
 pub fn handle_revocation(
-    asm: &Arc<Assembly>,
+    asm: &Assembly,
     visa_id: VisaId,
 ) -> Result<(), visa_table::VisaTableError> {
     asm.visa_table

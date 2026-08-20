@@ -45,6 +45,7 @@ pub struct Visa {
     pub visa: vsapi_types::Visa,
     streams: Vec<ForwardingEntry>,
     pub ftuple: VsapiFiveTuple,
+    pub next_hop: IpAddress,
 }
 
 impl std::fmt::Debug for Visa {
@@ -92,11 +93,17 @@ impl Visa {
         if visa.visa_type != vsapi_types::VisaType::Full {
             panic!("Forward only visas not yet supported")
         }
-        let ftuple = visa.dock_pep.clone().unwrap().get_five_tuple();
+        let ftuple = visa.dock_pep.as_ref().unwrap().get_five_tuple();
+        let next_hop = visa
+            .fwd_pep
+            .as_ref()
+            .map(|p| p.next_hop.into())
+            .unwrap_or_default();
         Self {
-            visa: visa,
+            visa,
             streams: Vec::new(),
-            ftuple: ftuple,
+            ftuple,
+            next_hop,
         }
     }
 
@@ -354,16 +361,19 @@ impl VisaTable {
         info!(target: VISA_MGMT, "Revoked visa {visa_id}");
         Ok(())
     }
-    /// Given a visa ID, look up the visa and return the destination address.
-    /// If visa is not found or does not have a destination address, return an error.
-    pub fn get_visa_dest_addr(&self, visa_id: VisaId) -> Result<IpAddress, VisaTableError> {
-        let visa_query = self
+
+    /// Given a visa ID, look up the visa and return the next hop address.
+    /// If visa is not found or does not have a next hop address, return an error.
+    pub fn get_visa_next_hop_addr(&self, visa_id: VisaId) -> Result<IpAddress, VisaTableError> {
+        let visa = self
             .table
             .get(&visa_id)
-            .ok_or(VisaTableError::NotFound(visa_id));
-        match visa_query {
-            Ok(visa) => Ok(IpAddress::from(visa.ftuple.dest_addr.clone())),
-            Err(e) => Err(e),
+            .ok_or(VisaTableError::NotFound(visa_id))?;
+
+        if visa.next_hop == IpAddress::UNSPECIFIED {
+            Ok(IpAddress::from(visa.ftuple.dest_addr.clone()))
+        } else {
+            Ok(visa.next_hop)
         }
     }
 
