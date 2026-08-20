@@ -148,7 +148,9 @@ jobs:
     - name: Set env
       run: |
         echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
-    - name: install valkey
+
+    - name: Install valkey
+      timeout-minutes: 5
       run: |
         sudo apt-get update
         sudo apt install -y valkey
@@ -215,7 +217,8 @@ jobs:
         out-file-path: 'integration-test'
         token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
 
-    - name: install valkey
+    - name: Install valkey
+      timeout-minutes: 5
       run: |
         sudo apt-get update
         sudo apt install -y valkey
