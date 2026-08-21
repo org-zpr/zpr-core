@@ -316,7 +316,7 @@ pub fn send_bind_actor_address_success_response<'a>(
             rsp_pkt.put_u16(key.as_bytes().len() as u16);
             rsp_pkt.put_slice(key.as_bytes());
         }
-        None => rsp_pkt.put_u16(0)
+        None => rsp_pkt.put_u16(0),
     }
     super::core::send_per_flow_txn_mgmt(
         asm,
