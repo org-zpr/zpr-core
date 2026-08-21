@@ -206,7 +206,7 @@ pub fn add_adapter_link(
     local_noise_key: NoiseKeypair,
     certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
-    let noise = match KmNoise::new(true, Some(local_noise_key), recv_zpis, certx) {
+    let noise = match KmNoise::new(true, true, Some(local_noise_key), recv_zpis, certx) {
         Ok(n) => n,
         Err(e) => {
             return Err(KmSetupError::InitializationError(e));
@@ -229,7 +229,7 @@ pub fn add_node_link(
     local_noise_key: NoiseKeypair,
     certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
-    let noise = match KmNoise::new(false, Some(local_noise_key), recv_zpis, certx) {
+    let noise = match KmNoise::new(false, false, Some(local_noise_key), recv_zpis, certx) {
         Ok(n) => n,
         Err(e) => return Err(KmSetupError::InitializationError(e)),
     };
@@ -443,8 +443,14 @@ mod test {
                 }
 
                 // Pretend to be a node and send back a valid reply.
-                let mut responder =
-                    KmNoise::new(false, Some(node_kp), ZPIPair::new(3, 4), node_exchanger).unwrap();
+                let mut responder = KmNoise::new(
+                    false,
+                    false,
+                    Some(node_kp),
+                    ZPIPair::new(3, 4),
+                    node_exchanger,
+                )
+                .unwrap();
                 match responder.reset() {
                     Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
                     Ok(None) => {} // good

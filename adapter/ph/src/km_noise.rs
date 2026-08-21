@@ -72,6 +72,9 @@ pub struct KmNoise {
     /// which message in the handshake sequence is next to send or receive
     msg_nr: u8,
     initiate: bool,
+    /// Should we abort if we cannot verify the certificate received from the peer?
+    /// (Has no effect if the KmCertificateExchange is not configured for validation.)
+    verify_cert: bool,
     local_keypair: NoiseKeypair,
     hs_sent_t: Option<Instant>,
     hs_state: Option<snow::HandshakeState>,
@@ -189,6 +192,7 @@ impl KmNoise {
     /// - `certx` is the certificate exchange creator/verifier.
     pub fn new(
         initiate: bool,
+        verify_cert: bool,
         local_keypair: Option<NoiseKeypair>,
         zpis: ZPIPair,
         certx: KmCertExchange,
@@ -211,6 +215,7 @@ impl KmNoise {
             state: KmSMState::Configuring,
             msg_nr: 0,
             initiate,
+            verify_cert,
             local_keypair: kp,
             hs_sent_t: None,
             hs_state: None,
@@ -507,7 +512,18 @@ impl KeyManagerStateMachine for KmNoise {
                         }
                     };
                     match self.parse_km_payload(&payload[..len], peer_pubkey) {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            if self.verify_cert
+                                && self.certx.requires_verification()
+                                && !self.peer_cert.as_ref().is_some_and(|c| c.is_verified())
+                            {
+                                error!(target: KEY_MGMT, "noise: unable to verify remote certificate; aborting handshake");
+                                self.state = KmSMState::Error;
+                                self.hs_state = Some(hs);
+                                return Err(KmError::CertExchangeError);
+                            }
+                        }
+
                         Err(_) => {
                             self.state = KmSMState::Error;
                             self.hs_state = Some(hs);
@@ -644,6 +660,7 @@ mod test {
 
         let mut initiator = KmNoise::new(
             true,
+            true,
             Some(initiator_keypair),
             ZPIPair::new(1, 2),
             initiator_exchanger,
@@ -655,6 +672,7 @@ mod test {
             KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
         let mut responder = KmNoise::new(
+            false,
             false,
             Some(node_kp),
             ZPIPair::new(3, 4),
@@ -868,6 +886,7 @@ mod test {
 
         let initiator = KmNoise::new(
             true,
+            true,
             Some(adapter_kp),
             ZPIPair::new(1, 2),
             initiator_exchanger,
@@ -875,6 +894,7 @@ mod test {
         .unwrap();
 
         let responder = KmNoise::new(
+            false,
             false,
             Some(node_kp),
             ZPIPair::new(3, 4),

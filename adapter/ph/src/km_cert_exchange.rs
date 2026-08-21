@@ -167,6 +167,12 @@ impl KmCertExchange {
         };
         return Ok(peer_result);
     }
+
+    /// Do we require certificate verification?
+    /// (That is, are we configured with an authority certificate?)
+    pub fn requires_verification(&self) -> bool {
+        self.authority_cert.is_some()
+    }
 }
 
 #[cfg(test)]
