@@ -296,6 +296,7 @@ pub fn send_bind_actor_address_success_response<'a>(
     txn_id: TxnId,
     tether_id: StreamId,
     tc: tc::Ip5TupleTc,
+    peer_a2a_dh_pubkey: Option<&x25519_dalek::PublicKey>,
 ) -> Sent<'a> {
     debug!(target: ZDP, "{}: sending BindActorAddressResponse [success] for {txn_id}", asm.formatted_link_id(link_id));
 
@@ -310,7 +311,13 @@ pub fn send_bind_actor_address_success_response<'a>(
 
     Tcst::Ip5Tuple.write_to_buf(&mut rsp_pkt).unwrap();
     tc.serialize(&mut rsp_pkt);
-
+    match peer_a2a_dh_pubkey {
+        Some(key) => {
+            rsp_pkt.put_u16(key.as_bytes().len() as u16);
+            rsp_pkt.put_slice(key.as_bytes());
+        }
+        None => rsp_pkt.put_u16(0),
+    }
     super::core::send_per_flow_txn_mgmt(
         asm,
         link_id,
@@ -436,6 +443,7 @@ pub fn send_bind_egress_stream_request<'a>(
     link_id: LinkId,
     txn_id: TxnId,
     tc: tc::Ip5TupleTc,
+    peer_a2a_dh_pubkey: Option<&x25519_dalek::PublicKey>,
 ) -> Sent<'a> {
     debug!(target: ZDP, "{}: sending BindEgressStreamRequest for {tc}", asm.formatted_link_id(link_id));
 
@@ -443,6 +451,13 @@ pub fn send_bind_egress_stream_request<'a>(
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
     bind_req_hdr.tcst = Tcst::Ip5Tuple;
     tc.serialize(&mut req);
+    match peer_a2a_dh_pubkey {
+        Some(key) => {
+            req.put_u16(key.as_bytes().len() as u16);
+            req.put_slice(key.as_bytes());
+        }
+        None => req.put_u16(0),
+    }
 
     core::send_per_flow_txn_mgmt(
         asm,

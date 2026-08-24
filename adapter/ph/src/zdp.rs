@@ -218,6 +218,7 @@ pub struct ZdpBindActorAddressResponseHeader {
     // followed by `info_len` octets of Optional Additional Status Information
     // followed by 8-bit TCST
     // followed by traffic classifier
+    // followed by A2A pubkey as a big-endian u16 indicating length followed by key itself
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -239,6 +240,7 @@ pub struct ZdpStreamIdResponseHeader {
 pub struct ZdpBindEgressStreamRequestHeader {
     pub tcst: Tcst,
     // followed by traffic classifier
+    // followed by A2A pubkey as a big-endian u16 indicating length followed by key itself
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

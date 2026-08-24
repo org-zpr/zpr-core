@@ -38,10 +38,12 @@ pub fn bind_egress_stream(
     dock_link_id: NonZero<LinkId>,
     txn_id: txn_mgr::TxnId,
     tc: tc::Ip5TupleTc,
+    peer_a2a_dh_pubkey: Option<x25519_dalek::PublicKey>,
 ) {
     debug!(
         target: FLOW_MGMT,
-        "bind_egress_stream(dock_link_id={}, txn_id={txn_id}, tc={tc})", asm.formatted_link_id(dock_link_id.get()));
+        "bind_egress_stream(dock_link_id={}, txn_id={txn_id}, tc={tc}, peer_a2a_dh_pubkey={peer_a2a_dh_pubkey:?})",
+        asm.formatted_link_id(dock_link_id.get()));
 
     // form PEP
     let pep = DltPep { tc };
@@ -109,6 +111,7 @@ pub fn install_tether(
     txn: &txn_mgr::TxnHandle,
     tether_id: StreamId,
     tc: tc::Ip5TupleTc,
+    peer_a2a_dh_pubkey: Option<x25519_dalek::PublicKey>,
 ) -> Result<(), InstallTetherError> {
     let five_tuple = asm
         .elt
@@ -123,7 +126,7 @@ pub fn install_tether(
     }
 
     // Bind succeeded; add to ELT.
-    debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
+    debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id} (peer_a2a_dh_pubkey={peer_a2a_dh_pubkey:?})");
 
     let pep = EltPep {
         compression_mode: tc.compression_mode(),

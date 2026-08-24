@@ -46,6 +46,8 @@ pub enum HandleMgmtError {
     LinkClosed,
 }
 
+const X25519_KEY_LEN: usize = 32;
+
 impl From<&HandleMgmtError> for counters::ManagementCounterType {
     fn from(err: &HandleMgmtError) -> Self {
         match err {
@@ -709,6 +711,26 @@ pub async fn handle_bind_egress_stream_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
+    if pkt.remaining() < size_of::<u16>() {
+        return Err(HandleMgmtError::BadStructure);
+    }
+
+    let key_len = pkt.get_u16() as usize;
+
+    let peer_a2a_dh_pubkey = if key_len == 0 {
+        None
+    } else {
+        if pkt.remaining() < key_len {
+            return Err(HandleMgmtError::BadStructure);
+        }
+
+        let Ok(key_bytes) = <[u8; X25519_KEY_LEN]>::try_from(&pkt.body()[..key_len]) else {
+            return Err(HandleMgmtError::BadStructure);
+        };
+
+        Some(x25519_dalek::PublicKey::from(key_bytes))
+    };
+
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??
         error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
@@ -728,7 +750,7 @@ pub async fn handle_bind_egress_stream_request(
         asm.formatted_link_id(ingress_link_id.get()), tc.five_tuple()
     );
 
-    adapter::bind_egress_stream(asm, ingress_link_id, txn_id, tc);
+    adapter::bind_egress_stream(asm, ingress_link_id, txn_id, tc, peer_a2a_dh_pubkey);
 
     Ok(())
 }
@@ -769,7 +791,27 @@ pub async fn handle_bind_actor_address_response(
                 return Err(HandleMgmtError::BadStructure);
             };
 
-            adapter::install_tether(&asm, &txn, stream_id, tc)?;
+            if pkt.remaining() < size_of::<u16>() {
+                return Err(HandleMgmtError::BadStructure);
+            }
+
+            let key_len = pkt.get_u16() as usize;
+
+            let peer_a2a_dh_pubkey = if key_len == 0 {
+                None
+            } else {
+                if pkt.remaining() < key_len {
+                    return Err(HandleMgmtError::BadStructure);
+                }
+
+                let Ok(key_bytes) = <[u8; X25519_KEY_LEN]>::try_from(&pkt.body()[..key_len]) else {
+                    return Err(HandleMgmtError::BadStructure);
+                };
+
+                Some(x25519_dalek::PublicKey::from(key_bytes))
+            };
+
+            adapter::install_tether(&asm, &txn, stream_id, tc, peer_a2a_dh_pubkey)?;
             Ok(())
         }
 
