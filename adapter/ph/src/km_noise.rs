@@ -322,6 +322,10 @@ impl NoiseCodec {
 }
 
 impl Codec for NoiseCodec {
+    fn max_overhead(self: &Self) -> usize {
+        NOISE_PADLEN
+    }
+
     fn encrypt_transport_stateless(
         self: &Self,
         payload: &[u8],
@@ -380,6 +384,10 @@ impl NullCodec {
 }
 
 impl Codec for NullCodec {
+    fn max_overhead(self: &Self) -> usize {
+        0
+    }
+
     fn encrypt_transport_stateless(
         self: &Self,
         payload: &[u8],

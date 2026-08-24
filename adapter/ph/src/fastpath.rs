@@ -592,17 +592,48 @@ pub fn encrypt_hmac(send_hmac_key: [u8; 32], pkt: &mut Packet) {
     pkt.put(&link_mac[..zdp::ZDP_PACKET_MAC_SIZE]);
 }
 
-pub fn encrypt_full(
-    _asm: &Assembly,
-    codec: &dyn Codec,
-    pkt: &mut Packet,
-) -> Result<(), km::EncryptionError> {
+/// Encrypt the body of a ZDP packet in place, leaving the ZPI header intact.
+///
+/// The ciphertext is written into the packet's own tailroom rather than into a
+/// scratch buffer, which avoids both a `PACKET_BUFFER_SIZE` stack zeroing and a
+/// copy of the ciphertext back into the packet:
+///
+/// ```text
+/// before:  [ metadata ][ headroom ][ ZPI ][ plaintext ][ tailroom ........... ]
+/// after:   [ metadata ][ .............. dead .......... ][ ZPI ][ ciphertext  ]
+/// ```
+///
+/// Only the one-byte ZPI header is moved.  Packets too large for their own
+/// tailroom to hold the ciphertext fall back to the scratch-buffer path; for
+/// the packet sizes seen in practice the fast path always applies.
+pub fn encrypt_full(codec: &dyn Codec, pkt: &mut Packet) -> Result<(), km::EncryptionError> {
     // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
 
     let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>(); // = 1
 
-    let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
+    if pkt.body().len() < zpi_hdr_len {
+        return Err(km::EncryptionError::ParseError);
+    }
+
     let encr_len = pkt.body().len() - zpi_hdr_len; // Everything except the ZPI byte
+
+    // Can the ciphertext fit in this packet's own tailroom?  If so we can
+    // encrypt straight into the backing buffer.
+    if pkt.tailroom_available() >= encr_len + codec.max_overhead() {
+        let len = {
+            let (body, tailroom) = pkt.body_and_tailroom_mut();
+            codec.encrypt_transport_stateless(&body[zpi_hdr_len..], tailroom)?
+        };
+
+        // The ciphertext sits where the tailroom was; move the ZPI header down
+        // in front of it and make that the new body.
+        pkt.adopt_tailroom_with_header(zpi_hdr_len, len);
+
+        return Ok(());
+    }
+
+    // Fallback: the packet is too big to encrypt into its own tailroom.
+    let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
 
     match codec.encrypt_transport_stateless(
         &pkt.body()[zpi_hdr_len..encr_len + zpi_hdr_len],
@@ -672,12 +703,7 @@ fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), Decrypt
 }
 
 /// Decrypt a packet using the given encryption codec.
-fn decrypt_full(
-    _asm: &Assembly,
-    codec: &dyn Codec,
-    padlen: usize,
-    pkt: &mut Packet,
-) -> Result<(), DecryptError> {
+fn decrypt_full(codec: &dyn Codec, padlen: usize, pkt: &mut Packet) -> Result<(), DecryptError> {
     if pkt.body().len() < 1 {
         return Err(DecryptError::BadStructure);
     }
@@ -714,9 +740,9 @@ fn decrypt_with_sa(
     } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
         // TODO: Put padlen in state somewhere too
         if asm.config.get().km_impl == KM_ID_NOISE {
-            return decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, pkt);
+            return decrypt_full(&*transport_sa.codec, NOISE_PADLEN, pkt);
         } else {
-            return decrypt_full(asm, &*transport_sa.codec, 0, pkt);
+            return decrypt_full(&*transport_sa.codec, 0, pkt);
         }
     } else {
         // We have an SA and ZPI does not match.
@@ -847,7 +873,7 @@ fn substrate_egress_common(
             if transit {
                 encrypt_hmac(transport_sa.send_hmac_key, pkt);
             } else {
-                match encrypt_full(asm, &*transport_sa.codec, pkt) {
+                match encrypt_full(&*transport_sa.codec, pkt) {
                     Ok(()) => (),
                     Err(err) => return Err(err),
                 }
@@ -936,6 +962,200 @@ mod test {
         assert!(res.is_ok());
 
         assert!(pkt.body().len() == orig_len); // did remove checksum
+    }
+
+    /// A codec that expands its input, like a real AEAD does: an 8-byte
+    /// counter prefix, the (trivially transformed) body, and a 16-byte trailing
+    /// tag.  Enough to catch offset and overlap mistakes that a copy codec
+    /// would hide.
+    struct ExpandingCodec;
+
+    impl ExpandingCodec {
+        const NONCE: usize = 8;
+        const TAG: usize = 16;
+    }
+
+    impl km::Codec for ExpandingCodec {
+        fn max_overhead(&self) -> usize {
+            Self::NONCE + Self::TAG
+        }
+
+        fn encrypt_transport_stateless(
+            &self,
+            payload: &[u8],
+            message: &mut [u8],
+        ) -> Result<usize, km::EncryptionError> {
+            let out_len = payload.len() + self.max_overhead();
+            if message.len() < out_len {
+                return Err(km::EncryptionError::MessageTooLarge);
+            }
+            message[..Self::NONCE].copy_from_slice(&[0x5a_u8; ExpandingCodec::NONCE]);
+            for (i, b) in payload.iter().enumerate() {
+                message[Self::NONCE + i] = b ^ 0xa5;
+            }
+            message[Self::NONCE + payload.len()..out_len].fill(0xee);
+            Ok(out_len)
+        }
+
+        fn decrypt_transport_stateless(
+            &self,
+            payload: &[u8],
+            message: &mut [u8],
+        ) -> Result<usize, km::DecryptionError> {
+            if payload.len() < self.max_overhead() {
+                return Err(km::DecryptionError::MessageTooShort);
+            }
+            let body = &payload[Self::NONCE..payload.len() - Self::TAG];
+            if message.len() < body.len() {
+                return Err(km::DecryptionError::ParseError);
+            }
+            for (i, b) in body.iter().enumerate() {
+                message[i] = b ^ 0xa5;
+            }
+            Ok(body.len())
+        }
+    }
+
+    /// What `encrypt_full` should produce for a given cleartext body,
+    /// independent of which code path it took.
+    fn expected_ciphertext(body: &[u8]) -> Vec<u8> {
+        let mut out = vec![body[0]]; // ZPI byte, unencrypted
+        out.extend_from_slice(&[0x5a_u8; ExpandingCodec::NONCE]);
+        out.extend(body[1..].iter().map(|b| b ^ 0xa5));
+        out.extend_from_slice(&[0xee_u8; ExpandingCodec::TAG]);
+        out
+    }
+
+    fn packet_with_body(buf_size: usize, headroom: usize, body: &[u8]) -> Packet {
+        let mut pkt = Packet::new(vec![0u8; buf_size].into_boxed_slice(), headroom);
+        pkt.put(body);
+        pkt
+    }
+
+    #[test]
+    fn test_encrypt_full_uses_tailroom_in_place() {
+        let body: Vec<u8> = (0..60u8).collect(); // body[0] is the ZPI byte
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &body);
+
+        let cleartext_end = pkt.body_offset() + pkt.len();
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+
+        assert_eq!(pkt.body(), expected_ciphertext(&body).as_slice());
+
+        // The ciphertext must live in what used to be tailroom -- that is the
+        // whole point -- with only the one-byte ZPI header relocated.
+        assert_eq!(pkt.body_offset(), cleartext_end - 1);
+    }
+
+    #[test]
+    fn test_encrypt_full_falls_back_when_tailroom_too_small() {
+        let body: Vec<u8> = (0..60u8).collect();
+        // Tailroom of 40 bytes cannot hold 59 + 24 bytes of ciphertext.
+        let buf_size = Packet::MIN_BODY_OFFSET + body.len() + 40;
+        let mut pkt = packet_with_body(buf_size, 0, &body);
+
+        let cleartext_offset = pkt.body_offset();
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+
+        // Same bytes as the in-place path, but written back over the original
+        // body rather than into the tailroom.
+        assert_eq!(pkt.body(), expected_ciphertext(&body).as_slice());
+        assert_eq!(pkt.body_offset(), cleartext_offset);
+    }
+
+    #[test]
+    fn test_encrypt_full_decrypt_full_round_trip() {
+        let body: Vec<u8> = (0..60u8).collect();
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &body);
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+        assert_ne!(pkt.body(), body.as_slice());
+
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_ok());
+        assert_eq!(pkt.body(), body.as_slice());
+    }
+
+    /// The pre-#385 implementation, kept in the test module so the benchmark
+    /// below compares old and new on identical packets.
+    fn encrypt_full_via_scratch_buffer(
+        codec: &dyn Codec,
+        pkt: &mut Packet,
+    ) -> Result<(), km::EncryptionError> {
+        let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>();
+        let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
+        let encr_len = pkt.body().len() - zpi_hdr_len;
+
+        match codec.encrypt_transport_stateless(
+            &pkt.body()[zpi_hdr_len..encr_len + zpi_hdr_len],
+            &mut enc_buf,
+        ) {
+            Ok(len) => {
+                pkt.shrink_by(encr_len);
+                pkt.put(&enc_buf[0..len]);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_encrypt_full_paths() {
+        use std::time::Instant;
+
+        const ITERS: u32 = 500_000;
+        let body: Vec<u8> = (0..64u8).collect();
+
+        // One buffer, reused, so buffer allocation is not part of either
+        // measurement.
+        let mut buf = vec![0u8; config::PACKET_BUFFER_SIZE].into_boxed_slice();
+
+        let run = |f: &dyn Fn(&dyn Codec, &mut Packet) -> Result<(), km::EncryptionError>,
+                   buf: &mut Box<[u8]>| {
+            let t = Instant::now();
+            for _ in 0..ITERS {
+                let owned = std::mem::replace(buf, Box::new([]));
+                let mut pkt = Packet::new(owned, 64);
+                pkt.put(body.as_slice());
+                f(&ExpandingCodec, &mut pkt).unwrap();
+                std::hint::black_box(pkt.body()[0]);
+                *buf = pkt.destroy();
+            }
+            t.elapsed()
+        };
+
+        // Warm up, then measure each twice and keep the faster run.
+        run(&encrypt_full, &mut buf);
+        run(&encrypt_full_via_scratch_buffer, &mut buf);
+
+        let new = run(&encrypt_full, &mut buf).min(run(&encrypt_full, &mut buf));
+        let old = run(&encrypt_full_via_scratch_buffer, &mut buf)
+            .min(run(&encrypt_full_via_scratch_buffer, &mut buf));
+
+        println!(
+            "encrypt_full 64B body: in-place {:?}/pkt, scratch-buffer {:?}/pkt",
+            new / ITERS,
+            old / ITERS
+        );
+    }
+
+    #[test]
+    fn test_encrypt_full_rejects_empty_packet() {
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[]);
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_err());
+    }
+
+    #[test]
+    fn test_encrypt_full_zpi_only_packet() {
+        // Degenerate case: body is nothing but the ZPI byte, so the header
+        // relocation is a self-copy.
+        let body = [0x07u8];
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &body);
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+        assert_eq!(pkt.body(), expected_ciphertext(&body).as_slice());
     }
 
     #[test]
