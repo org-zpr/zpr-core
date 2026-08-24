@@ -431,10 +431,12 @@ fn requested_visa_granted(
 
     // adapter next-hops require the TC; node next-hops require the visa ID
     let tc;
+    let peer_a2a_dh_pubkey;
 
     match egress_peer_state.peer_type() {
         PeerType::Node => {
             tc = None;
+            peer_a2a_dh_pubkey = None;
         }
 
         PeerType::Adapter => {
@@ -446,6 +448,7 @@ fn requested_visa_granted(
                 return requested_visa_denied(asm, ingress_link_id, txn_id);
             };
             tc = Some(visa.get_tc());
+            peer_a2a_dh_pubkey = visa.get_ingress_a2a_dh_pubkey();
         }
 
         PeerType::Dock | PeerType::Unknown => {
@@ -503,7 +506,7 @@ fn requested_visa_granted(
                 egress_link_id.get(),
                 egress_bind_txn_id,
                 tc,
-                None,
+                peer_a2a_dh_pubkey.as_ref(),
             )
             .enqueue();
         }
@@ -609,14 +612,17 @@ fn requested_tether_granted(
 
     // adapter requestors require the TC; node requestors do not
     let tc;
+    let peer_a2a_dh_pubkey;
 
     match ingress_peer_state.peer_type() {
         PeerType::Node => {
             tc = None;
+            peer_a2a_dh_pubkey = None;
         }
 
         PeerType::Adapter => {
             tc = Some(visa.get_tc());
+            peer_a2a_dh_pubkey = visa.get_egress_a2a_dh_pubkey();
         }
 
         PeerType::Dock | PeerType::Unknown => {
@@ -653,7 +659,7 @@ fn requested_tether_granted(
             txn_id,
             ingress_tether_id,
             tc,
-            None,
+            peer_a2a_dh_pubkey.as_ref(),
         )
         .enqueue(),
     }

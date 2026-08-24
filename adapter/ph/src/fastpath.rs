@@ -310,14 +310,17 @@ impl FastpathWorker {
         match &*entry {
             EltEntry::Active(pep) => {
                 // compute A2A MAC
-                // TODO: use actual A2A SAID & keyed hash
+                // TODO: use actual A2A SAID
                 // See https://github.com/org-zpr/zpr-core/issues/1349
                 let a2a_said: A2aSaid = 0;
                 let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
                 let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+                let a2a_micv = match pep.a2a_micv_key {
+                    Some(micv_key) => blake3::keyed_hash(&micv_key, pkt.body()),
+                    None => blake3::hash(pkt.body()),
+                };
                 // SECURITY: truncating BLAKE3 is safe
-                a2a_mac[..a2a_mac_size]
-                    .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
+                a2a_mac[..a2a_mac_size].copy_from_slice(&a2a_micv.as_bytes()[..a2a_mac_size]);
 
                 // compress packet
                 compress::compress(
@@ -431,8 +434,12 @@ impl FastpathWorker {
         compress::expand(pep.tc.compression_mode(), &pep.tc.five_tuple(), &mut pkt);
 
         // check A2A MAC
-        // TODO: use actual A2A SAID & keyed hash
-        if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
+        // TODO: use actual A2A SAID
+        let a2a_micv = match pep.a2a_micv_key {
+            Some(micv_key) => blake3::keyed_hash(&micv_key, pkt.body()),
+            None => blake3::hash(pkt.body()),
+        };
+        if a2a_micv.as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
             drop(pep);
             return self.drop_and_count(pkt, FastpathCounterType::MicvFailure);
         }

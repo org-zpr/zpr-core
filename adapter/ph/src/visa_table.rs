@@ -135,6 +135,20 @@ impl Visa {
         tc::Ip5TupleTc::new(self.visa.dock_pep.as_ref().unwrap().get_five_tuple().into())
     }
 
+    pub fn get_ingress_a2a_dh_pubkey(&self) -> Option<x25519_dalek::PublicKey> {
+        let key = &self.visa.dock_pep.as_ref()?.session_key.ingress_key;
+        <[u8; 32]>::try_from(key.as_slice())
+            .ok()
+            .map(x25519_dalek::PublicKey::from)
+    }
+
+    pub fn get_egress_a2a_dh_pubkey(&self) -> Option<x25519_dalek::PublicKey> {
+        let key = &self.visa.dock_pep.as_ref()?.session_key.egress_key;
+        <[u8; 32]>::try_from(key.as_slice())
+            .ok()
+            .map(x25519_dalek::PublicKey::from)
+    }
+
     pub fn unlink_forwarding_entry(&mut self, forwarding_entry: &ForwardingEntry) -> bool {
         let idx = self.streams.iter().position(|fe| forwarding_entry == fe);
 
