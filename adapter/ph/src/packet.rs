@@ -529,8 +529,10 @@ impl Packet {
         let output_offset = old_offset + self.metadata().len;
         let new_offset = output_offset - header_len;
 
-        // Regions cannot overlap unless the body is entirely header, in which
-        // case source and destination coincide and the copy is a no-op.
+        // The source and destination regions overlap whenever the header is
+        // more than half the length of the old body (new_offset < old_offset +
+        // header_len iff len < 2 * header_len). That is fine: `copy_within`
+        // handles overlapping regions correctly (it is a `memmove`).
         self.buf
             .copy_within(old_offset..old_offset + header_len, new_offset);
 

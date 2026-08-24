@@ -600,8 +600,12 @@ pub fn encrypt_hmac(send_hmac_key: [u8; 32], pkt: &mut Packet) {
 ///
 /// ```text
 /// before:  [ metadata ][ headroom ][ ZPI ][ plaintext ][ tailroom ........... ]
-/// after:   [ metadata ][ .............. dead .......... ][ ZPI ][ ciphertext  ]
+/// after:   [ metadata ][ ....... dead .........][ ZPI ][ ciphertext ][ tail.. ]
 /// ```
+///
+/// The ciphertext starts exactly where the old tailroom started, the relocated
+/// ZPI byte overwrites the tail of the old plaintext, and whatever tailroom the
+/// ciphertext (plaintext + AEAD overhead) does not consume remains after it.
 ///
 /// Only the one-byte ZPI header is moved.  Packets too large for their own
 /// tailroom to hold the ciphertext fall back to the scratch-buffer path; for
