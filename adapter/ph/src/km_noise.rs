@@ -1,9 +1,11 @@
 //! KeyManager implementation using Noise protocol.
 //!
-//! Configured to use the "IK" pattern (see Noise paper).  This is same as what wireguard uses
-//! and requires that initiators know the 25519 public key of the responder.  The idea here
-//! is that an adapter wanting to connect to a remote node will have access to this key.
-//! Maybe through a special DNS record.
+//! Configured to use the "XX" pattern (see Noise paper).  This does not
+//! require that initiators know the 25519 public key of the responder.  The
+//! idea here is that an adapter wanting to connect to a remote node will
+//! validate the certificate which the node sends against a well-known CA
+//! certificate and confirm that the certificate's public key matches that
+//! exchanged by Noise.
 //!
 //! The key management messages are all handled by the noise protocol.
 //!
@@ -44,7 +46,7 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::time::{Duration, Instant};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
-static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+static PATTERN: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 
 const MSG_BUF_SIZE: usize = 4096;
 
@@ -67,18 +69,35 @@ impl From<snow::Error> for KmError {
 pub struct KmNoise {
     settings: KmSettings,
     state: KmSMState,
+    /// which message in the handshake sequence is next to send or receive
+    msg_nr: u8,
     initiate: bool,
-    peer_pub_key: Option<Vec<u8>>, // required if initiator
+    /// Should we abort if we cannot verify the certificate received from the peer?
+    /// (Has no effect if the KmCertificateExchange is not configured for validation.)
+    verify_cert: bool,
     local_keypair: NoiseKeypair,
     hs_sent_t: Option<Instant>,
     hs_state: Option<snow::HandshakeState>,
     //t_state: Option<snow::TransportState>,
-    recv_hmac_key: [u8; HMAC_KEY_LEN], // messages sent to us from peer will use this key (we create this)
-    send_hmac_key: Option<[u8; HMAC_KEY_LEN]>, // messages sent to peer will use this key (peers creates this)
+    /// messages sent to us from peer will use this key (we create this)
+    recv_hmac_key: [u8; HMAC_KEY_LEN],
+    /// messages sent to peer will use this key (peers creates this)
+    send_hmac_key: Option<[u8; HMAC_KEY_LEN]>,
     recv_zpis: ZPIPair,
     send_zpis: Option<ZPIPair>,
     certx: KmCertExchange,
-    peer_cert: Option<PeerCertificate>, // result of key exchange
+    /// result of key exchange
+    peer_cert: Option<PeerCertificate>,
+}
+
+/// Should this message number in the Noise handshake sequence carry a ZPI
+/// parameter payload.  Which message(s) this is varies by Noise pattern
+/// chosen.
+fn msg_carries_zpi_payload(msg_nr: u8) -> bool {
+    // Our XX pattern has three handshake messages.  We only expect to find
+    // a KeyMsg in the payload of the 2nd and 3rd messages: the 1st message
+    // is not encrypted.  (Note, msg_nr is 0-based).
+    msg_nr == 1 || msg_nr == 2
 }
 
 /// Holds a noise keypair.
@@ -162,29 +181,22 @@ struct KeyMsg {
 impl KmNoise {
     /// Create the Noise KeyManager.
     ///
-    /// This requires Noise keys.  Eventually (TODO) we will also pass certificates through here
+    /// This requires Noise keys.  We also pass certificates through here
     /// so that each side can check for certificate authority signautre.
-    /// (<https://github.com/org-zpr/zpr-core/issues/419>)
     ///
     /// The ZPI stuff here is definately first pass. Currently there is no way to change the
     /// ZPI values.  The ZPIs passed in here are sent to the peer for use in messages sent to us.
     ///
-    /// - `peer_pub_key` is required for initiator, and should match the `local_keypair` of the responder.
     /// - `local_keypair` is optional. If not provided, a new keypair will be generated.
     /// - `zpis` are the ZPI values that the peer should use for messages.
     /// - `certx` is the certificate exchange creator/verifier.
     pub fn new(
         initiate: bool,
-        peer_pub_key: Option<Vec<u8>>,
+        verify_cert: bool,
         local_keypair: Option<NoiseKeypair>,
         zpis: ZPIPair,
         certx: KmCertExchange,
     ) -> Result<Self, KmError> {
-        if initiate && peer_pub_key.is_none() {
-            error!(target: KEY_MGMT, "noise: peer public key required for initiator");
-            return Err(KmError::ConfigurationError);
-        }
-
         let settings = KmSettings {
             zdp_km_type: KM_ID_NOISE,
             padlen: NOISE_PADLEN,
@@ -201,8 +213,9 @@ impl KmNoise {
         Ok(KmNoise {
             settings,
             state: KmSMState::Configuring,
+            msg_nr: 0,
             initiate,
-            peer_pub_key,
+            verify_cert,
             local_keypair: kp,
             hs_sent_t: None,
             hs_state: None,
@@ -217,25 +230,30 @@ impl KmNoise {
 
     /// Create a noise handshake message with our KeyMsg payload.
     /// Returns a [KmError::HandshakeError] if there is a problem.
-    fn create_hs_message(&self, hs: &mut snow::HandshakeState) -> Result<Bytes, KmError> {
-        let payload = KeyMsg {
-            zpi_full_encr: self.recv_zpis.encr,
-            zpi_transit_hmac: self.recv_zpis.hmac,
-            hmac_key: self.recv_hmac_key,
-        };
-
+    fn create_hs_message(&mut self, hs: &mut snow::HandshakeState) -> Result<Bytes, KmError> {
         let mut payload_buf = BytesMut::with_capacity(MSG_BUF_SIZE);
-        payload_buf.put_slice(payload.as_bytes());
-        match self.certx.write_payload(&mut payload_buf) {
-            Ok(_) => {}
-            Err(e) => {
-                error!(target: KEY_MGMT, "noise: error writing certificate exchange payload: {e:?}");
-                return Err(KmError::CertExchangeError);
-            }
-        };
+
+        if msg_carries_zpi_payload(self.msg_nr) {
+            let payload = KeyMsg {
+                zpi_full_encr: self.recv_zpis.encr,
+                zpi_transit_hmac: self.recv_zpis.hmac,
+                hmac_key: self.recv_hmac_key,
+            };
+
+            payload_buf.put_slice(payload.as_bytes());
+            match self.certx.write_payload(&mut payload_buf) {
+                Ok(_) => {}
+                Err(e) => {
+                    error!(target: KEY_MGMT, "noise: error writing certificate exchange payload: {e:?}");
+                    return Err(KmError::CertExchangeError);
+                }
+            };
+        }
+
         let mut buf = BytesMut::zeroed(MSG_BUF_SIZE);
         match hs.write_message(&payload_buf.freeze(), &mut buf) {
             Ok(len) => {
+                self.msg_nr += 1;
                 buf.truncate(len);
                 Ok(buf.freeze())
             }
@@ -263,7 +281,7 @@ impl KmNoise {
         });
         self.send_hmac_key = Some(km.hmac_key);
 
-        // The key exchange payload follows the KeyMsg.'
+        // The key exchange payload follows the KeyMsg.
         let peer_cert = match self
             .certx
             .process_payload(&payload[std::mem::size_of::<KeyMsg>()..], peer_public_key)
@@ -400,6 +418,7 @@ impl KeyManagerStateMachine for KmNoise {
 
     fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
         self.state = KmSMState::Configuring;
+        self.msg_nr = 0;
         let np: snow::params::NoiseParams = match PATTERN.parse() {
             Ok(p) => p,
             Err(e) => {
@@ -411,11 +430,8 @@ impl KeyManagerStateMachine for KmNoise {
         aws_lc_rs::rand::fill(&mut self.recv_hmac_key).expect("OS RNG Failed"); // generate an HMAC key
         self.send_hmac_key = None;
         if self.initiate {
-            let rpk = self.peer_pub_key.as_ref().unwrap();
             let mut initiator = match snow::Builder::new(np)
                 .local_private_key(self.local_keypair.private.as_ref())
-                .unwrap()
-                .remote_public_key(rpk)
                 .unwrap()
                 .build_initiator()
             {
@@ -456,6 +472,7 @@ impl KeyManagerStateMachine for KmNoise {
                 }
             };
             self.hs_state = Some(responder);
+            self.hs_sent_t = None;
             Ok(None)
         }
     }
@@ -475,26 +492,43 @@ impl KeyManagerStateMachine for KmNoise {
         }
         assert!(self.hs_state.is_some()); // or a programming error has occurred
 
+        // message received; clear timeout
+        self.hs_sent_t = None;
+
         let mut hs = self.hs_state.take().unwrap();
         let mut payload = BytesMut::zeroed(MSG_BUF_SIZE);
-        // Our IK pattern has two handshake messages. In each we expect to find a KeyMsg in the payload.
         match hs.read_message(&message[..], &mut payload) {
             Ok(len) => {
-                let peer_pubkey = match hs.get_remote_static() {
-                    Some(p) => p,
-                    None => {
-                        error!(target: KEY_MGMT, "noise: no remote public key - cannot do cert exchange");
-                        self.state = KmSMState::Error;
-                        self.hs_state = Some(hs);
-                        return Err(KmError::CertExchangeError);
-                    }
-                };
-                match self.parse_km_payload(&payload[..len], peer_pubkey) {
-                    Ok(_) => {}
-                    Err(_) => {
-                        self.state = KmSMState::Error;
-                        self.hs_state = Some(hs);
-                        return Err(KmError::HandshakeError);
+                let msg_nr = self.msg_nr;
+                self.msg_nr += 1;
+                if msg_carries_zpi_payload(msg_nr) {
+                    let peer_pubkey = match hs.get_remote_static() {
+                        Some(p) => p,
+                        None => {
+                            error!(target: KEY_MGMT, "noise: no remote public key - cannot do cert exchange");
+                            self.state = KmSMState::Error;
+                            self.hs_state = Some(hs);
+                            return Err(KmError::CertExchangeError);
+                        }
+                    };
+                    match self.parse_km_payload(&payload[..len], peer_pubkey) {
+                        Ok(_) => {
+                            if self.verify_cert
+                                && self.certx.requires_verification()
+                                && !self.peer_cert.as_ref().is_some_and(|c| c.is_verified())
+                            {
+                                error!(target: KEY_MGMT, "noise: unable to verify remote certificate; aborting handshake");
+                                self.state = KmSMState::Error;
+                                self.hs_state = Some(hs);
+                                return Err(KmError::CertExchangeError);
+                            }
+                        }
+
+                        Err(_) => {
+                            self.state = KmSMState::Error;
+                            self.hs_state = Some(hs);
+                            return Err(KmError::HandshakeError);
+                        }
                     }
                 }
             }
@@ -509,8 +543,11 @@ impl KeyManagerStateMachine for KmNoise {
         let mut hs_msg: Option<Bytes> = None;
 
         if !hs.is_handshake_finished() {
-            hs_msg = match self.create_hs_message(&mut hs) {
-                Ok(m) => Some(m),
+            match self.create_hs_message(&mut hs) {
+                Ok(m) => {
+                    self.hs_sent_t = Some(Instant::now());
+                    hs_msg = Some(m);
+                }
                 Err(_) => {
                     self.hs_state = Some(hs);
                     self.state = KmSMState::Error;
@@ -567,6 +604,8 @@ impl KeyManagerStateMachine for KmNoise {
                     return Err(KmError::HandshakeError);
                 }
             };
+        } else {
+            self.hs_state = Some(hs);
         }
         return Ok(hs_msg);
     }
@@ -574,7 +613,6 @@ impl KeyManagerStateMachine for KmNoise {
     fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
         if self.state == KmSMState::Configuring
             && self.hs_state.is_some()
-            && self.initiate
             && self.hs_sent_t.is_some()
             && Instant::now().duration_since(self.hs_sent_t.unwrap()) > HANDSHAKE_TIMEOUT
         {
@@ -600,8 +638,7 @@ mod test {
     use crate::km_testdata::test::*;
     use crate::pki;
 
-    #[test]
-    fn test_noise_handshake_manually_1() {
+    fn test_noise_handshake_common() -> (km::KmTransportSA, km::KmTransportSA) {
         let node_kp = NoiseKeypair::new(
             BASE64_STANDARD
                 .decode(NODE_NOISE_KEY)
@@ -623,7 +660,7 @@ mod test {
 
         let mut initiator = KmNoise::new(
             true,
-            Some(node_kp.public.to_vec()),
+            true,
             Some(initiator_keypair),
             ZPIPair::new(1, 2),
             initiator_exchanger,
@@ -636,7 +673,7 @@ mod test {
 
         let mut responder = KmNoise::new(
             false,
-            None,
+            false,
             Some(node_kp),
             ZPIPair::new(3, 4),
             responder_exchanger,
@@ -653,10 +690,10 @@ mod test {
                 panic!("error resetting initiator: {:?}", e);
             }
         };
-        assert!(
-            handshake_msg_0.len() == 913,
-            "unexpected handshake message-0 length, got {}",
-            handshake_msg_0.len()
+        assert_eq!(
+            handshake_msg_0.len(),
+            32,
+            "unexpected handshake message-0 length",
         );
         assert!(initiator.get_state() == KmSMState::Configuring);
 
@@ -668,7 +705,7 @@ mod test {
             }
         };
 
-        // -> e, es, s, ss
+        // -> e
         let handshake_msg_1 = match responder.handle_message(&handshake_msg_0, KM_ID_NOISE) {
             Ok(Some(m)) => m,
             Ok(None) => {
@@ -678,31 +715,56 @@ mod test {
                 panic!("responder handle_message failed on handshake-0: {:?}", e);
             }
         };
-        assert!(
-            handshake_msg_1.len() == 862,
-            "unexpected handshake message-1 length, got {}",
-            handshake_msg_1.len()
+        assert_eq!(
+            handshake_msg_1.len(),
+            910,
+            "unexpected handshake message-1 length",
         );
-        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
+        assert!(matches!(responder.get_state(), KmSMState::Configuring));
 
-        // <- e, ee, se
-        match initiator.handle_message(&handshake_msg_1, KM_ID_NOISE) {
-            Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
-            Ok(None) => {} // good
+        // <- e, ee, s, es
+        let handshake_msg_2 = match initiator.handle_message(&handshake_msg_1, KM_ID_NOISE) {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                panic!("expected handshake-2 message, got nothing!");
+            }
             Err(e) => {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
+        assert_eq!(
+            handshake_msg_2.len(),
+            881,
+            "unexpected handshake message-2 length",
+        );
         assert!(matches!(initiator.get_state(), KmSMState::Transport { .. }));
 
-        // Handshake complete, now we can encrypt/decrypt
-
-        let i_transport = match initiator.get_state() {
-            KmSMState::Transport(t) => t,
-            _ => {
-                panic!("unexpected state after handshake");
+        // -> s, se
+        match responder.handle_message(&handshake_msg_2, KM_ID_NOISE) {
+            Ok(Some(_)) => panic!("unexpected additional handshake message from responder"),
+            Ok(None) => {} // good
+            Err(e) => {
+                panic!("responder.handle_message failed on handshake-2: {:?}", e);
             }
         };
+        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
+
+        let KmSMState::Transport(i_transport) = initiator.get_state() else {
+            panic!("unexpected state after handshake");
+        };
+
+        let KmSMState::Transport(r_transport) = responder.get_state() else {
+            panic!("unexpected state after handshake");
+        };
+
+        (i_transport, r_transport)
+    }
+
+    #[test]
+    fn test_noise_handshake_manually_1() {
+        let (i_transport, r_transport) = test_noise_handshake_common();
+
+        // Handshake complete, now we can encrypt/decrypt
 
         let plaintext = b"hello world";
 
@@ -724,13 +786,6 @@ mod test {
             "unexpected encrypted message length, got {}",
             out_len
         );
-
-        let r_transport = match responder.get_state() {
-            KmSMState::Transport(t) => t,
-            _ => {
-                panic!("unexpected state after handshake");
-            }
-        };
 
         let mut in_buf = [0u8; 4096];
         let in_len = match r_transport
@@ -790,112 +845,9 @@ mod test {
     // Just make sure that our b64 keys work with the code.
     #[test]
     fn test_noise_handshake_manually_static_node_key() {
-        let node_kp = NoiseKeypair::new(
-            BASE64_STANDARD
-                .decode(NODE_NOISE_KEY)
-                .unwrap()
-                .try_into()
-                .unwrap(),
-        );
-        let adapter_kp = NoiseKeypair::new(
-            BASE64_STANDARD
-                .decode(ADAPTER_NOISE_KEY)
-                .unwrap()
-                .try_into()
-                .unwrap(),
-        );
-
-        let initiator_exchanger =
-            KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
-        let responder_exchanger =
-            KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
-
-        let mut initiator = KmNoise::new(
-            true,
-            Some(node_kp.public.to_vec()),
-            Some(adapter_kp),
-            ZPIPair::new(1, 2),
-            initiator_exchanger,
-        )
-        .unwrap();
-        assert!(initiator.get_state() == KmSMState::Configuring);
-
-        let mut responder = KmNoise::new(
-            false,
-            None,
-            Some(node_kp),
-            ZPIPair::new(3, 4),
-            responder_exchanger,
-        )
-        .unwrap();
-        assert!(responder.get_state() == KmSMState::Configuring);
-
-        let handshake_msg_0 = match initiator.reset() {
-            Ok(Some(m)) => m,
-            Ok(None) => {
-                panic!("expected handshake message");
-            }
-            Err(e) => {
-                panic!("error resetting initiator: {:?}", e);
-            }
-        };
-        assert!(
-            handshake_msg_0.len() == 913,
-            "unexpected handshake message-0 length, got {}",
-            handshake_msg_0.len()
-        );
-        assert!(initiator.get_state() == KmSMState::Configuring);
-
-        match responder.reset() {
-            Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
-            Ok(None) => {} // good
-            Err(e) => {
-                panic!("error resetting responder: {:?}", e);
-            }
-        };
-
-        // -> e, es, s, ss
-        let handshake_msg_1 = match responder.handle_message(&handshake_msg_0, KM_ID_NOISE) {
-            Ok(Some(m)) => m,
-            Ok(None) => {
-                panic!("expected handshake-1 message, got nothing!");
-            }
-            Err(e) => {
-                panic!("responder handle_message failed on handshake-0: {:?}", e);
-            }
-        };
-        assert!(
-            handshake_msg_1.len() == 862,
-            "unexpected handshake message-1 length, got {}",
-            handshake_msg_1.len()
-        );
-        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
-
-        // <- e, ee, se
-        match initiator.handle_message(&handshake_msg_1, KM_ID_NOISE) {
-            Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
-            Ok(None) => {} // good
-            Err(e) => {
-                panic!("initiator.handle_message failed on handshake-1: {:?}", e);
-            }
-        };
-        assert!(matches!(initiator.get_state(), KmSMState::Transport { .. }));
+        let (initiator_sa, responder_sa) = test_noise_handshake_common();
 
         // At this point each side should know the others hmac key, and the ZPIs should have been exchanged.
-
-        let initiator_sa = match initiator.get_state() {
-            KmSMState::Transport(t) => t,
-            _ => {
-                panic!("unexpected state after handshake");
-            }
-        };
-
-        let responder_sa = match responder.get_state() {
-            KmSMState::Transport(t) => t,
-            _ => {
-                panic!("unexpected state after handshake");
-            }
-        };
 
         assert!(initiator_sa.recv_hmac_key != [0u8; HMAC_KEY_LEN]);
         assert!(responder_sa.recv_hmac_key != [0u8; HMAC_KEY_LEN]);
@@ -934,7 +886,7 @@ mod test {
 
         let initiator = KmNoise::new(
             true,
-            Some(node_kp.public.to_vec()),
+            true,
             Some(adapter_kp),
             ZPIPair::new(1, 2),
             initiator_exchanger,
@@ -943,7 +895,7 @@ mod test {
 
         let responder = KmNoise::new(
             false,
-            None,
+            false,
             Some(node_kp),
             ZPIPair::new(3, 4),
             responder_exchanger,
@@ -1049,6 +1001,23 @@ mod test {
             },
             Err(_) => {
                 panic!("timed out waiting for handshake message from node");
+            }
+        }
+
+        // and finally, the adapter responds to the node
+        match timeout(Duration::from_secs(2), a_km_rx.recv()).await {
+            Ok(resp) => match resp {
+                Some(linkmsg) => {
+                    n_km_payload_tx.send(linkmsg.msg).await.unwrap();
+                }
+                None => {
+                    panic!(
+                        "timed out or failed waiting for handshake message response from adapter"
+                    );
+                }
+            },
+            Err(_) => {
+                panic!("timed out waiting for handshake message from adapter");
             }
         }
 

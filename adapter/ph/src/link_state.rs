@@ -1,6 +1,6 @@
 use crate::auth::{self, AUTH_KEY_SIZE_BYTES, AuthBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob};
 use crate::counters::ManagementCounterType;
-use crate::km::{PeerCertificate, ZPIPair};
+use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::mgmt;
 use crate::mgmt::core::{MgmtSendError, PacketStatus};
@@ -527,7 +527,6 @@ impl LinkStateWrapper {
                     link_id,
                     ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
                     asm.self_noise_keypair.clone().unwrap(),
-                    asm.peer_noise_keypair.clone().unwrap().public,
                     asm.certx.clone().unwrap(),
                 )
                 .unwrap();
@@ -581,40 +580,19 @@ impl LinkStateWrapper {
         };
 
         if let Some(ref peer_cert) = sa.peer_cert {
-            let require_ca_signature = asm.config.get().ca_file.is_some();
-            let (cert, is_verified) = match peer_cert {
-                PeerCertificate::Unverified(cert) => {
-                    warn!(target: LINK_STATE, "{} has unverified name {}", asm.formatted_link_id(link_id), pki::subject_name(cert));
-                    if require_ca_signature {
-                        // If this node has been configured with a CA certificate for checking these things
-                        // then these rules kick in:
-                        //
-                        // - Nodes should accept unverified certs from adapters.
-                        // - Nodes should not accept unverified certs from other nodes.
-                        // - Adapters should not accept unverified certs from nodes.
-                        match self.link_type {
-                            LinkType::AdapterToNode => {
-                                return Err(LinkStateError::InvalidOperation(
-                                    "adapter received unverified certificate from node".to_string(),
-                                ));
-                            }
-                            LinkType::NodeToAdapter => (), // OK
-                            LinkType::NodeToNode => {
-                                return Err(LinkStateError::InvalidOperation(
-                                    "node received unverified certificate from peer node"
-                                        .to_string(),
-                                ));
-                            }
-                            _ => (),
-                        }
-                    }
-                    (cert, false)
-                }
-                PeerCertificate::Verified(cert) => {
-                    info!(target: LINK_STATE, "{} has verified name {}", asm.formatted_link_id(link_id), pki::subject_name(cert));
-                    (cert, true)
-                }
-            };
+            let cert = peer_cert.get_cert();
+            let is_verified = peer_cert.is_verified();
+
+            // Note, keying will have failed if we requested verification (i.e. were
+            // connecting to node) but the cert couldn't be verified.  So here,
+            // we only need to verify the case that we are only conditionally verifying
+            // (i.e., we are being connected to by a special adapter).
+
+            if is_verified {
+                info!(target: LINK_STATE, "{} has verified name {}", asm.formatted_link_id(link_id), pki::subject_name(cert));
+            } else {
+                warn!(target: LINK_STATE, "{} has unverified name {}", asm.formatted_link_id(link_id), pki::subject_name(cert));
+            }
 
             let subject_der = match pki::subject_der(cert) {
                 Ok(der) => der,

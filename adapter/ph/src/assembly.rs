@@ -89,7 +89,6 @@ pub struct Assembly {
     pub km_state: KmState,
 
     pub self_noise_keypair: Option<NoiseKeypair>,
-    pub peer_noise_keypair: Option<NoiseKeypair>,
     pub a2a_dh_keypair: ReusableSecret,
     pub certx: Option<KmCertExchange>,
     pub system_start_time: std::time::Instant,
@@ -549,7 +548,6 @@ pub mod test {
             adapter_manager_factory,
             km_state,
             self_noise_keypair: None,
-            peer_noise_keypair: None,
             a2a_dh_keypair: ReusableSecret::random(),
             certx: None,
             system_start_time: std::time::Instant::now(),

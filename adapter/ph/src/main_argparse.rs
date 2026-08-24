@@ -39,7 +39,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             config_file,
             common,
             node_addr,
-            node_public_key_file,
             bootstrap_key,
         } => {
             ph_mode = PhMode::Adapter;
@@ -69,14 +68,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             }
             if let Some(node_addr) = node_addr {
                 config.node_addr = Some(node_addr);
-            }
-            if let Some(npkf) = node_public_key_file {
-                config.node_public_key_file = Some(path::absolute(npkf).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for node_public_key_file: {:?}",
-                        e
-                    )))
-                })?);
             }
             if let Some(bootstrap_key) = bootstrap_key {
                 config.bootstrap_key_path = Some(path::absolute(bootstrap_key).or_else(|e| {
@@ -216,7 +207,6 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "tests/node_public_key.pem"
         "#;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -260,10 +250,6 @@ mod test {
             Some(Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(
                 10, 0, 0, 1
             ))]))
-        );
-        assert_eq!(
-            config.adapter.node_public_key_file,
-            Some(PathBuf::from("tests/node_public_key.pem"))
         );
     }
 
@@ -330,7 +316,6 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
@@ -338,14 +323,12 @@ mod test {
         let capture_file = TempFile::touch();
         let cert_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
             .replace("$CAPTUREFILE", capture_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -384,10 +367,6 @@ mod test {
         assert_eq!(
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
-        );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(npk_file.get_path().into())
         );
     }
 
@@ -443,9 +422,6 @@ mod test {
 
         let tmpfile = TempFile::new_toml(&tomltxt);
 
-        let node_pk_file = TempFile::touch();
-        let node_pk_fname = String::from(node_pk_file.get_path().to_str().unwrap());
-
         let args = vec![
             "ph",
             "adapter",
@@ -455,8 +431,6 @@ mod test {
             "192.168.0.2:5000",
             "--zpr-addr",
             "10.0.0.1",
-            "--node-public-key-file",
-            &node_pk_fname,
         ];
 
         let (pmode, config) = argparse(Some(args)).unwrap();
@@ -473,10 +447,6 @@ mod test {
         assert_eq!(
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
-        );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(PathBuf::from(&node_pk_fname))
         );
     }
 
@@ -495,7 +465,6 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
@@ -503,14 +472,12 @@ mod test {
         let control_file = TempFile::touch();
         let capture_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
             .replace("$CAPTUREFILE", capture_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -564,10 +531,6 @@ mod test {
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(npk_file.get_path().into())
-        );
     }
 
     #[test]
@@ -585,18 +548,15 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
         let cert_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -632,10 +592,6 @@ mod test {
         assert_eq!(
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
-        );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(npk_file.get_path().into())
         );
     }
 
@@ -749,16 +705,13 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
         let cert_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -798,17 +751,14 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let cert_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -832,15 +782,11 @@ mod test {
         [adapter]
         name = "my-adapter"
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
-        let tmp = tomltxt
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        let tmp = tomltxt.replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -864,15 +810,11 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
-        let tmp = tomltxt
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        let tmp = tomltxt.replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -899,15 +841,11 @@ mod test {
         [adapter]
         name = "config-name"
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
-        let tmp = tomltxt
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        let tmp = tomltxt.replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -939,16 +877,13 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         bootstrap_key = "$BSKEY"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$BSKEY", bootstrap_key_path.to_str().unwrap());
         tomltxt = &tmp;
 

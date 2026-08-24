@@ -117,8 +117,13 @@ impl PeerCertificate {
             PeerCertificate::Unverified(cert) => cert,
         }
     }
+
     pub fn common_name(&self) -> Option<String> {
         pki::common_name(self.get_cert())
+    }
+
+    pub fn is_verified(&self) -> bool {
+        matches!(self, Self::Verified(_))
     }
 }
 

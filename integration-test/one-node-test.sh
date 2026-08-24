@@ -197,7 +197,6 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --io-engine auto \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS" \
-  --node-public-key-file node.pubkey \
   --zpr-addr "$VS_ZPR_ADDR" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
 
 sleep 5
@@ -216,7 +215,6 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --io-engine io_uring \
   --node-addr "$NODE_SUBSTRATE_ADDR_A" \
-  --node-public-key-file node.pubkey \
   --zpr-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
@@ -233,7 +231,6 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --io-engine posix_unbatched \
   --node-addr "$NODE_SUBSTRATE_ADDR_B" \
-  --node-public-key-file node.pubkey \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
@@ -252,7 +249,6 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --km-impl "$KM_IMPL" \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT" \
-    --node-public-key-file node.pubkey \
     --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
 fi
 
