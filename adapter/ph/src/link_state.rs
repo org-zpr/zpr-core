@@ -839,7 +839,7 @@ impl LinkStateWrapper {
         let link_id = self.id;
         let a2a_dh_public_key = asm
             .peer_table
-            .inspect(link_id, |ps| *ps.a2a_dh_pubkey.lock().unwrap())
+            .inspect(link_id, |ps| *ps.a2a_dh_pubkey.get())
             .flatten();
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 

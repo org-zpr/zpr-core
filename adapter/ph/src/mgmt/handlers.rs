@@ -383,7 +383,7 @@ fn process_a2a_dh_pubkey_tlv(
             tlv::TlvValue::X25519PubKey(pubkey) => {
                 info!(target: ZDP, "{}: Applying A2A_DH_PUBKEY from {message_name}", asm.formatted_link_id(link_id));
                 asm.peer_table.inspect(link_id, |ps| {
-                    *ps.a2a_dh_pubkey.lock().unwrap() = Some(*pubkey);
+                    ps.a2a_dh_pubkey.write(Some(*pubkey));
                 });
             }
             _ => {
