@@ -302,6 +302,9 @@ pub mod traffic_classifier_flags {
 /// Config-specified size of A2A MAC.  Algorithm-specified MAC may be smaller (but not larger).
 pub const ZDP_A2A_MAC_SIZE: usize = 8;
 
+/// BLAKE3 key-derivation context for the A2A MICV key.
+pub const ZDP_A2A_MICV_KEY_CONTEXT: &str = "org-zpr zpr-core 2026-08-21 a2a micv key";
+
 /// Size of the ZDP "link" HMAC which is set link-by-link for transit packets.
 /// This HMAC is tacked on to the end of the packet (following the A2A HMAC).
 pub const ZDP_PACKET_MAC_SIZE: usize = 8;
