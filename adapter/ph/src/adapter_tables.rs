@@ -10,6 +10,7 @@ use crate::defs::FiveTuple;
 use crate::mgmt::txn_mgr::TxnHandle;
 use crate::packet::Packet;
 use crate::tc;
+use crate::zdp;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DashMapEntry;
@@ -20,10 +21,29 @@ use zpr::packet_info::{CompressionMode, StreamId};
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 
-#[derive(Clone, Copy)]
 pub struct EltPep {
     pub compression_mode: CompressionMode,
     pub tether_id: StreamId,
+    pub a2a_shared_secret: Option<x25519_dalek::SharedSecret>,
+    pub a2a_micv_key: Option<[u8; blake3::KEY_LEN]>,
+}
+
+impl EltPep {
+    pub fn new(
+        compression_mode: CompressionMode,
+        tether_id: StreamId,
+        a2a_shared_secret: Option<x25519_dalek::SharedSecret>,
+    ) -> Self {
+        let a2a_micv_key = a2a_shared_secret
+            .as_ref()
+            .map(|secret| blake3::derive_key(zdp::ZDP_A2A_MICV_KEY_CONTEXT, secret.as_bytes()));
+        Self {
+            compression_mode,
+            tether_id,
+            a2a_shared_secret,
+            a2a_micv_key,
+        }
+    }
 }
 
 pub enum EltEntry {
@@ -179,6 +199,21 @@ impl EndpointLookupTable {
 
 pub struct DltPep {
     pub tc: tc::Ip5TupleTc,
+    pub a2a_shared_secret: Option<x25519_dalek::SharedSecret>,
+    pub a2a_micv_key: Option<[u8; blake3::KEY_LEN]>,
+}
+
+impl DltPep {
+    pub fn new(tc: tc::Ip5TupleTc, a2a_shared_secret: Option<x25519_dalek::SharedSecret>) -> Self {
+        let a2a_micv_key = a2a_shared_secret
+            .as_ref()
+            .map(|secret| blake3::derive_key(zdp::ZDP_A2A_MICV_KEY_CONTEXT, secret.as_bytes()));
+        Self {
+            tc,
+            a2a_shared_secret,
+            a2a_micv_key,
+        }
+    }
 }
 
 /// The Dock Lookup Table (DLT) holds all state of inbound tethers.

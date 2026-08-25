@@ -45,8 +45,17 @@ pub fn bind_egress_stream(
         "bind_egress_stream(dock_link_id={}, txn_id={txn_id}, tc={tc}, peer_a2a_dh_pubkey={peer_a2a_dh_pubkey:?})",
         asm.formatted_link_id(dock_link_id.get()));
 
+    let a2a_shared_secret = match &peer_a2a_dh_pubkey {
+        Some(pubkey) => Some(asm.a2a_dh_keypair.diffie_hellman(pubkey)),
+        None => {
+            warn!(target: FLOW_MGMT, "{}: bind of {tc}: peer A2A public key not provided",
+                asm.formatted_link_id(dock_link_id.get()));
+            None
+        }
+    };
+
     // form PEP
-    let pep = DltPep { tc };
+    let pep = DltPep::new(tc, a2a_shared_secret);
 
     // TODO: reverse path
 
@@ -128,10 +137,15 @@ pub fn install_tether(
     // Bind succeeded; add to ELT.
     debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id} (peer_a2a_dh_pubkey={peer_a2a_dh_pubkey:?})");
 
-    let pep = EltPep {
-        compression_mode: tc.compression_mode(),
-        tether_id,
+    let a2a_shared_secret = match &peer_a2a_dh_pubkey {
+        Some(pubkey) => Some(asm.a2a_dh_keypair.diffie_hellman(pubkey)),
+        None => {
+            warn!(target: FLOW_MGMT, "Bind of {five_tuple}: peer A2A public key not provided");
+            None
+        }
     };
+
+    let pep = EltPep::new(tc.compression_mode(), tether_id, a2a_shared_secret);
 
     let Ok(initial_packet) = asm.elt.set_active(&five_tuple, pep) else {
         // The only way for a transaction to have exited pending (i.e.,

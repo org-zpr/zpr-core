@@ -476,6 +476,69 @@ impl Packet {
         &mut self.buf[offset..offset + len]
     }
 
+    /// Offset of the packet body within the backing buffer.
+    pub fn body_offset(&self) -> usize {
+        self.metadata().offset
+    }
+
+    /// The amount of space available for extension of the end of the packet.
+    pub fn tailroom_available(&self) -> usize {
+        let md = self.metadata();
+        self.buf.len() - (md.offset + md.len)
+    }
+
+    /// Returns the packet body and the tailroom following it as two disjoint
+    /// slices.  This allows a transform (e.g. encryption) to read the body and
+    /// write its output into the tailroom of the same backing buffer, without
+    /// an intermediate scratch buffer.  Use `set_body_extent()` afterwards to
+    /// make the written region the new packet body.
+    pub fn body_and_tailroom_mut(&mut self) -> (&[u8], &mut [u8]) {
+        let offset = self.metadata().offset;
+        let len = self.metadata().len;
+        let (head, tail) = self.buf.split_at_mut(offset + len);
+        (&head[offset..], tail)
+    }
+
+    /// Redefine the packet body to be the `len` bytes at `offset` in the
+    /// backing buffer.  The data itself is not touched; only the metadata
+    /// describing where the body lives is updated.  Intended for transforms
+    /// that write their result elsewhere in the buffer (see
+    /// `body_and_tailroom_mut()`).
+    pub fn set_body_extent(&mut self, offset: usize, len: usize) {
+        assert!(offset >= Self::MIN_BODY_OFFSET);
+        assert!(len <= self.buf.len());
+        assert!(offset <= self.buf.len() - len);
+        let md = self.metadata_mut();
+        md.offset = offset;
+        md.len = len;
+    }
+
+    /// Completes an in-place transform that read the current body and wrote
+    /// `written` bytes of output into the tailroom (see
+    /// `body_and_tailroom_mut()`).  The leading `header_len` bytes of the
+    /// current body are preserved: they are relocated to sit immediately in
+    /// front of the transform's output, and the body is redefined to be that
+    /// header followed by the output.
+    ///
+    /// Panics if the tailroom does not actually hold `written` bytes.
+    pub fn adopt_tailroom_with_header(&mut self, header_len: usize, written: usize) {
+        assert!(header_len <= self.metadata().len);
+        assert!(written <= self.tailroom_available());
+
+        let old_offset = self.metadata().offset;
+        let output_offset = old_offset + self.metadata().len;
+        let new_offset = output_offset - header_len;
+
+        // The source and destination regions overlap whenever the header is
+        // more than half the length of the old body (new_offset < old_offset +
+        // header_len iff len < 2 * header_len). That is fine: `copy_within`
+        // handles overlapping regions correctly (it is a `memmove`).
+        self.buf
+            .copy_within(old_offset..old_offset + header_len, new_offset);
+
+        self.set_body_extent(new_offset, header_len + written);
+    }
+
     /// Returns mutable references to both the packet metadata and body.
     pub fn metadata_mut_and_body_mut(&mut self) -> (&mut PacketMetadata, &mut [u8]) {
         let (md, bd) = self.buf.split_at_mut(size_of::<PacketMetadata>());
@@ -620,8 +683,7 @@ unsafe impl buf::BufMut for Packet {
 
     /// This indicates how much tailroom is remaining.
     fn remaining_mut(&self) -> usize {
-        let md = self.metadata();
-        self.buf.len() - (md.offset + md.len)
+        self.tailroom_available()
     }
 
     /// Provides a reference to a portion of the remaining tailroom.
