@@ -282,6 +282,8 @@ impl KmNoise {
         self.send_hmac_key = Some(km.hmac_key);
 
         // The key exchange payload follows the KeyMsg.
+        // The peer may legitimately send no certificate (`None`): the Noise
+        // handshake already authenticated its static key.
         let peer_cert = match self
             .certx
             .process_payload(&payload[std::mem::size_of::<KeyMsg>()..], peer_public_key)
@@ -295,7 +297,7 @@ impl KmNoise {
                 return Err(KmError::CertExchangeError);
             }
         };
-        self.peer_cert = Some(peer_cert);
+        self.peer_cert = peer_cert;
         Ok(())
     }
 }
@@ -848,6 +850,108 @@ mod test {
                 PeerCertificate::Verified(actual_r_cert)
             );
         }
+    }
+
+    // An adapter with no certificate (self-generated key) can complete the
+    // handshake against a node that does not require the adapter's cert.
+    // The node ends up with peer_cert == None; the adapter still requires and
+    // verifies the node's cert.
+    #[test]
+    fn test_noise_handshake_certless_initiator() {
+        let node_kp = NoiseKeypair::new(
+            BASE64_STANDARD
+                .decode(NODE_NOISE_KEY)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
+
+        // Initiator (adapter): no local cert, but has the CA and verifies the node.
+        let ca_cert = pki::from_pem(CA_CERT_DATA.as_bytes()).unwrap();
+        let initiator_exchanger = KmCertExchange::new(None, Some(ca_cert));
+
+        let mut initiator = KmNoise::new(
+            true,
+            true,
+            None, // self-generated static key
+            ZPIPair::new(1, 2),
+            initiator_exchanger,
+        )
+        .unwrap();
+
+        // Responder (node): has a cert, does not verify the adapter's.
+        let responder_exchanger =
+            KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
+        let mut responder = KmNoise::new(
+            false,
+            false,
+            Some(node_kp),
+            ZPIPair::new(3, 4),
+            responder_exchanger,
+        )
+        .unwrap();
+
+        let handshake_msg_0 = initiator.reset().unwrap().unwrap();
+        assert!(responder.reset().unwrap().is_none());
+
+        let handshake_msg_1 = responder
+            .handle_message(&handshake_msg_0, KM_ID_NOISE)
+            .unwrap()
+            .unwrap();
+        let handshake_msg_2 = initiator
+            .handle_message(&handshake_msg_1, KM_ID_NOISE)
+            .unwrap()
+            .unwrap();
+        assert!(
+            responder
+                .handle_message(&handshake_msg_2, KM_ID_NOISE)
+                .unwrap()
+                .is_none()
+        );
+
+        let KmSMState::Transport(i_transport) = initiator.get_state() else {
+            panic!("initiator not in transport state after handshake");
+        };
+        let KmSMState::Transport(r_transport) = responder.get_state() else {
+            panic!("responder not in transport state after handshake");
+        };
+
+        // Node saw no cert from the adapter; adapter verified the node's cert.
+        assert!(r_transport.peer_cert.is_none());
+        let actual_r_cert = pki::from_pem(NODE_CERT_DATA.as_bytes()).unwrap();
+        assert_eq!(
+            i_transport.peer_cert.unwrap(),
+            PeerCertificate::Verified(actual_r_cert)
+        );
+    }
+
+    // An initiator that requires verification must abort when the responder
+    // presents no certificate at all.
+    #[test]
+    fn test_noise_handshake_aborts_when_required_cert_missing() {
+        // Initiator requires verification (has a CA cert, verify_cert=true).
+        let ca_cert = pki::from_pem(CA_CERT_DATA.as_bytes()).unwrap();
+        let initiator_exchanger = KmCertExchange::new(None, Some(ca_cert));
+        let mut initiator =
+            KmNoise::new(true, true, None, ZPIPair::new(1, 2), initiator_exchanger).unwrap();
+
+        // Responder has no certificate.
+        let responder_exchanger = KmCertExchange::new(None, None);
+        let mut responder =
+            KmNoise::new(false, false, None, ZPIPair::new(3, 4), responder_exchanger).unwrap();
+
+        let handshake_msg_0 = initiator.reset().unwrap().unwrap();
+        assert!(responder.reset().unwrap().is_none());
+
+        let handshake_msg_1 = responder
+            .handle_message(&handshake_msg_0, KM_ID_NOISE)
+            .unwrap()
+            .unwrap();
+        match initiator.handle_message(&handshake_msg_1, KM_ID_NOISE) {
+            Err(KmError::CertExchangeError) => {} // expected
+            other => panic!("expected CertExchangeError, got {other:?}"),
+        }
+        assert_eq!(initiator.get_state(), KmSMState::Error);
     }
 
     // Just make sure that our b64 keys work with the code.

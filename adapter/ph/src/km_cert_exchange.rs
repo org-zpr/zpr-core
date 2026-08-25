@@ -2,17 +2,19 @@
 //!
 //!
 //!
-//! Each party in the exchange has a signed certificate that includes their
-//! public key. In this case that is a NOISE key. The certificate is signed
-//! by a certificate authority and each party also has the authority
+//! Each party in the exchange may have a signed certificate that includes
+//! their public key. In this case that is a NOISE key. The certificate is
+//! signed by a certificate authority and each party also has the authority
 //! certificate.
 //!
 //! The messages sent are exceedingly simple: each just sends its signed
-//! certificate to the other.
+//! certificate to the other. A party without a certificate (e.g. a
+//! non-special adapter using a self-generated key) sends an empty payload
+//! (`cert_len == 0`).
 //!
-//! Upon receiving a message, the recipient checks the signature on the
-//! certfiicate and then checks that the public key in the certificate
-//! is the one expected (extrated from the current SA).
+//! Upon receiving a message carrying a certificate, the recipient checks the
+//! signature on the certfiicate and then checks that the public key in the
+//! certificate is the one expected (extrated from the current SA).
 //!
 //!
 //!
@@ -45,16 +47,19 @@ struct CertExchgHdr {
 
 /// The Certificate Exchange object holds the local certificate (which includes the noise public key)
 /// and the certificate for our trusted signing authority.
+/// The local certificate is optional: a peer whose certificate is never
+/// verified (a non-special adapter) may omit it, in which case an empty
+/// payload is sent during keying.
 #[derive(Clone)]
 pub struct KmCertExchange {
-    local_cert: Certificate,
+    local_cert: Option<Certificate>,
     authority_cert: Option<Certificate>,
 }
 
 impl KmCertExchange {
-    /// - `cert` - the certificate of the initiator.
+    /// - `cert` - the certificate of the initiator, if it has one.
     /// - `authority_cert` - the certificate of the authority that is expected to have signed the responders certificate.
-    pub fn new(cert: Certificate, authority_cert: Option<Certificate>) -> Self {
+    pub fn new(cert: Option<Certificate>, authority_cert: Option<Certificate>) -> Self {
         KmCertExchange {
             local_cert: cert,
             authority_cert,
@@ -66,18 +71,23 @@ impl KmCertExchange {
     pub fn new_from_pem(cert_pem: &str, authority_cert_pem: &str) -> Result<Self, ParseError> {
         let cert = pki::from_pem(cert_pem.as_bytes())?;
         let authority_cert = pki::from_pem(authority_cert_pem.as_bytes())?;
-        Ok(KmCertExchange::new(cert, Some(authority_cert)))
+        Ok(KmCertExchange::new(Some(cert), Some(authority_cert)))
     }
 
     /// Write a cert exhange payload into the supplied buffer.
+    /// If we have no local certificate, an empty payload (`cert_len == 0`)
+    /// is written.
     ///
     /// ## Errors
     /// - [CertExchangeError::BufferSizeError] - the buffer is too short to hold the payload.
     /// - [CertExchangeError::CertificateFormatError] - the certificate is too large to be encoded in the payload.
     pub fn write_payload(&self, buf: &mut impl bytes::BufMut) -> Result<(), CertExchangeError> {
-        let cert_der = pki::to_der(&self.local_cert)
-            .inspect_err(|e| error!(target: KEY_MGMT, "cannot encode local certificate: {e}"))
-            .map_err(|_| CertExchangeError::CertificateFormatError)?;
+        let cert_der = match self.local_cert.as_ref() {
+            Some(cert) => pki::to_der(cert)
+                .inspect_err(|e| error!(target: KEY_MGMT, "cannot encode local certificate: {e}"))
+                .map_err(|_| CertExchangeError::CertificateFormatError)?,
+            None => Vec::new(),
+        };
         if cert_der.len() > u16::MAX as usize {
             return Err(CertExchangeError::CertificateFormatError);
         }
@@ -96,7 +106,8 @@ impl KmCertExchange {
     }
 
     /// Process a payload from a peer.
-    /// Returns the presented certificate. If we were able to verify the signature against the
+    /// Returns the presented certificate, or `None` if the peer sent none
+    /// (`cert_len == 0`). If we were able to verify the signature against the
     /// `authority_cert` passed in the constructor, then the returned enum will be [PeerCertificate::Verified],
     /// otherwise it will be [PeerCertificate::Unverified].
     ///
@@ -110,7 +121,7 @@ impl KmCertExchange {
         &self,
         payload: &[u8],
         expected_peer_public_key: &[u8],
-    ) -> Result<PeerCertificate, CertExchangeError> {
+    ) -> Result<Option<PeerCertificate>, CertExchangeError> {
         // Payload should be at minimum: CertExchgHdr
         if payload.len() < std::mem::size_of::<CertExchgHdr>() {
             return Err(CertExchangeError::ShortPayloadError);
@@ -124,6 +135,11 @@ impl KmCertExchange {
 
         // Now we have the cert length, so check again.
         let cert_len: usize = msg.cert_len.into();
+        if cert_len == 0 {
+            // The peer sent no certificate. The Noise handshake has already
+            // authenticated its static key; there is simply no name bound to it.
+            return Ok(None);
+        }
         if payload.len() < std::mem::size_of::<CertExchgHdr>() + cert_len {
             return Err(CertExchangeError::ShortPayloadError);
         }
@@ -165,7 +181,7 @@ impl KmCertExchange {
         } else {
             PeerCertificate::Unverified(initiator_cert)
         };
-        return Ok(peer_result);
+        return Ok(Some(peer_result));
     }
 
     /// Do we require certificate verification?
@@ -226,7 +242,7 @@ mod test {
 
         // Node emits the initiator cert on success:
         let adapter_cert = pki::from_pem(ADAPTER_CERT_DATA.as_bytes()).unwrap();
-        assert_eq!(PeerCertificate::Verified(adapter_cert), i_cert);
+        assert_eq!(Some(PeerCertificate::Verified(adapter_cert)), i_cert);
     }
 
     #[test]
@@ -286,6 +302,24 @@ mod test {
         };
 
         // Node emits the initiator cert on success:
-        assert_eq!(PeerCertificate::Unverified(self_signed_cert), i_cert);
+        assert_eq!(Some(PeerCertificate::Unverified(self_signed_cert)), i_cert);
+    }
+
+    #[test]
+    fn test_km_cert_no_local_cert_round_trip() {
+        // An adapter with no certificate sends an empty payload; a responder
+        // (that does not require verification of it) accepts it as "no cert".
+        let keypair = NoiseKeypair::generate();
+        let adapter_exchanger = KmCertExchange::new(None, None);
+
+        let mut buffer = BytesMut::with_capacity(MSG_BUF_SIZE);
+        adapter_exchanger.write_payload(&mut buffer).unwrap();
+        assert_eq!(buffer.len(), std::mem::size_of::<CertExchgHdr>());
+
+        let node_exchanger = KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
+        let result = node_exchanger
+            .process_payload(&buffer[..buffer.len()], &keypair.public)
+            .unwrap();
+        assert_eq!(None, result);
     }
 }

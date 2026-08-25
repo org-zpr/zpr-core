@@ -82,7 +82,7 @@ use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use logging::targets::STARTUP;
-use pki::{generate_self_signed_noise_cert, load_cert};
+use pki::load_cert;
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
@@ -174,19 +174,15 @@ fn main() -> ExitCode {
 
     // Set up key exchange.
     //
-    // If we have a signed certificate, use that.  Otherwise we create a self-signed cert
-    // and insert our CN (`name` from config) and our self_noise_keypair public key.
+    // If we have a signed certificate, use it during keying. Otherwise none is
+    // sent: nodes do not verify the certificates of non-special adapters, so an
+    // adapter without one simply presents no name (the Noise handshake still
+    // authenticates its static key).
 
     let self_cert = match config.certificate_file.as_ref() {
-        None => match generate_self_signed_noise_cert(&config.name, &self_noise_keypair) {
-            Ok(cert) => cert,
-            Err(e) => {
-                error!(target: STARTUP, "failed to generate self-signed certificate: {e:?}");
-                return ExitCode::FAILURE;
-            }
-        },
+        None => None,
         Some(cert_path) => match load_cert(cert_path) {
-            Ok(cert) => cert,
+            Ok(cert) => Some(cert),
             Err(e) => {
                 error!(target: STARTUP, "failed to load certificate from {:?}: {e:?}", cert_path);
                 return ExitCode::FAILURE;

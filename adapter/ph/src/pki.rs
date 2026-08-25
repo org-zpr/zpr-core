@@ -1,31 +1,40 @@
 //! Collection of PKI related utility functions.
 use aws_lc_rs::signature::{self, UnparsedPublicKey};
+#[cfg(test)]
 use ed25519_dalek::{Signature as EdSignature, SigningKey as EdSigningKey};
 use std::fs;
 use std::path::Path;
+#[cfg(test)]
 use std::str::FromStr;
+#[cfg(test)]
 use std::time::Duration;
 use thiserror::Error;
 use x509_cert::{
     Certificate,
-    builder::{Builder, CertificateBuilder, profile::BuilderProfile},
-    certificate::TbsCertificate,
     der::{
         Decode, Encode, EncodePem,
-        asn1::{BitString, OctetStringRef},
+        asn1::OctetStringRef,
         oid::ObjectIdentifier,
         pem::{self, LineEnding},
     },
+    name::Name,
+    spki::SubjectPublicKeyInfoOwned,
+};
+#[cfg(test)]
+use x509_cert::{
+    builder::{Builder, CertificateBuilder, profile::BuilderProfile},
+    certificate::TbsCertificate,
+    der::asn1::BitString,
     ext::{
         Extension,
         pkix::{KeyUsage, KeyUsages},
     },
-    name::Name,
     serial_number::SerialNumber,
-    spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned, SubjectPublicKeyInfoRef},
+    spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoRef},
     time::Validity,
 };
 
+#[cfg(test)]
 use crate::km_noise::NoiseKeypair;
 use pkcs8::PrivateKeyInfoRef;
 
@@ -217,15 +226,18 @@ pub fn load_noise_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseEr
     })
 }
 
+#[cfg(test)]
 const OID_X25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.110");
 const OID_RSA_ENCRYPTION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
 const OID_SHA256_WITH_RSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
 const OID_ED25519: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
 
+#[cfg(test)]
 struct NoiseCertProfile {
     name: Name,
 }
 
+#[cfg(test)]
 impl BuilderProfile for NoiseCertProfile {
     fn get_issuer(&self, _subject: &Name) -> Name {
         self.name.clone()
@@ -244,6 +256,11 @@ impl BuilderProfile for NoiseCertProfile {
     }
 }
 
+/// Generate a self-signed certificate binding `cn` to a noise public key.
+/// Production code no longer sends self-signed certificates during keying
+/// (an adapter without a certificate sends none at all); this remains for
+/// tests that need throwaway certificates.
+#[cfg(test)]
 pub fn generate_self_signed_noise_cert(
     cn: &str,
     keypair: &NoiseKeypair,
