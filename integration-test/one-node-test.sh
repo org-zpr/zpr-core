@@ -206,6 +206,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --self-addr "$A_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
   --bootstrap-key actor1-rsa.key \
+  --name adapter1 \
   --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --io-engine io_uring \
@@ -220,6 +221,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --self-addr "$B_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
   --bootstrap-key actor2-rsa.key \
+  --name adapter2 \
   --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --io-engine posix_unbatched \
@@ -237,6 +239,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --self-addr "$C_SUBSTRATE_ADDR" \
     --ca-file ca.crt \
     --bootstrap-key actor3-rsa.key \
+    --name adapter3 \
     --km-impl "$KM_IMPL" \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT" \
