@@ -9,8 +9,8 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::AbortHandle;
 use tracing::{error, info, warn};
 use zpr::vsapi_types::{
-    AuthBlob, CommFlag, ConnectRequest, DisconnectNotice, DisconnectReason, PacketDesc, VisaOp,
-    VisaRequest,
+    AuthBlob, CommFlag, ConnectRequest, DisconnectNotice, DisconnectReason, PacketDesc, PublicKey,
+    VisaOp, VisaRequest,
 };
 
 use crate::vsconn::{NodeConnect, StateFlag, VSConnHandle, VSConnLifecycleEvent};
@@ -184,7 +184,7 @@ pub async fn run_handler(
                                 claims,
                                 substrate_addr,
                                 dock_interface: 0,
-                                a2a_dh_public_key: zpr::vsapi_types::PublicKey::new(&a2a_key_bytes),
+                                a2a_dh_public_key: PublicKey::new(&a2a_key_bytes),
                             };
 
                             match handle.authorize_connect(connect_req).await {
