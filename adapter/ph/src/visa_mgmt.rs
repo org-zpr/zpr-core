@@ -80,7 +80,16 @@ pub fn build_connect_request(
         }
     }
 
-    let cn = get_common_name(asm, id)?;
+    let mut cn = get_common_name(asm, id)?;
+    if cn.is_empty() {
+        // Self-generated-key adapters (no certificate exchange) leave the SA
+        // without a peer cert, so there is no cert CN. Fall back to the CN
+        // asserted in the self-signed auth blob; the visa service
+        // authenticates that CN against the blob's RSA signature.
+        if let AuthBlob::SelfSigned(ss) = blob {
+            cn = ss.cn.clone();
+        }
+    }
 
     // Convert the adapter's AuthBlob to the vsapi_types AuthBlob for the v2 protocol.
     let vsapi_blob = match blob {
