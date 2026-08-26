@@ -933,11 +933,12 @@ impl LinkStateWrapper {
         }
         let key = key.unwrap();
 
-        let Some(ref peer_cert) = sa.peer_cert else {
-            warn!(target: LINK_STATE, "{} no peer cert found, cannot validate blob", asm.formatted_link_id(link_id));
-            return false;
-        };
-        if let Err(e) = ss_blob.verify_blob_challenge(peer_cert.get_cert(), &key) {
+        // Adapters using self-generated keys present no certificate during
+        // keying, so there is no cert CN to bind the blob to; the visa
+        // service still authenticates the blob CN via the RSA signature.
+        if let Err(e) =
+            ss_blob.verify_blob_challenge(sa.peer_cert.as_ref().map(|c| c.get_cert()), &key)
+        {
             warn!(target: LINK_STATE, "{} challenge verification failed: {e}", asm.formatted_link_id(link_id));
             return false;
         }

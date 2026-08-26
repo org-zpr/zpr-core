@@ -208,23 +208,29 @@ impl ZdpSelfSignedBlob {
 
     /// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].
     /// This extracts that data and checks that:
-    ///   - The CN in the provided `peer_cert` matches the CN in the blob.
+    ///   - If the peer presented a certificate during keying, the CN in that
+    ///     certificate matches the CN in the blob. Adapters using self-generated
+    ///     keys send no certificate (`peer_cert` is `None`); there is then no
+    ///     cert CN to bind to, so this check is skipped and the blob CN is
+    ///     authenticated solely by the visa service's RSA signature check.
     ///   - The HMAC in the blob is valid for the provided `key`.
     ///   - The blob is not older than `MAX_BLOB_AGE_SECONDS`.
     pub fn verify_blob_challenge(
         &self,
-        peer_cert: &X509Certificate,
+        peer_cert: Option<&X509Certificate>,
         key: &[u8; AUTH_KEY_SIZE_BYTES],
     ) -> Result<(), AuthError> {
-        if let Some(link_cn) = pki::common_name(peer_cert) {
-            if link_cn != self.cn {
-                return Err(AuthError::FormatError(format!(
-                    "CN mismatch: expected {link_cn} found {}",
-                    self.cn
-                )));
+        if let Some(peer_cert) = peer_cert {
+            if let Some(link_cn) = pki::common_name(peer_cert) {
+                if link_cn != self.cn {
+                    return Err(AuthError::FormatError(format!(
+                        "CN mismatch: expected {link_cn} found {}",
+                        self.cn
+                    )));
+                }
+            } else {
+                return Err(AuthError::FormatError("no CN in peer cert".to_string()));
             }
-        } else {
-            return Err(AuthError::FormatError("no CN in peer cert".to_string()));
         }
 
         let payload_bytes = BASE64_STANDARD.decode(self.challenge.clone())?;
