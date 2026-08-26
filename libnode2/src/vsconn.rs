@@ -320,7 +320,13 @@ impl VSConn {
         // value when present, otherwise the socket's local IP plus the dock port (last
         // resort for wildcard binds — correct only when node and peers share a network).
         let effective_substrate = match self.advertised_substrate {
-            Some(addr) => addr,
+            Some(addr) => {
+                debug!(
+                    target: VS_RPC,
+                    "advertising configured substrate address {addr} to the VS"
+                );
+                addr
+            }
             None => {
                 let local = sock.local_addr()?;
                 let port = if self.dock_port != 0 {
@@ -328,7 +334,12 @@ impl VSConn {
                 } else {
                     local.port()
                 };
-                SocketAddr::new(local.ip(), port)
+                let addr = SocketAddr::new(local.ip(), port);
+                debug!(
+                    target: VS_RPC,
+                    "advertising substrate address {addr} to the VS (derived from local socket {local} and dock port {port}; no configured address)"
+                );
+                addr
             }
         };
         self.substrate_addr.set(Some(effective_substrate));
