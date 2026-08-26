@@ -504,11 +504,45 @@ fn main() -> ExitCode {
         let auth_private_key = zpr_utils::rsa_sign::load_rsa_key(auth_key_pem.as_bytes())
             .unwrap_or_else(|e| panic!("failed to parse auth_private_key {auth_key_path:?}: {e}"));
 
+        // Advertised substrate address resolution, in order:
+        //   1. advertised_substrate_addr config, if set.
+        //   2. self_addr, if its IP is specified (common LAN/single-host case).
+        //   3. Deferred: VSConn derives it from the VSAPI socket's local IP + the dock
+        //      port on connect (wildcard binds only; requires a concrete dock port).
+        let advertised_substrate = config.advertised_substrate_addr.or_else(|| {
+            if config.self_addr.ip().is_unspecified() {
+                None
+            } else {
+                Some(config.self_addr)
+            }
+        });
+        let dock_port = config.self_addr.port();
+        match advertised_substrate {
+            Some(addr) => {
+                info!(target: STARTUP, "advertising substrate address {addr} to the visa service")
+            }
+            None => {
+                assert!(
+                    dock_port != 0,
+                    "cannot determine an advertised substrate address: self_addr \
+                     {} has an unspecified IP and no dock port; set \
+                     advertised_substrate_addr in the [node] config section",
+                    config.self_addr
+                );
+                info!(
+                    target: STARTUP,
+                    "advertised substrate address will be derived from the VSAPI socket (dock port {dock_port})"
+                );
+            }
+        }
+
         vsconn = Some(libnode::vsconn::VSConn::new(
             topology_config.vs_queue_size,
             SocketAddr::new(VISA_SERVICE_ADDR, VISA_SERVICE_PORT),
             node_name,
             auth_private_key,
+            advertised_substrate,
+            dock_port,
         ));
     } else {
         vsconn = None;

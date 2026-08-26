@@ -126,6 +126,11 @@ pub struct Config {
     /// For a node this is the nodes dock listening address.
     pub self_addr: SocketAddr,
 
+    /// Node only, optional - the substrate address this node advertises to the visa
+    /// service (the address peers dial). Needed when it differs from the bind address,
+    /// e.g. behind NAT. Resolved from the config-file string at parse time.
+    pub advertised_substrate_addr: Option<SocketAddr>,
+
     /// Path to a PEM file containing the Certificate Authority certificate.
     /// Optional and if present is used by the link management system to verify passed noise certificates.
     pub ca_file: Option<PathBuf>,
@@ -251,6 +256,7 @@ impl Config {
             let base_dir = config_file.config_path.parent().unwrap();
             config.set_from_globals(&config_file.global, base_dir)?;
             config.set_from_authentication(&config_file.authentication, base_dir)?;
+            config.set_from_node(&config_file.node)?;
         }
         Ok(config)
     }
@@ -478,6 +484,17 @@ impl Config {
         Ok(())
     }
 
+    // Overwrite our internal state with the values present in the node section
+    // of TOML config.
+    fn set_from_node(&mut self, config: &Option<NodeConfigSection>) -> Result<(), ArgsError> {
+        if let Some(config) = config {
+            if let Some(advertised) = &config.advertised_substrate_addr {
+                self.advertised_substrate_addr = Some(resolve_advertised_addr(advertised)?);
+            }
+        }
+        Ok(())
+    }
+
     // Overwrite our internal state with the values present in the CommonArgs (from command line)
     fn set_from_common(&mut self, common: &CommonArgs) -> Result<(), ArgsError> {
         if let Some(control_path) = &common.control_path {
@@ -574,6 +591,7 @@ impl Default for Config {
             certificate_file: None,
             private_key_file: None,
             private_key_data: None,
+            advertised_substrate_addr: None,
             auth_private_key: None,
             tun_if: None,
             logging: Vec::new(),
@@ -607,7 +625,16 @@ pub struct NodeConfig {
     pub config_path: PathBuf,
 
     pub global: GlobalConfigSection,
+    pub node: Option<NodeConfigSection>,
     pub authentication: Option<AuthenticationConfigSection>,
+}
+
+// Node only bits.
+#[derive(Deserialize, Debug, Clone)]
+pub struct NodeConfigSection {
+    /// The substrate address this node advertises to the visa service, as a
+    /// `"host:port"` string. Hostnames are resolved once at parse time.
+    pub advertised_substrate_addr: Option<String>,
 }
 
 // Global section is shared by nodes and adapters.
@@ -700,6 +727,38 @@ fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
     }
 }
 
+/// Resolve an `advertised_substrate_addr` config string (`"host:port"`, host may be a
+/// hostname or an IP) to a concrete [SocketAddr]. Resolution happens once, here at
+/// config-parse time. Unresolvable strings, unspecified IPs (e.g. `0.0.0.0`) and
+/// port 0 are rejected: the value is what peers dial, so it must be concrete.
+fn resolve_advertised_addr(addr_str: &str) -> Result<SocketAddr, ArgsError> {
+    use std::net::ToSocketAddrs;
+    let resolved = addr_str
+        .to_socket_addrs()
+        .map_err(|e| {
+            ArgsError::ParseError(format!(
+                "failed to resolve advertised_substrate_addr {addr_str:?}: {e}"
+            ))
+        })?
+        .next()
+        .ok_or_else(|| {
+            ArgsError::ParseError(format!(
+                "advertised_substrate_addr {addr_str:?} resolved to no addresses"
+            ))
+        })?;
+    if resolved.ip().is_unspecified() {
+        return Err(ArgsError::ParseError(format!(
+            "advertised_substrate_addr {addr_str:?} is an unspecified address; peers cannot dial it"
+        )));
+    }
+    if resolved.port() == 0 {
+        return Err(ArgsError::ParseError(format!(
+            "advertised_substrate_addr {addr_str:?} has port 0; peers cannot dial it"
+        )));
+    }
+    Ok(resolved)
+}
+
 /// Parse the `certificate_file` (a noise certificate) and return the CN value found within.
 ///
 /// TODO: This has nothing to do with noise.  And nothing to do with km_cert_exchange.  Move to a pki util file.
@@ -722,5 +781,66 @@ mod test {
             bootstrap_key = "rsa_key.pem"
             "#;
         let _config: AdapterConfigSection = toml::from_str(toml_str).unwrap();
+    }
+
+    #[test]
+    fn test_deserialize_node_config_section() {
+        let toml_str = r#"
+            advertised_substrate_addr = "203.0.113.7:5000"
+            "#;
+        let config: NodeConfigSection = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.advertised_substrate_addr.as_deref(),
+            Some("203.0.113.7:5000")
+        );
+    }
+
+    #[test]
+    fn test_node_config_advertised_substrate_addr() {
+        let toml_str = r#"
+            [global]
+            self_addr = "10.0.0.1:5000"
+
+            [node]
+            advertised_substrate_addr = "203.0.113.7:6000"
+            "#;
+        let file_config: NodeConfig = toml::from_str(toml_str).unwrap();
+        let mut config = Config::default();
+        config.set_from_node(&file_config.node).unwrap();
+        assert_eq!(
+            config.advertised_substrate_addr,
+            Some("203.0.113.7:6000".parse().unwrap())
+        );
+
+        // Without a [node] section the option stays unset.
+        let toml_str = r#"
+            [global]
+            self_addr = "10.0.0.1:5000"
+            "#;
+        let file_config: NodeConfig = toml::from_str(toml_str).unwrap();
+        let mut config = Config::default();
+        config.set_from_node(&file_config.node).unwrap();
+        assert_eq!(config.advertised_substrate_addr, None);
+    }
+
+    #[test]
+    fn test_resolve_advertised_addr() {
+        // Plain IP:port passes through.
+        assert_eq!(
+            resolve_advertised_addr("203.0.113.7:5000").unwrap(),
+            "203.0.113.7:5000".parse::<SocketAddr>().unwrap()
+        );
+        // Hostname resolves (localhost is safe to assume in CI).
+        let resolved = resolve_advertised_addr("localhost:5000").unwrap();
+        assert_eq!(resolved.port(), 5000);
+        assert!(resolved.ip().is_loopback());
+        // Unspecified IP rejected.
+        assert!(resolve_advertised_addr("0.0.0.0:5000").is_err());
+        assert!(resolve_advertised_addr("[::]:5000").is_err());
+        // Port 0 rejected.
+        assert!(resolve_advertised_addr("203.0.113.7:0").is_err());
+        // Garbage rejected.
+        assert!(resolve_advertised_addr("not an address").is_err());
+        assert!(resolve_advertised_addr("203.0.113.7").is_err());
     }
 }

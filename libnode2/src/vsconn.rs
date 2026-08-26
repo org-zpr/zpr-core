@@ -129,6 +129,19 @@ pub struct VSConn {
     node_private_key: RsaKeyPair,
     life_tx: broadcast::Sender<VSConnLifecycleEvent>,
     connect_fn: ConnectFn,
+    /// The substrate address this node advertises to the VS, when configured
+    /// (operator config; required behind NAT). When `None`, the effective value
+    /// is derived from the VSAPI TCP socket's local IP plus `dock_port` on each
+    /// (re)connect — correct only when node and peers share a network.
+    advertised_substrate: Option<SocketAddr>,
+    /// The node's dock (substrate listening) port, used by the socket-derived
+    /// fallback above. A value of 0 means "use the TCP source port instead"
+    /// (test tooling only; a real node always has a concrete dock port).
+    dock_port: u16,
+    /// Effective substrate address, computed in [VSConn::run] once the VSAPI
+    /// TCP connection is up. Sent as the `substrate_addr` param on both
+    /// `connect` and `open` (the VS requires it on both).
+    substrate_addr: std::cell::Cell<Option<SocketAddr>>,
 }
 
 /// Handle for sending commands to a running [VSConn].
@@ -191,11 +204,16 @@ impl VSConn {
     ///
     /// `buffer_size` determines how many commands can be buffered to send to the run loop before
     /// [VSConnHandle] starts blocking.
+    ///
+    /// `advertised_substrate` is the substrate address this node advertises to the VS
+    /// (`None` = derive from the VSAPI socket's local IP + `dock_port`; see the field docs).
     pub fn new(
         buffer_size: usize,
         vs_addr: SocketAddr,
         node_cn: String,
         node_private_key: RsaKeyPair,
+        advertised_substrate: Option<SocketAddr>,
+        dock_port: u16,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
         let (life_tx, _) = broadcast::channel(LIFECYCLE_EVENT_BUFFER_SIZE);
@@ -207,6 +225,9 @@ impl VSConn {
             node_private_key,
             life_tx,
             connect_fn: Box::new(|addr| Box::pin(tokio::net::TcpStream::connect(addr))),
+            advertised_substrate,
+            dock_port,
+            substrate_addr: std::cell::Cell::new(None),
         }
     }
 
@@ -294,6 +315,23 @@ impl VSConn {
             }
         };
         sock.set_nodelay(true)?;
+
+        // Compute the effective substrate address we advertise to the VS: the configured
+        // value when present, otherwise the socket's local IP plus the dock port (last
+        // resort for wildcard binds — correct only when node and peers share a network).
+        let effective_substrate = match self.advertised_substrate {
+            Some(addr) => addr,
+            None => {
+                let local = sock.local_addr()?;
+                let port = if self.dock_port != 0 {
+                    self.dock_port
+                } else {
+                    local.port()
+                };
+                SocketAddr::new(local.ip(), port)
+            }
+        };
+        self.substrate_addr.set(Some(effective_substrate));
 
         let connector = tls_connect();
         let tls = connector.connect(self.vs_addr.ip().into(), sock).await?;
@@ -608,6 +646,19 @@ impl VSConn {
         }
     }
 
+    /// The `substrate_addr` param the VS requires on both `connect` and `open`.
+    /// Set by [VSConn::run] before any command is processed; the error arm is
+    /// defensive.
+    fn substrate_addr_param(&self) -> Result<Param, VSApiError> {
+        let addr = self.substrate_addr.get().ok_or_else(|| {
+            VSApiError::CommandFailed("substrate address not yet determined".to_string())
+        })?;
+        Ok(Param::new_str(
+            pname::SUBSTRATE_ADDR.into(),
+            addr.to_string(),
+        ))
+    }
+
     async fn do_connect(
         &self,
         vs_service: &vsapi2::visa_service::Client,
@@ -616,7 +667,10 @@ impl VSConn {
         let vs_cr = VSConnectRequest {
             cn: self.node_cn.clone(),
             ctype: req.connect_type(),
-            params: Some(vec![Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr)]),
+            params: Some(vec![
+                Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr),
+                self.substrate_addr_param()?,
+            ]),
         };
 
         debug!(target: VS_RPC, "VS-API -> connect (type = {:?})", vs_cr.ctype);
@@ -708,7 +762,7 @@ impl VSConn {
         let req = VSConnectRequest {
             cn: self.node_cn.clone(),
             ctype: oreq.connect_type(),
-            params: None,
+            params: Some(vec![self.substrate_addr_param()?]),
         };
 
         let mut vs_request = vs_service.open_request();
@@ -1147,6 +1201,9 @@ mod tests {
                 node_private_key,
                 life_tx,
                 connect_fn,
+                advertised_substrate: None,
+                dock_port: 0,
+                substrate_addr: std::cell::Cell::new(None),
             }
         }
     }
