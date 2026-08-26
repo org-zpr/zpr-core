@@ -697,6 +697,147 @@ mod test {
         assert!(config.logging.is_empty());
     }
 
+    // CLI --advertised-substrate-addr sets the advertised address with no config file.
+    #[test]
+    #[parallel(env)]
+    fn test_main_args_argparse_node_advertised_addr_cli_only() {
+        let ca_file = TempFile::touch();
+        let ca_file_fname = String::from(ca_file.get_path().to_str().unwrap());
+        let cert_file = TempFile::touch();
+        let cert_file_fname = String::from(cert_file.get_path().to_str().unwrap());
+        let pk_file = TempFile::touch();
+        let pk_file_fname = String::from(pk_file.get_path().to_str().unwrap());
+
+        let args = vec![
+            "ph",
+            "node",
+            "--ca-file",
+            &ca_file_fname,
+            "--certificate-file",
+            &cert_file_fname,
+            "--private-key-file",
+            &pk_file_fname,
+            "--control-path",
+            "/tmp/control.sock",
+            "--capture-path",
+            "/tmp/capture.sock",
+            "--zpr-addr",
+            "10.0.0.1",
+            "--self-addr",
+            "0.0.0.0:12345",
+            "--advertised-substrate-addr",
+            "203.0.113.7:12345",
+        ];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Node);
+        // The bind address stays wildcard; only the advertised address is concrete.
+        assert_eq!(
+            config.self_addr,
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 12345)
+        );
+        assert_eq!(
+            config.advertised_substrate_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 7)),
+                12345
+            ))
+        );
+    }
+
+    // CLI --advertised-substrate-addr wins over [node] advertised_substrate_addr.
+    #[test]
+    #[parallel(env)]
+    fn test_main_args_argparse_node_advertised_addr_cli_overrides_config() {
+        let mut tomltxt = r#"
+        [global]
+        ca_file = "$CAFILE"
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
+        capture_path = "/tmp/capture.sock"
+        self_addr = "0.0.0.0:12345"
+        zpr_addr = [ "10.0.0.1" ]
+
+        [node]
+        advertised_substrate_addr = "203.0.113.7:6000"
+        "#;
+
+        let ca_file = TempFile::touch();
+        let cert_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec![
+            "ph",
+            "node",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "--advertised-substrate-addr",
+            "198.51.100.9:7000",
+        ];
+
+        let (_, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(
+            config.advertised_substrate_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, 9)),
+                7000
+            ))
+        );
+    }
+
+    // The CLI value goes through the same validation as the config-file value:
+    // an unspecified IP is rejected because peers cannot dial it.
+    #[test]
+    #[parallel(env)]
+    fn test_main_args_argparse_node_advertised_addr_cli_rejects_unspecified() {
+        let ca_file = TempFile::touch();
+        let ca_file_fname = String::from(ca_file.get_path().to_str().unwrap());
+        let cert_file = TempFile::touch();
+        let cert_file_fname = String::from(cert_file.get_path().to_str().unwrap());
+        let pk_file = TempFile::touch();
+        let pk_file_fname = String::from(pk_file.get_path().to_str().unwrap());
+
+        let args = vec![
+            "ph",
+            "node",
+            "--ca-file",
+            &ca_file_fname,
+            "--certificate-file",
+            &cert_file_fname,
+            "--private-key-file",
+            &pk_file_fname,
+            "--control-path",
+            "/tmp/control.sock",
+            "--capture-path",
+            "/tmp/capture.sock",
+            "--zpr-addr",
+            "10.0.0.1",
+            "--advertised-substrate-addr",
+            "0.0.0.0:12345",
+        ];
+
+        match argparse(Some(args)) {
+            Err(ArgsError::ParseError(msg)) => {
+                assert!(
+                    msg.contains("unspecified"),
+                    "expected 'unspecified' in error, got: {msg}"
+                );
+            }
+            other => panic!("expected ParseError, got: {:?}", other),
+        }
+    }
+
     #[test]
     #[serial(env)] // serialize with other tests because we modify process environment
     fn test_main_args_argparse_adapter_key_in_env() {
