@@ -218,11 +218,24 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         }
     };
 
-    // We just emit the TLV stuff to log but only use window size.
+    // We just emit the TLV stuff to log but only use window size and the A2A key.
     for (tlv_type, tlv_value) in &tlv_data {
         match *tlv_type {
             tlv::DataType::WINDOW_SIZE => {
                 process_window_size_tlv(&asm, ingress_link_id, "HelloRequest", tlv_value)?;
+            }
+            tlv::DataType::A2A_DH_PUBKEY => {
+                for value in tlv_value {
+                    if let tlv::TlvValue::X25519PubKey(key) = value {
+                        debug!(
+                            target: ZDP,
+                            "{}: HelloRequest carries A2A DH public key", asm.formatted_link_id(ingress_link_id)
+                        );
+                        asm.peer_table.inspect(ingress_link_id, |ps| {
+                            *ps.peer_a2a_dh_pubkey.lock().unwrap() = Some(*key);
+                        });
+                    }
+                }
             }
             _ => {
                 info!(

@@ -114,7 +114,20 @@ pub fn build_connect_request(
         value: cn,
     });
 
-    let a2a_dh_public_key = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
+    // The A2A DH public key belongs to the connecting adapter (the actor's
+    // PEP), not to this node.  The adapter sent it in its HelloRequest and it
+    // was stashed in the peer table.  Sending our own key here would give the
+    // visa service the same key for every actor on this node, so peer MICV
+    // computations would disagree and A2A traffic would be dropped.
+    let a2a_dh_public_key = asm
+        .peer_table
+        .inspect(id, |ps| *ps.peer_a2a_dh_pubkey.lock().unwrap())
+        .flatten()
+        .ok_or_else(|| {
+            LinkStateError::InvalidOperation(format!(
+                "link {id} has no A2A DH public key from HelloRequest; cannot build connect request"
+            ))
+        })?;
     let connect_req = vsapi_types::ConnectRequest {
         blobs: vec![vsapi_blob],
         claims: request_claims,
