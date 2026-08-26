@@ -713,19 +713,60 @@ fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), Decrypt
     Ok(())
 }
 
-/// Decrypt a packet using the given encryption codec.
+/// Decrypt a packet using the given encryption codec, leaving the ZPI header
+/// intact.
+///
+/// Mirrors `encrypt_full()`: the plaintext is written into the packet's own
+/// tailroom rather than into a scratch buffer, which avoids both a
+/// `PACKET_BUFFER_SIZE` stack zeroing and a copy of the plaintext back into
+/// the packet:
+///
+/// ```text
+/// before:  [ metadata ][ headroom ][ ZPI ][ ciphertext ][ tailroom ......... ]
+/// after:   [ metadata ][ ........ dead .........][ ZPI ][ plaintext ][ tail. ]
+/// ```
+///
+/// Decryption never expands (plaintext = ciphertext - overhead), so the
+/// ciphertext length bounds the output and `encr_len` bytes of tailroom are
+/// always sufficient.  Packets without that much tailroom fall back to the
+/// scratch-buffer path; for the packet sizes seen in practice the fast path
+/// always applies.
 fn decrypt_full(codec: &dyn Codec, padlen: usize, pkt: &mut Packet) -> Result<(), DecryptError> {
-    if pkt.body().len() < 1 {
+    let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>(); // = 1
+
+    if pkt.body().len() < zpi_hdr_len {
         return Err(DecryptError::BadStructure);
     }
-    let encr_len = pkt.body().len() - 1;
+    let encr_len = pkt.body().len() - zpi_hdr_len;
     if encr_len < padlen {
         return Err(DecryptError::BadStructure);
     }
 
+    // Can the plaintext fit in this packet's own tailroom?  If so we can
+    // decrypt straight into the backing buffer.
+    if pkt.tailroom_available() >= encr_len {
+        let res = {
+            let (body, tailroom) = pkt.body_and_tailroom_mut();
+            codec.decrypt_transport_stateless(&body[zpi_hdr_len..], tailroom)
+        };
+        match res {
+            Ok(len) => {
+                // The plaintext sits where the tailroom was; move the ZPI
+                // header down in front of it and make that the new body.
+                pkt.adopt_tailroom_with_header(zpi_hdr_len, len);
+                return Ok(());
+            }
+            Err(e) => {
+                error!(target: DATAPATH, "decryption failed: {}", e);
+                return Err(DecryptError::DecryptionFailure);
+            }
+        }
+    }
+
+    // Fallback: the packet is too big to decrypt into its own tailroom.
     let mut decr_buf = [0u8; config::PACKET_BUFFER_SIZE];
 
-    match codec.decrypt_transport_stateless(&pkt.body()[1..encr_len + 1], &mut decr_buf) {
+    match codec.decrypt_transport_stateless(&pkt.body()[zpi_hdr_len..], &mut decr_buf) {
         Ok(len) => {
             // Copy the decrypted data back into the message -- do not overwrite ZPI.
             pkt.shrink_by(encr_len); // remove ciphertext body, leave ZPI
@@ -1086,6 +1127,62 @@ mod test {
 
         assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_ok());
         assert_eq!(pkt.body(), body.as_slice());
+    }
+
+    #[test]
+    fn test_decrypt_full_uses_tailroom_in_place() {
+        let body: Vec<u8> = (0..60u8).collect(); // body[0] is the ZPI byte
+        let ciphertext = expected_ciphertext(&body);
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &ciphertext);
+
+        let ciphertext_end = pkt.body_offset() + pkt.len();
+
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_ok());
+
+        assert_eq!(pkt.body(), body.as_slice());
+
+        // The plaintext must live in what used to be tailroom -- that is the
+        // whole point -- with only the one-byte ZPI header relocated.
+        assert_eq!(pkt.body_offset(), ciphertext_end - 1);
+    }
+
+    #[test]
+    fn test_decrypt_full_falls_back_when_tailroom_too_small() {
+        let body: Vec<u8> = (0..60u8).collect();
+        // 84 bytes of ciphertext; tailroom of 40 bytes cannot hold the 83
+        // bytes decryption may emit, so this must take the scratch-buffer
+        // path.
+        let ciphertext = expected_ciphertext(&body);
+        let buf_size = Packet::MIN_BODY_OFFSET + ciphertext.len() + 40;
+        let mut pkt = packet_with_body(buf_size, 0, &ciphertext);
+
+        let ciphertext_offset = pkt.body_offset();
+
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_ok());
+
+        // Same bytes as the in-place path, but written back over the original
+        // body rather than into the tailroom.
+        assert_eq!(pkt.body(), body.as_slice());
+        assert_eq!(pkt.body_offset(), ciphertext_offset);
+    }
+
+    #[test]
+    fn test_decrypt_full_rejects_short_packet() {
+        // Body shorter than ZPI + padlen must be rejected on both counts.
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[]);
+        assert!(decrypt_full(&ExpandingCodec, 0, &mut pkt).is_err());
+
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[0x07u8; 5]);
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_full_codec_failure_is_reported() {
+        // ExpandingCodec rejects ciphertexts shorter than its overhead; long
+        // enough to pass the padlen==0 structure check, short enough to fail
+        // inside the codec on the in-place path.
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[0x07u8; 5]);
+        assert!(decrypt_full(&ExpandingCodec, 0, &mut pkt).is_err());
     }
 
     /// The pre-#385 implementation, kept in the test module so the benchmark

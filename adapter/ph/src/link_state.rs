@@ -215,6 +215,11 @@ impl LinkData {
     }
 }
 
+struct InitAuthData {
+    bootstrap: bool,
+    challenge: Option<auth::ZdpInitAuthenticationPayload>,
+}
+
 pub struct LinkStateMachine {
     id: LinkId,
     state: LinkState,
@@ -231,8 +236,8 @@ pub struct LinkStateMachine {
     /// Counter available for use by states which wish to count timeouts.
     /// Reset to 0 on any state transition.
     timeout_count: usize,
-    /// present only while in RegisterAA state; used for retransmits
-    auth_blob: Option<String>,
+    /// Used in Helloing when a racy InitAuthRequest arrived
+    stowed_init_auth: Option<InitAuthData>,
     /// Handle to an outstanding echo/keepalive task; used only during Active.
     /// Instant is time at which the echo was sent.
     echo_handle: Option<(Instant, tokio::task::AbortHandle)>,
@@ -251,7 +256,7 @@ impl LinkStateMachine {
             logical_clock: 0,
             timeout_handle: None,
             timeout_count: 0,
-            auth_blob: None,
+            stowed_init_auth: None,
             echo_handle: None,
             shutting_down: false,
         }
@@ -265,7 +270,6 @@ impl LinkStateMachine {
         self.last_state_change = std::time::Instant::now();
         self.cancel_timeout();
         self.timeout_count = 0;
-        self.auth_blob = None;
     }
 
     /// Schedule the given callback to be invoked asynchronously after the
@@ -775,8 +779,17 @@ impl LinkStateWrapper {
                     target: LINK_STATE,
                     "{} finished helloing.  Now waiting for init auth.", asm.formatted_link_id(link_id)
                 );
+                let stowed_init_auth = std::mem::take(&mut locked_fsm.stowed_init_auth);
                 drop(locked_fsm);
-                Ok(())
+                if let Some(stowed_init_auth) = stowed_init_auth {
+                    self.process_init_auth(
+                        asm,
+                        stowed_init_auth.bootstrap,
+                        stowed_init_auth.challenge,
+                    )
+                } else {
+                    Ok(())
+                }
             }
             (LinkType::NodeToNode, LinkState::Helloing) => {
                 let mut link_data = self.locked_data.lock().unwrap();
@@ -1123,7 +1136,6 @@ impl LinkStateWrapper {
                                     &blobstr,
                                 );
                                 locked_fsm.set_state(LinkState::RegisterAA);
-                                locked_fsm.auth_blob = Some(blobstr);
                                 self.set_timeout(
                                     asm,
                                     &mut locked_fsm,
@@ -1190,6 +1202,13 @@ impl LinkStateWrapper {
                         }
                     }
                 }
+            }
+            (LinkType::AdapterToNode, LinkState::Helloing) => {
+                // init auth can race helloing; if so, stow it away until we finish helloing
+                locked_fsm.stowed_init_auth = Some(InitAuthData {
+                    bootstrap,
+                    challenge,
+                });
             }
             (_, _) => {
                 return Err(LinkStateError::UnexpectedTransition(
@@ -1406,7 +1425,6 @@ impl LinkStateWrapper {
         let blobstr = blob.encode();
         let requested_addrs = asm.get_local_zpr_addrs_std();
         self.send_acquire_zpr_address_request(asm, &requested_addrs, &blobstr);
-        locked_fsm.auth_blob = Some(blobstr);
         self.set_timeout(asm, &mut locked_fsm, config::VS_AUTHENTICATION_TIMEOUT);
         Ok(())
     }
