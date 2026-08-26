@@ -171,6 +171,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --logging "$DEBUG_TARGETS" \
   --control-path "$NODE_SOCK" \
   --capture-path "$NODE_CAP_SOCK" \
+  --advertised-substrate-addr "$NODE_SUBSTRATE_ADDR_VS":5000 \
   --ca-file ca.crt \
   --certificate-file node.crt \
   --private-key-file node.key \

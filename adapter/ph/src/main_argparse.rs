@@ -82,6 +82,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
         Command::Node {
             config_file,
             auth_private_key,
+            advertised_substrate_addr,
             common,
         } => {
             ph_mode = PhMode::Node;
@@ -103,6 +104,10 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                 None => None,
             };
             config = Config::new_for_node(config_file, auth_private_key, &common)?;
+            // Command line overrides the config file.
+            if let Some(advertised) = advertised_substrate_addr {
+                config.set_advertised_substrate_addr(&advertised)?;
+            }
         }
     }
     config.finalize()?;

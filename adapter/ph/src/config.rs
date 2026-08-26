@@ -495,6 +495,13 @@ impl Config {
         Ok(())
     }
 
+    /// Set the advertised substrate address from a command-line string,
+    /// applying the same resolution/validation as the config-file path.
+    pub fn set_advertised_substrate_addr(&mut self, addr_str: &str) -> Result<(), ArgsError> {
+        self.advertised_substrate_addr = Some(resolve_advertised_addr(addr_str)?);
+        Ok(())
+    }
+
     // Overwrite our internal state with the values present in the CommonArgs (from command line)
     fn set_from_common(&mut self, common: &CommonArgs) -> Result<(), ArgsError> {
         if let Some(control_path) = &common.control_path {
