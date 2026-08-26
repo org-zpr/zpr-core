@@ -28,7 +28,8 @@ Then launch lntest:
 
 ```bash
 ./target/degug/lntest -a \[::1\]:5002 -n node.zpr.org \
-  -p test-data/include/node-private-key.pem
+  -p test-data/include/node-private-key.pem \
+  --substrate-addr 127.0.0.1:5000
 ```
 
 Hit return a few times becuase the REPL loop get clobbered by the logging
