@@ -114,11 +114,13 @@ pub fn build_connect_request(
         value: cn,
     });
 
+    let a2a_dh_public_key = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
     let connect_req = vsapi_types::ConnectRequest {
         blobs: vec![vsapi_blob],
         claims: request_claims,
         substrate_addr: asm.get_local_dock_addr(),
         dock_interface: 0,
+        a2a_dh_public_key: vsapi_types::PublicKey::new(a2a_dh_public_key.as_bytes()),
     };
     Ok(Some(connect_req))
 }

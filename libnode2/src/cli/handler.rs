@@ -9,8 +9,8 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task::AbortHandle;
 use tracing::{error, info, warn};
 use zpr::vsapi_types::{
-    AuthBlob, CommFlag, ConnectRequest, DisconnectNotice, DisconnectReason, PacketDesc, VisaOp,
-    VisaRequest,
+    AuthBlob, CommFlag, ConnectRequest, DisconnectNotice, DisconnectReason, PacketDesc, PublicKey,
+    VisaOp, VisaRequest,
 };
 
 use crate::vsconn::{NodeConnect, StateFlag, VSConnHandle, VSConnLifecycleEvent};
@@ -172,11 +172,17 @@ pub async fn run_handler(
                                 10, rand_octets[0], rand_octets[1], rand_octets[2],
                             ));
 
+                            // lntest has no real A2A traffic, but the field is
+                            // required; send a random (well-formed) 32-byte key.
+                            let mut key_bytes = [0u8; 32];
+                            aws_lc_rs::rand::fill(&mut key_bytes).expect("OS RNG Failed");
+
                             let connect_req = ConnectRequest {
                                 blobs: vec![AuthBlob::SS(blob)],
                                 claims,
                                 substrate_addr,
                                 dock_interface: 0,
+                                a2a_dh_public_key: PublicKey::new(&key_bytes),
                             };
 
                             match handle.authorize_connect(connect_req).await {
