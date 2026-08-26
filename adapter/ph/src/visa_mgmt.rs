@@ -80,17 +80,6 @@ pub fn build_connect_request(
         }
     }
 
-    let mut cn = get_common_name(asm, id)?;
-    if cn.is_empty() {
-        // Self-generated-key adapters (no certificate exchange) leave the SA
-        // without a peer cert, so there is no cert CN. Fall back to the CN
-        // asserted in the self-signed auth blob; the visa service
-        // authenticates that CN against the blob's RSA signature.
-        if let AuthBlob::SelfSigned(ss) = blob {
-            cn = ss.cn.clone();
-        }
-    }
-
     // Convert the adapter's AuthBlob to the vsapi_types AuthBlob for the v2 protocol.
     let vsapi_blob = match blob {
         AuthBlob::SelfSigned(ss) => vsapi_types::AuthBlob::SS(vsapi_types::SelfSignedBlob {
@@ -118,10 +107,17 @@ pub fn build_connect_request(
             value: addr.to_string(),
         });
     }
-    request_claims.push(vsapi_types::Claim {
-        key: claims::key::CN.into(),
-        value: cn,
-    });
+    // The CN claim always comes from the AuthBlob certificate, never from the
+    // SA cert: the SA cert only validates the node-adapter link, while the
+    // AuthBlob cert authenticates an actor to the VS (and multiple actors may
+    // sit behind one adapter, so the two CNs must be independent). With an
+    // AuthCode blob there is no AuthBlob cert, so no CN claim is sent.
+    if let AuthBlob::SelfSigned(ss) = blob {
+        request_claims.push(vsapi_types::Claim {
+            key: claims::key::CN.into(),
+            value: ss.cn.clone(),
+        });
+    }
 
     let connect_req = vsapi_types::ConnectRequest {
         blobs: vec![vsapi_blob],
@@ -130,33 +126,6 @@ pub fn build_connect_request(
         dock_interface: 0,
     };
     Ok(Some(connect_req))
-}
-
-/// WARNING! Using this ignores whether the certificate was verified or not.
-fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateError> {
-    let Some(peer_state) = asm.peer_table.get(id) else {
-        return Err(LinkStateError::NotFound(id));
-    };
-
-    let Some(sa) = peer_state.get_established_transport_association() else {
-        return Err(LinkStateError::InvalidOperation(
-            "Attempted to Register Actor Address when SA not established".to_owned(),
-        ));
-    };
-
-    // TODO: validate that DN *only* has CN, since this is what VS expects
-    // (or, teach VS about DNs)
-    let cn: String;
-
-    if let Some(ref peer_cert) = sa.peer_cert {
-        cn = peer_cert.common_name().unwrap_or_default();
-    } else {
-        cn = String::new();
-    }
-
-    debug!(target: VISA_MGMT, "{} CN is {cn}", asm.formatted_link_id(id));
-
-    Ok(cn)
 }
 
 /// This uses "RemoteDisconnect" as the reason passed to the visa service.
