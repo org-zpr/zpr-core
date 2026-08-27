@@ -21,7 +21,7 @@ dock_node = "node"
 
 [bootstrap]
 "node" = "node-rsa-pubkey.pem"
-"vs" = "actorvs.pem"
+"vs.zpr" = "actorvs.pem"
 "adapter1" = "actor1.pem"
 "adapter2" = "actor2.pem"
 

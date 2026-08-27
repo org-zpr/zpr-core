@@ -889,42 +889,34 @@ impl LinkStateWrapper {
 
         locked_fsm.set_state(LinkState::RegisterAA);
 
-        debug!(
-            target: LINK_STATE,
-            "About to build connect request"
-        );
+        let is_vs_link = asm
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter)
+            .is_some_and(|vs_id| vs_id.get() == link_id);
+
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
-        match visa_mgmt::build_connect_request(
-            asm,
-            link_id,
-            requested_addr,
-            &d_blob,
-            a2a_dh_public_key,
-        ) {
-            Ok(Some(conn_req)) => {
-                drop(locked_fsm);
-                Ok(visa_mgmt::authorize_connect(asm, link_id, conn_req))
-            }
+        let conn_req =
+            visa_mgmt::build_connect_request(asm, requested_addr, &d_blob, a2a_dh_public_key)?;
+        drop(locked_fsm);
 
-            Ok(None) => {
-                debug!(target: LINK_STATE, "skipping visa service authorize call, authorizing ourselves (requested_addr = {requested_addr})");
-
-                // Need to send a grant here anyway to "turn on" the adapter (and outselves)
-                // So pretend we are the visa service and handle our own authorization.
-                drop(locked_fsm);
-
-                if let Err(e) = asm.process_link_state_event(
-                    link_id,
-                    LinkEvent::ReceivedAuthorizeResponse(requested_addr),
-                ) {
-                    error!(target: LINK_STATE, "{} failed to process authorize response: {e}", asm.formatted_link_id(link_id));
-                }
-
-                Ok(())
-            }
-
-            Err(e) => Err(e),
+        if !is_vs_link {
+            visa_mgmt::authorize_connect(asm, link_id, conn_req);
+            return Ok(());
         }
+
+        debug!(target: LINK_STATE, "deferring visa service authorize call, authorizing ourselves (requested_addr = {requested_addr})");
+        *asm.deferred_vs_connect.lock().unwrap() = Some((link_id, conn_req));
+
+        // Need to send a grant here anyway to "turn on" the adapter (and outselves)
+        // So pretend we are the visa service and handle our own authorization.
+        if let Err(e) = asm.process_link_state_event(
+            link_id,
+            LinkEvent::ReceivedAuthorizeResponse(requested_addr),
+        ) {
+            error!(target: LINK_STATE, "{} failed to process authorize response: {e}", asm.formatted_link_id(link_id));
+        }
+
+        Ok(())
     }
 
     fn check_self_signed_blob(

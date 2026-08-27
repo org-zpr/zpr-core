@@ -524,6 +524,7 @@ fn main() -> ExitCode {
             &node_zpr_addr,
         )),
         vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),
+        deferred_vs_connect: Mutex::new(None),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),

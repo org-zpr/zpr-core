@@ -2,6 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use tokio::sync::broadcast;
 
 use crate::prelude::*;
+use crate::visa_mgmt;
 use crate::vss_worker;
 
 use libnode::error::VSApiError;
@@ -95,6 +96,14 @@ pub async fn launch(
                                 error!(target: STARTUP, "failed to process initial visa op from VS: {e:?}");
                             }
                         }
+
+                        // The route to the visa service runs through the VS adapter's own tunnel, so its
+                        // connect request could not be sent at bootstrap. That tunnel is up now.
+                        let deferred = asm.deferred_vs_connect.lock().unwrap().take();
+                        if let Some((vs_link_id, conn_req)) = deferred {
+                            visa_mgmt::send_deferred_vs_connect(&asm, vs_link_id, conn_req).await;
+                        }
+
                         // Next time we connect, we have state.
                         state = StateFlag::HasState;
                         break; // Exit inner loop; go back to waiting for a state change.

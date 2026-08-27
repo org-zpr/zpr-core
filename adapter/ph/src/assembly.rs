@@ -29,7 +29,7 @@ use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
 use x25519_dalek::ReusableSecret;
-use zpr::vsapi_types::AuthServicesList;
+use zpr::vsapi_types::{AuthServicesList, ConnectRequest};
 use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,6 +65,7 @@ pub struct Assembly {
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
     pub vs_auth_services: std::sync::RwLock<AuthServicesList>, // present only on nodes, may be empty, managed by visa service
+    pub deferred_vs_connect: Mutex<Option<(LinkId, ConnectRequest)>>, // present only on nodes, the VS adapter's connect request, held until the node has VSAPI access
 
     pub visa_table: std::sync::RwLock<visa_table::VisaTable>, // Only for nodes
 
@@ -535,6 +536,7 @@ pub mod test {
             vsconn,
             visa_table,
             vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),
+            deferred_vs_connect: Mutex::new(None),
             capture_queue,
             capture_worker,
             flow_control,
