@@ -61,6 +61,7 @@ pub struct NodeConnect {
     /// Connect will fail if this does not match policy.
     pub zpr_addr: IpAddr,
     pub state: StateFlag,
+    pub a2a_dh_pubkey: x25519_dalek::PublicKey,
 }
 
 #[derive(Debug)]
@@ -646,6 +647,7 @@ impl VSConn {
             params: Some(vec![
                 Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr),
                 self.substrate_addr_param(),
+                Param::new_x25519_pubkey(pname::A2A_DH_PUBKEY.into(), req.a2a_dh_pubkey),
             ]),
         };
 

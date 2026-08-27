@@ -225,17 +225,7 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
                 process_window_size_tlv(&asm, ingress_link_id, "HelloRequest", tlv_value)?;
             }
             tlv::DataType::A2A_DH_PUBKEY => {
-                for value in tlv_value {
-                    if let tlv::TlvValue::X25519PubKey(key) = value {
-                        debug!(
-                            target: ZDP,
-                            "{}: HelloRequest carries A2A DH public key", asm.formatted_link_id(ingress_link_id)
-                        );
-                        asm.peer_table.inspect(ingress_link_id, |ps| {
-                            *ps.peer_a2a_dh_pubkey.lock().unwrap() = Some(*key);
-                        });
-                    }
-                }
+                process_a2a_dh_pubkey_tlv(&asm, ingress_link_id, "HelloRequest", tlv_value)?;
             }
             _ => {
                 info!(
@@ -246,6 +236,10 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         }
     }
 
+    //Warn adapter did not send key. Connection is not rejected in case of future changes
+    if !tlv_data.contains_key(&tlv::DataType::A2A_DH_PUBKEY) {
+        warn!(target: ZDP, "{}: HelloRequest did not include A2A_DH_PUBKEY", asm.formatted_link_id(ingress_link_id));
+    }
     asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)?;
 
     Ok(())
@@ -371,6 +365,29 @@ fn process_window_size_tlv(
             }
             _ => {
                 warn!(target: ZDP, "{}: {message_name} window size type is wrong: {window_size_entry:?}", asm.formatted_link_id(link_id));
+                return Err(HandleMgmtError::BadStructure);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn process_a2a_dh_pubkey_tlv(
+    asm: &Assembly,
+    link_id: LinkId,
+    message_name: &str,
+    tlv_value: &[tlv::TlvValue],
+) -> HandleMgmtResult {
+    for entry in tlv_value {
+        match entry {
+            tlv::TlvValue::X25519PubKey(pubkey) => {
+                info!(target: ZDP, "{}: Applying A2A_DH_PUBKEY from {message_name}", asm.formatted_link_id(link_id));
+                asm.peer_table.inspect(link_id, |ps| {
+                    ps.a2a_dh_pubkey.write(Some(*pubkey));
+                });
+            }
+            _ => {
+                warn!(target: ZDP, "{}: {message_name} A2A_DH_PUBKEY value type is wrong: {entry:?}", asm.formatted_link_id(link_id));
                 return Err(HandleMgmtError::BadStructure);
             }
         }

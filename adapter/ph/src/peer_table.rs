@@ -39,10 +39,7 @@ pub struct PeerState {
     pub mgmt_processor: queues::MgmtProcessor,
     pub mgmt_processor_worker: task::JoinHandle<()>,
     pub auth_key: [u8; 32], // set in ::new and never changed.
-    /// The peer adapter's A2A DH public key, received in its HelloRequest.
-    /// Only set on NodeToAdapter links; forwarded to the visa service in the
-    /// ConnectRequest so visas carry the actual actor keys.
-    pub peer_a2a_dh_pubkey: Mutex<Option<x25519_dalek::PublicKey>>,
+    pub a2a_dh_pubkey: RcuBox<Option<x25519_dalek::PublicKey>>,
     pub zdpr_send: Mutex<zdpr::Sender<crate::packet::Packet>>,
     pub zdpr_recv: Mutex<zdpr::Receiver>,
     pub zdpr_retry_timer_reset: Notify,
@@ -118,7 +115,7 @@ impl PeerState {
             mgmt_processor,
             mgmt_processor_worker,
             auth_key: key,
-            peer_a2a_dh_pubkey: Mutex::new(None),
+            a2a_dh_pubkey: RcuBox::new(None),
             zdpr_send: Mutex::new(zdpr::Sender::new()),
             zdpr_recv: Mutex::new(zdpr::Receiver::new(
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,
@@ -549,7 +546,7 @@ pub mod test {
             mgmt_processor,
             mgmt_processor_worker: task::spawn(async {}),
             auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
-            peer_a2a_dh_pubkey: Mutex::new(None),
+            a2a_dh_pubkey: RcuBox::new(None),
             zdpr_send: Mutex::new(zdpr::Sender::new()),
             zdpr_recv: Mutex::new(zdpr::Receiver::new(
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,

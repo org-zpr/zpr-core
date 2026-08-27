@@ -634,8 +634,8 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            let pub_key = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
-            mgmt::requests::send_hello_request(asm, self.id, pub_key).enqueue();
+            let pubkey = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
+            mgmt::requests::send_hello_request(asm, self.id, pubkey).enqueue();
             self.set_timeout(asm, &mut locked_fsm, config::LINK_HELLO_TIMEOUT);
             debug!(
                 target: LINK_STATE,
@@ -828,6 +828,10 @@ impl LinkStateWrapper {
         blob: String,
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
+        let a2a_dh_public_key = asm
+            .peer_table
+            .inspect(link_id, |ps| *ps.a2a_dh_pubkey.get())
+            .flatten();
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (self.link_type, locked_fsm.state) {
@@ -890,7 +894,13 @@ impl LinkStateWrapper {
             "About to build connect request"
         );
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
-        match visa_mgmt::build_connect_request(asm, link_id, requested_addr, &d_blob) {
+        match visa_mgmt::build_connect_request(
+            asm,
+            link_id,
+            requested_addr,
+            &d_blob,
+            a2a_dh_public_key,
+        ) {
             Ok(Some(conn_req)) => {
                 drop(locked_fsm);
                 Ok(visa_mgmt::authorize_connect(asm, link_id, conn_req))
@@ -946,11 +956,12 @@ impl LinkStateWrapper {
         }
         let key = key.unwrap();
 
-        let Some(ref peer_cert) = sa.peer_cert else {
-            warn!(target: LINK_STATE, "{} no peer cert found, cannot validate blob", asm.formatted_link_id(link_id));
-            return false;
-        };
-        if let Err(e) = ss_blob.verify_blob_challenge(peer_cert.get_cert(), &key) {
+        // Adapters using self-generated keys present no certificate during
+        // keying, so there is no cert CN to bind the blob to; the visa
+        // service still authenticates the blob CN via the RSA signature.
+        if let Err(e) =
+            ss_blob.verify_blob_challenge(sa.peer_cert.as_ref().map(|c| c.get_cert()), &key)
+        {
             warn!(target: LINK_STATE, "{} challenge verification failed: {e}", asm.formatted_link_id(link_id));
             return false;
         }

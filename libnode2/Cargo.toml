@@ -23,6 +23,7 @@ tui-input = { version = "0.15", features = ["crossterm"], optional = true } # ln
 tokio-rustls = "0.26.4"
 rustls = "0.23.36"
 rcgen = "0.14.7"
+x25519-dalek = "3.0.0"
 
 [features]
 build-lnt = ["clap", "tracing-subscriber", "ratatui", "crossterm", "tui-input"]

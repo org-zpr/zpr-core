@@ -65,6 +65,7 @@ pub fn build_connect_request(
     id: LinkId,
     addr: IpAddress,
     blob: &AuthBlob,
+    a2a_dh_public_key: Option<x25519_dalek::PublicKey>,
 ) -> Result<Option<vsapi_types::ConnectRequest>, LinkStateError> {
     // Check if this link is "blessed" as the visa service. This happens in link_state and is sensitive
     // to whether the certificate was verified or not.
@@ -79,8 +80,6 @@ pub fn build_connect_request(
             }
         }
     }
-
-    let cn = get_common_name(asm, id)?;
 
     // Convert the adapter's AuthBlob to the vsapi_types AuthBlob for the v2 protocol.
     let vsapi_blob = match blob {
@@ -109,60 +108,30 @@ pub fn build_connect_request(
             value: addr.to_string(),
         });
     }
-    request_claims.push(vsapi_types::Claim {
-        key: claims::key::CN.into(),
-        value: cn,
-    });
+    // The CN claim always comes from the AuthBlob certificate, never from the
+    // SA cert: the SA cert only validates the node-adapter link, while the
+    // AuthBlob cert authenticates an actor to the VS (and multiple actors may
+    // sit behind one adapter, so the two CNs must be independent). With an
+    // AuthCode blob there is no AuthBlob cert, so no CN claim is sent.
+    if let AuthBlob::SelfSigned(ss) = blob {
+        request_claims.push(vsapi_types::Claim {
+            key: claims::key::CN.into(),
+            value: ss.cn.clone(),
+        });
+    }
 
-    // The A2A DH public key belongs to the connecting adapter (the actor's
-    // PEP), not to this node.  The adapter sent it in its HelloRequest and it
-    // was stashed in the peer table.  Sending our own key here would give the
-    // visa service the same key for every actor on this node, so peer MICV
-    // computations would disagree and A2A traffic would be dropped.
-    let a2a_dh_public_key = asm
-        .peer_table
-        .inspect(id, |ps| *ps.peer_a2a_dh_pubkey.lock().unwrap())
-        .flatten()
-        .ok_or_else(|| {
-            LinkStateError::InvalidOperation(format!(
-                "link {id} has no A2A DH public key from HelloRequest; cannot build connect request"
-            ))
-        })?;
+    let a2a_dh_public_key = a2a_dh_public_key
+        .map(|key| vsapi_types::PublicKey::new(key.as_bytes()))
+        .unwrap_or_else(|| vsapi_types::PublicKey::new(&[]));
+
     let connect_req = vsapi_types::ConnectRequest {
         blobs: vec![vsapi_blob],
         claims: request_claims,
         substrate_addr: asm.get_local_dock_addr(),
         dock_interface: 0,
-        a2a_dh_public_key: vsapi_types::PublicKey::new(a2a_dh_public_key.as_bytes()),
+        a2a_dh_public_key,
     };
     Ok(Some(connect_req))
-}
-
-/// WARNING! Using this ignores whether the certificate was verified or not.
-fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateError> {
-    let Some(peer_state) = asm.peer_table.get(id) else {
-        return Err(LinkStateError::NotFound(id));
-    };
-
-    let Some(sa) = peer_state.get_established_transport_association() else {
-        return Err(LinkStateError::InvalidOperation(
-            "Attempted to Register Actor Address when SA not established".to_owned(),
-        ));
-    };
-
-    // TODO: validate that DN *only* has CN, since this is what VS expects
-    // (or, teach VS about DNs)
-    let cn: String;
-
-    if let Some(ref peer_cert) = sa.peer_cert {
-        cn = peer_cert.common_name().unwrap_or_default();
-    } else {
-        cn = String::new();
-    }
-
-    debug!(target: VISA_MGMT, "{} CN is {cn}", asm.formatted_link_id(id));
-
-    Ok(cn)
 }
 
 /// This uses "RemoteDisconnect" as the reason passed to the visa service.

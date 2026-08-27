@@ -120,9 +120,6 @@ create_network
 create_ca_key_and_cert ca
 create_actor_key_and_cert ca vs.zpr
 #create_actor_key_and_cert ca node
-create_actor_key_and_cert ca adapter1
-create_actor_key_and_cert ca adapter2
-create_actor_key_and_cert ca adapter3
 
 # Temporary hack until our policy compiler is in-repo
 cp "$PREGEN/node.key" node.key
@@ -194,9 +191,8 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --capture-path "$ADAPTER1_CAP_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
-  --certificate-file adapter1.crt \
-  --private-key-file adapter1.key \
   --bootstrap-key actor1-rsa.key \
+  --name adapter1 \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --zpr-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
@@ -208,9 +204,8 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --capture-path "$ADAPTER2_CAP_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
-  --certificate-file adapter2.crt \
-  --private-key-file adapter2.key \
   --bootstrap-key actor2-rsa.key \
+  --name adapter2 \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
@@ -223,9 +218,8 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --capture-path "$ADAPTER3_CAP_SOCK" \
     --self-addr "$C_SUBSTRATE_ADDR":0 \
     --ca-file ca.crt \
-    --certificate-file adapter3.crt \
-    --private-key-file adapter3.key \
     --bootstrap-key actor3-rsa.key \
+    --name adapter3 \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C":12345 \
     --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
