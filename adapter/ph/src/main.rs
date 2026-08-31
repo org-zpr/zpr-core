@@ -500,11 +500,42 @@ fn main() -> ExitCode {
         let auth_private_key = zpr_utils::rsa_sign::load_rsa_key(auth_key_pem.as_bytes())
             .unwrap_or_else(|e| panic!("failed to parse auth_private_key {auth_key_path:?}: {e}"));
 
+        // Advertised substrate address resolution, in order:
+        //   1. advertised_substrate_addr config, if set.
+        //   2. self_addr, if its IP is specified (common LAN/single-host case).
+        // A wildcard self_addr with no configured advertised address is a startup
+        // error: a wildcard binds every local IP (including ones added later), of
+        // which the machine may have several, but we can advertise only one —
+        // there is no sound way to pick it automatically, so the operator must
+        // choose via advertised_substrate_addr.
+        let advertised_substrate = config
+            .advertised_substrate_addr
+            .or_else(|| {
+                if config.self_addr.ip().is_unspecified() {
+                    None
+                } else {
+                    Some(config.self_addr)
+                }
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "cannot determine an advertised substrate address: self_addr {} \
+                     has an unspecified IP; set advertised_substrate_addr in the \
+                     [node] config section",
+                    config.self_addr
+                )
+            });
+        info!(
+            target: STARTUP,
+            "advertising substrate address {advertised_substrate} to the visa service"
+        );
+
         vsconn = Some(libnode::vsconn::VSConn::new(
             topology_config.vs_queue_size,
             SocketAddr::new(VISA_SERVICE_ADDR, VISA_SERVICE_PORT),
             node_name,
             auth_private_key,
+            advertised_substrate,
         ));
     } else {
         vsconn = None;

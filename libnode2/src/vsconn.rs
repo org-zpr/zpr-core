@@ -130,6 +130,15 @@ pub struct VSConn {
     node_private_key: RsaKeyPair,
     life_tx: broadcast::Sender<VSConnLifecycleEvent>,
     connect_fn: ConnectFn,
+    /// The substrate address this node advertises to the VS (operator config;
+    /// the address peers dial, which may differ from the bind address behind
+    /// NAT). Sent as the `substrate_addr` param on both `connect` and `open`
+    /// (the VS requires it on both). Callers must resolve a concrete,
+    /// reachable address before constructing a [VSConn]: the node may have
+    /// several local IPs (a wildcard bind covers all of them, present and
+    /// future) but only one can be advertised, so the choice belongs to the
+    /// operator, not to a socket-derived guess.
+    substrate_addr: SocketAddr,
 }
 
 /// Handle for sending commands to a running [VSConn].
@@ -192,11 +201,16 @@ impl VSConn {
     ///
     /// `buffer_size` determines how many commands can be buffered to send to the run loop before
     /// [VSConnHandle] starts blocking.
+    ///
+    /// `substrate_addr` is the substrate address this node advertises to the VS — the
+    /// address peers dial (see the field docs). It must be concrete and reachable;
+    /// there is deliberately no auto-derivation fallback.
     pub fn new(
         buffer_size: usize,
         vs_addr: SocketAddr,
         node_cn: String,
         node_private_key: RsaKeyPair,
+        substrate_addr: SocketAddr,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
         let (life_tx, _) = broadcast::channel(LIFECYCLE_EVENT_BUFFER_SIZE);
@@ -208,6 +222,7 @@ impl VSConn {
             node_private_key,
             life_tx,
             connect_fn: Box::new(|addr| Box::pin(tokio::net::TcpStream::connect(addr))),
+            substrate_addr,
         }
     }
 
@@ -295,6 +310,11 @@ impl VSConn {
             }
         };
         sock.set_nodelay(true)?;
+
+        debug!(
+            target: VS_RPC,
+            "advertising substrate address {} to the VS", self.substrate_addr
+        );
 
         let connector = tls_connect();
         let tls = connector.connect(self.vs_addr.ip().into(), sock).await?;
@@ -609,6 +629,14 @@ impl VSConn {
         }
     }
 
+    /// The `substrate_addr` param the VS requires on both `connect` and `open`.
+    fn substrate_addr_param(&self) -> Param {
+        Param::new_str(
+            pname::SUBSTRATE_ADDR.into(),
+            self.substrate_addr.to_string(),
+        )
+    }
+
     async fn do_connect(
         &self,
         vs_service: &vsapi2::visa_service::Client,
@@ -619,6 +647,7 @@ impl VSConn {
             ctype: req.connect_type(),
             params: Some(vec![
                 Param::new_ip(pname::ZPR_ADDR.into(), req.zpr_addr),
+                self.substrate_addr_param(),
                 Param::new_x25519_pubkey(pname::A2A_DH_PUBKEY.into(), req.a2a_dh_pubkey),
             ]),
         };
@@ -712,7 +741,7 @@ impl VSConn {
         let req = VSConnectRequest {
             cn: self.node_cn.clone(),
             ctype: oreq.connect_type(),
-            params: None,
+            params: Some(vec![self.substrate_addr_param()]),
         };
 
         let mut vs_request = vs_service.open_request();
@@ -1151,6 +1180,7 @@ mod tests {
                 node_private_key,
                 life_tx,
                 connect_fn,
+                substrate_addr: "127.0.0.1:5000".parse().unwrap(),
             }
         }
     }

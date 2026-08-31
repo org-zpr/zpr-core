@@ -26,7 +26,7 @@ tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.20"
 x509-cert = "0.3.0"
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.25.0", features = ["vsapi", "policy"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.25.1", features = ["vsapi", "policy"] }
 zpr-ext = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-ext-v0.5.3" }
 zpr-utils = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-utils-v0.2.1" }
 
