@@ -74,6 +74,7 @@ rcu-mutex-arc = ["rcu/rcu-mutex-arc", "zpr/rcu-mutex-arc"]
 rcu-rwlock = ["rcu/rcu-rwlock", "zpr/rcu-rwlock"]
 complete = ["clap_complete"]
 capnp-ancillary = ["dep:capnp-futures", "capnp-futures/tokio-unix-fd-stream"]
+fuzzing = []
 
 [[bin]]
 name = "ph"

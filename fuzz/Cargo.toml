@@ -1,0 +1,19 @@
+[package]
+name = "ph-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ph = { path = "../adapter/ph", features = ["fuzzing"] }
+
+[profile.release]
+opt-level = 1
+lto = true
+
+[[bin]]
+name = "fuzz_substrate_ingress"
+path = "fuzz_targets/fuzz_substrate_ingress.rs"
+test = false
+doc = false
