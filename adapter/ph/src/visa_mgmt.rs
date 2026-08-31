@@ -7,6 +7,7 @@ use crate::visa_table;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use libnode::claims;
+use libnode::error::VSApiError;
 use std::net::IpAddr;
 use std::num::NonZero;
 use zpr::vsapi_types::{self, DisconnectNotice, DisconnectReason};
@@ -16,24 +17,26 @@ use zpr_utils::net_defs::IpAddress;
 pub async fn send_deferred_vs_connect(
     asm: &Arc<Assembly>,
     link_id: LinkId,
+    assigned_addr: IpAddress,
     connect_req: vsapi_types::ConnectRequest,
-) {
-    match asm
+) -> Result<(), VSApiError> {
+    let conn = asm
         .vsconn
         .as_ref()
         .unwrap()
         .authorize_connect(connect_req)
-        .await
-    {
-        Ok(cr) => {
-            info!(target: VISA_MGMT, "{}: visa service adapter registered with the visa service as {}",
-                asm.formatted_link_id(link_id), cr.zpr_addr);
-        }
-        Err(e) => {
-            warn!(target: VISA_MGMT, "{}: deferred visa service adapter connect failed: {e}",
-                asm.formatted_link_id(link_id));
-        }
+        .await?;
+
+    if IpAddress::new_from_std(&conn.zpr_addr) != assigned_addr {
+        return Err(VSApiError::CommandFailed(format!(
+            "visa service granted {} to the visa service adapter, which is already assigned {assigned_addr}",
+            conn.zpr_addr
+        )));
     }
+
+    info!(target: VISA_MGMT, "{}: visa service adapter registered with the visa service as {}",
+        asm.formatted_link_id(link_id), conn.zpr_addr);
+    Ok(())
 }
 
 pub fn authorize_connect(

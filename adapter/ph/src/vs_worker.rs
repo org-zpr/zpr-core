@@ -100,8 +100,17 @@ pub async fn launch(
                         // The route to the visa service runs through the VS adapter's own tunnel, so its
                         // connect request could not be sent at bootstrap. That tunnel is up now.
                         let deferred = asm.deferred_vs_connect.lock().unwrap().take();
-                        if let Some((vs_link_id, conn_req)) = deferred {
-                            visa_mgmt::send_deferred_vs_connect(&asm, vs_link_id, conn_req).await;
+                        if let Some((vs_link_id, assigned_addr, conn_req)) = deferred {
+                            if let Err(e) = visa_mgmt::send_deferred_vs_connect(
+                                &asm,
+                                vs_link_id,
+                                assigned_addr,
+                                conn_req,
+                            )
+                            .await
+                            {
+                                panic!("deferred visa service adapter connect failed: {e}");
+                            }
                         }
 
                         // Next time we connect, we have state.

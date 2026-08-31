@@ -905,7 +905,7 @@ impl LinkStateWrapper {
         }
 
         debug!(target: LINK_STATE, "deferring visa service authorize call, authorizing ourselves (requested_addr = {requested_addr})");
-        *asm.deferred_vs_connect.lock().unwrap() = Some((link_id, conn_req));
+        *asm.deferred_vs_connect.lock().unwrap() = Some((link_id, requested_addr, conn_req));
 
         // Need to send a grant here anyway to "turn on" the adapter (and outselves)
         // So pretend we are the visa service and handle our own authorization.

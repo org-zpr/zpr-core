@@ -65,7 +65,7 @@ pub struct Assembly {
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
     pub vs_auth_services: std::sync::RwLock<AuthServicesList>, // present only on nodes, may be empty, managed by visa service
-    pub deferred_vs_connect: Mutex<Option<(LinkId, ConnectRequest)>>, // present only on nodes, the VS adapter's connect request, held until the node has VSAPI access
+    pub deferred_vs_connect: Mutex<Option<(LinkId, IpAddress, ConnectRequest)>>, // present only on nodes, the VS adapter's connect request and self-granted address, held until the node has VSAPI access
 
     pub visa_table: std::sync::RwLock<visa_table::VisaTable>, // Only for nodes
 
