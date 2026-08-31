@@ -504,8 +504,10 @@ fn main() -> ExitCode {
         //   1. advertised_substrate_addr config, if set.
         //   2. self_addr, if its IP is specified (common LAN/single-host case).
         // A wildcard self_addr with no configured advertised address is a startup
-        // error: the VSAPI socket traverses the ZPR network, so its local IP is the
-        // node's ZPR/TUN address and cannot serve as a substrate fallback.
+        // error: a wildcard binds every local IP (including ones added later), of
+        // which the machine may have several, but we can advertise only one —
+        // there is no sound way to pick it automatically, so the operator must
+        // choose via advertised_substrate_addr.
         let advertised_substrate = config
             .advertised_substrate_addr
             .or_else(|| {

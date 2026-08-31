@@ -134,9 +134,10 @@ pub struct VSConn {
     /// the address peers dial, which may differ from the bind address behind
     /// NAT). Sent as the `substrate_addr` param on both `connect` and `open`
     /// (the VS requires it on both). Callers must resolve a concrete,
-    /// reachable address before constructing a [VSConn]: the VSAPI TCP socket
-    /// traverses the ZPR network, so its local IP is the node's ZPR/TUN
-    /// address and can never serve as a substrate fallback.
+    /// reachable address before constructing a [VSConn]: the node may have
+    /// several local IPs (a wildcard bind covers all of them, present and
+    /// future) but only one can be advertised, so the choice belongs to the
+    /// operator, not to a socket-derived guess.
     substrate_addr: SocketAddr,
 }
 

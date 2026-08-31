@@ -159,9 +159,10 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         auth_private_key: Option<PathBuf>,
 
-        /// Substrate address to advertise to the visa service (host:port; host may be
-        /// a hostname). Required when self_addr has an unspecified IP (e.g. 0.0.0.0),
-        /// since a wildcard address cannot be dialed by peers.
+        /// Substrate address to advertise to the visa service, as a literal
+        /// IP:port (IPv6 in square brackets, e.g. [2001:db8::1]:5000). Required
+        /// when self_addr has an unspecified IP (e.g. 0.0.0.0), since a wildcard
+        /// address cannot be dialed by peers.
         #[arg(long, value_name = "ADDR:PORT")]
         advertised_substrate_addr: Option<String>,
 

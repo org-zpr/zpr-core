@@ -640,7 +640,7 @@ pub struct NodeConfig {
 #[derive(Deserialize, Debug, Clone)]
 pub struct NodeConfigSection {
     /// The substrate address this node advertises to the visa service, as a
-    /// `"host:port"` string. Hostnames are resolved once at parse time.
+    /// literal `"IP:port"` string (IPv6 in square-bracket notation).
     pub advertised_substrate_addr: Option<String>,
 }
 
@@ -734,25 +734,19 @@ fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
     }
 }
 
-/// Resolve an `advertised_substrate_addr` config string (`"host:port"`, host may be a
-/// hostname or an IP) to a concrete [SocketAddr]. Resolution happens once, here at
-/// config-parse time. Unresolvable strings, unspecified IPs (e.g. `0.0.0.0`) and
-/// port 0 are rejected: the value is what peers dial, so it must be concrete.
+/// Parse an `advertised_substrate_addr` config string to a concrete [SocketAddr].
+/// The value must be a literal `IP:port` — IPv6 in square-bracket notation, e.g.
+/// `"[2001:db8::1]:5000"`. Hostnames are deliberately not accepted: substrate
+/// claims are always for a specific IP address and adapters dial nodes by IP, so
+/// the advertised value must be the concrete address itself. Unspecified IPs
+/// (e.g. `0.0.0.0`) and port 0 are rejected: the value is what peers dial.
 fn resolve_advertised_addr(addr_str: &str) -> Result<SocketAddr, ArgsError> {
-    use std::net::ToSocketAddrs;
-    let resolved = addr_str
-        .to_socket_addrs()
-        .map_err(|e| {
-            ArgsError::ParseError(format!(
-                "failed to resolve advertised_substrate_addr {addr_str:?}: {e}"
-            ))
-        })?
-        .next()
-        .ok_or_else(|| {
-            ArgsError::ParseError(format!(
-                "advertised_substrate_addr {addr_str:?} resolved to no addresses"
-            ))
-        })?;
+    let resolved: SocketAddr = addr_str.parse().map_err(|e| {
+        ArgsError::ParseError(format!(
+            "advertised_substrate_addr {addr_str:?} is not a literal IP:port \
+             (IPv6 in square brackets, e.g. \"[2001:db8::1]:5000\"): {e}"
+        ))
+    })?;
     if resolved.ip().is_unspecified() {
         return Err(ArgsError::ParseError(format!(
             "advertised_substrate_addr {addr_str:?} is an unspecified address; peers cannot dial it"
@@ -837,15 +831,27 @@ mod test {
             resolve_advertised_addr("203.0.113.7:5000").unwrap(),
             "203.0.113.7:5000".parse::<SocketAddr>().unwrap()
         );
-        // Hostname resolves (localhost is safe to assume in CI).
-        let resolved = resolve_advertised_addr("localhost:5000").unwrap();
-        assert_eq!(resolved.port(), 5000);
-        assert!(resolved.ip().is_loopback());
+        // V6 in square-bracket notation passes through.
+        assert_eq!(
+            resolve_advertised_addr("[2001:db8::7]:5000").unwrap(),
+            "[2001:db8::7]:5000".parse::<SocketAddr>().unwrap()
+        );
+        // V6 with a scope-free full form.
+        assert_eq!(
+            resolve_advertised_addr("[2001:db8:0:0:0:0:0:9]:6000").unwrap(),
+            "[2001:db8::9]:6000".parse::<SocketAddr>().unwrap()
+        );
+        // V6 without brackets rejected.
+        assert!(resolve_advertised_addr("2001:db8::7:5000").is_err());
+        // Hostnames rejected: the claim is always for a specific IP address.
+        assert!(resolve_advertised_addr("localhost:5000").is_err());
+        assert!(resolve_advertised_addr("node1.example.com:5000").is_err());
         // Unspecified IP rejected.
         assert!(resolve_advertised_addr("0.0.0.0:5000").is_err());
         assert!(resolve_advertised_addr("[::]:5000").is_err());
-        // Port 0 rejected.
+        // Port 0 rejected (V4 and V6).
         assert!(resolve_advertised_addr("203.0.113.7:0").is_err());
+        assert!(resolve_advertised_addr("[2001:db8::7]:0").is_err());
         // Garbage rejected.
         assert!(resolve_advertised_addr("not an address").is_err());
         assert!(resolve_advertised_addr("203.0.113.7").is_err());
