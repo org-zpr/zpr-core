@@ -109,7 +109,10 @@ pub async fn launch(
                             )
                             .await
                             {
-                                panic!("deferred visa service adapter connect failed: {e}");
+                                panic!(
+                                    "{}: deferred visa service adapter connect failed: {e}",
+                                    asm.formatted_link_id(vs_link_id)
+                                );
                             }
                         }
 
