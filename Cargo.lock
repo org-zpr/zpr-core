@@ -2792,7 +2792,6 @@ name = "ph-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "once_cell",
  "ph",
 ]
 
