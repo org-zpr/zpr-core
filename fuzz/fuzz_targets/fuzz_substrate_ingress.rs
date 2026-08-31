@@ -17,3 +17,4 @@ fuzz_target!(|data: &[u8]| {
     // even with arbitrary untrusted packet data.
     worker.substrate_ingress(&peer_addr, &iface_addr, pkt);
 });
+
