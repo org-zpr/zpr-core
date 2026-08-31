@@ -3,40 +3,31 @@
 
 use crate::packet::Packet;
 use crate::prelude::*;
-use crate::assembly::Assembly;
+use crate::assembly::{test::create_assembly, test::TestAssemblyBuilder};
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
+use crate::batch_io;
 use std::sync::Arc;
-use zpr_utils::net_defs::ScopedIpAddr;
+use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
 /// Create a minimal FastpathWorker for fuzzing.
-/// 
-/// NOTE: This is a stub that needs Assembly::new_test() to be implemented
-/// in the assembly module to create a test-safe instance with all required fields.
 pub fn make_test_worker() -> FastpathWorker {
-    // Placeholder: In a real implementation, Assembly::new_test() would 
-    // return a minimal Assembly configured for fuzzing (with test doubles
-    // for peer_table, mgmt_dispatch_factory, etc.).
-    //
-    // For now, this is intentionally incomplete and will fail to compile
-    // until Assembly::new_test() is implemented.
+    // Use TestAssemblyBuilder to create a minimal Assembly with all required fields.
+    let builder = TestAssemblyBuilder::new();
+    let asm = Arc::new(create_assembly(builder));
     
-    static BATCH_IO: crate::batch_io::BatchIoEngine = crate::batch_io::BatchIoEngine::new_test();
+    // Get a suitable batch I/O engine for this platform
+    let batch_io_engine = batch_io::auto_select_engine();
+    
     let config = FastpathWorkerConfig {
-        batch_io_engine: &BATCH_IO,
+        batch_io_engine,
         buffer_count: 8,
         batch_size: 8,
     };
     
-    let asm = Arc::new(Assembly::new_test());
     FastpathWorker::new(config, 0, asm)
 }
 
 /// Build packet ingress parameters from fuzz input bytes.
-///
-/// Splits the input into:
-/// - First 16 bytes (or less): peer socket address (deterministic)
-/// - Next 16 bytes (or less): interface address (default)
-/// - Remaining bytes: packet payload
 pub fn build_from_bytes(data: &[u8]) -> (SubstrateAddr, ScopedIpAddr, Packet) {
     use std::net::{SocketAddrV6, Ipv6Addr};
     
@@ -55,7 +46,8 @@ pub fn build_from_bytes(data: &[u8]) -> (SubstrateAddr, ScopedIpAddr, Packet) {
     let ip = Ipv6Addr::from(octets);
     let peer_addr = SubstrateAddr::from(SocketAddrV6::new(ip, port, 0, 0));
     
-    let iface = ScopedIpAddr::default();
+    // Create ScopedIpAddr::V6 — use unspecified address and zero scope for fuzz testing
+    let iface = ScopedIpAddr::V6(ScopedIpv6Addr::new(Ipv6Addr::UNSPECIFIED, 0));
     
     // Build packet from remaining bytes
     const MAX_PKT_SIZE: usize = 2048;

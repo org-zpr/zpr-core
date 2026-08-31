@@ -63,6 +63,10 @@ mod zprtun;
 #[cfg(test)]
 mod km_testdata;
 
+/// Re-export test modules for fuzzing when feature is enabled
+#[cfg(feature = "fuzzing")]
+pub use assembly::test;
+
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_harness;
 

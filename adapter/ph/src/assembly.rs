@@ -405,7 +405,7 @@ impl Assembly {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "fuzzing"))]
 pub mod test {
 
     use super::*;
