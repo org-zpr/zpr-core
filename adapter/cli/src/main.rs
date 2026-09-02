@@ -3,6 +3,7 @@
 //! when a command is multiple words, this program assumes the spaces are replaced
 //! with a '-' on the command line
 mod main_args;
+mod oidc;
 mod rusty_helper;
 
 use crate::main_args::{CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkCommands};
@@ -176,6 +177,27 @@ async fn process_command(
         return Ok(true);
     }
 
+    // The standalone OIDC login test harness talks to the IdP only; it does
+    // not need the packet handler's management socket.
+    if let Commands::OidcLogin {
+        issuer,
+        client_id,
+        client_secret,
+        scopes,
+        nonce,
+        no_browser,
+    } = command
+    {
+        let idp = oidc::OidcIdpInfo {
+            issuer,
+            client_id,
+            client_secret,
+            scopes,
+            allow_offline_access: false,
+        };
+        return oidc_login_task(idp, nonce, no_browser).await;
+    }
+
     let sock = tokio::net::UnixStream::connect(socket).await?;
     let (reader, writer) = sock.into_split();
 
@@ -251,12 +273,81 @@ async fn process_command(
                 },
                 Commands::Logging { logs } => change_logging_task(service, logs).await?,
                 Commands::Addr => get_node_addr_task(service).await?,
+                Commands::Connect { id, no_browser } => {
+                    connect_task(service, id, no_browser).await?
+                }
+                Commands::AuthAgent { id } => auth_agent_task(service, id).await?,
+                Commands::OidcLogin { .. } => unreachable!("handled before connecting"),
                 Commands::Quit => return Ok(true), // Will never reach here
             }
 
             Ok(false)
         })
         .await
+}
+
+/// Run the standalone OIDC login flow (hidden `oidc-login` debug command)
+/// and print the resulting id_token to stdout. On failure, exits with the
+/// contract exit code for the failure class.
+async fn oidc_login_task(
+    idp: oidc::OidcIdpInfo,
+    nonce: String,
+    no_browser: bool,
+) -> Result<bool, CliError> {
+    match oidc::login(&idp, &nonce, !no_browser, Duration::from_secs(300)).await {
+        Ok(id_token) => {
+            // The one deliberate place the token is emitted: stdout, for the
+            // test harness. Progress/log output never carries it.
+            println!("{id_token}");
+            Ok(false)
+        }
+        Err(err) => {
+            eprintln!("oidc-login failed: {err}");
+            std::process::exit(oidc::exit_code_for_oidc_error(&err));
+        }
+    }
+}
+
+/// `connect`: start a link and hold the RPC connection open for the duration
+/// of `startLink`, printing progress. Exits non-zero per the failure-class
+/// contract (2 declined, 3 timeout, 4 IdP unreachable, 5 VS rejected token,
+/// 6 policy denied, 7 device blob rejected).
+///
+/// Interactive OIDC authentication during connect requires the packet
+/// handler's auth-agent interface (plan item D2, zpr-visaservice#317); until
+/// that lands the packet handler authenticates with its configured
+/// bootstrap credentials and `--no-browser` has nothing extra to print.
+async fn connect_task(service: svc::Client, id: u32, _no_browser: bool) -> Result<(), CliError> {
+    println!("Connecting link {id}…");
+    let mut request = service.start_link_request();
+    request.get().set_id(id);
+
+    // Keep this RPC (and thus the connection) open until startLink resolves.
+    let response = request.send().promise.await?;
+    let results = response.get()?;
+    match results.get_result()?.which()? {
+        cli::success_or_error::Which::Success(_) => {
+            println!("Link {id} up");
+            Ok(())
+        }
+        cli::success_or_error::Which::Error(e) => {
+            let msg = e?.get_txt()?.to_string()?;
+            eprintln!("connect failed: {msg}");
+            std::process::exit(oidc::exit_code_for_link_error(&msg));
+        }
+    }
+}
+
+/// `auth-agent`: register as the authentication agent for a link and serve
+/// interactive OIDC requests until SIGINT. The packet-handler side of the
+/// agent registration (plan item D2, Contract 6) has not landed yet, so this
+/// currently reports that and exits non-zero.
+async fn auth_agent_task(_service: svc::Client, id: u32) -> Result<(), CliError> {
+    eprintln!(
+        "auth-agent for link {id}: the packet handler does not expose the \
+         auth-agent interface yet (pending plan item D2, org-zpr/zpr-visaservice#317)"
+    );
+    std::process::exit(1);
 }
 
 // TODO combine no arg tasks into one func w/ closure

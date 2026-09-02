@@ -73,6 +73,48 @@ pub enum Commands {
     Quit,
     /// Gets the address of an adapter's node
     Addr,
+    /// Connect (start) a link, performing interactive authentication when the
+    /// packet handler requests it
+    #[command(arg_required_else_help = true)]
+    Connect {
+        #[arg(required = true)]
+        /// Link id to connect
+        id: u32,
+        /// Print authentication URLs instead of opening a browser
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// Register as the authentication agent for a link and run until
+    /// interrupted
+    #[command(arg_required_else_help = true)]
+    AuthAgent {
+        #[arg(required = true)]
+        /// Link id to serve as authentication agent for
+        id: u32,
+    },
+    /// Debug: run the OIDC relying-party login flow standalone and print the
+    /// resulting id_token to stdout
+    #[command(hide = true, arg_required_else_help = true)]
+    OidcLogin {
+        /// OIDC issuer URL
+        #[arg(long)]
+        issuer: String,
+        /// OAuth client id
+        #[arg(long)]
+        client_id: String,
+        /// OAuth client secret (confidential clients only)
+        #[arg(long)]
+        client_secret: Option<String>,
+        /// Scopes to request (comma-separated)
+        #[arg(long, value_delimiter = ',', default_value = "openid")]
+        scopes: Vec<String>,
+        /// Nonce to bind into the id_token
+        #[arg(long)]
+        nonce: String,
+        /// Print the authorization URL instead of opening a browser
+        #[arg(long)]
+        no_browser: bool,
+    },
 }
 
 #[derive(Debug, Args)]
