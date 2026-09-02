@@ -2,11 +2,11 @@
 
 // Core modules
 pub mod assembly;
+pub mod batch_io;
+pub mod config;
 pub mod fastpath;
 pub mod packet;
 pub mod queues;
-pub mod batch_io;
-pub mod config;
 
 // Private modules
 mod adapter_manager_worker;
@@ -72,5 +72,3 @@ pub mod fuzz_harness;
 
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_harness_light;
-
-

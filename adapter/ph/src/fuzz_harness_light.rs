@@ -4,7 +4,7 @@
 
 use crate::packet::Packet;
 use crate::prelude::*;
-use std::net::{SocketAddrV6, Ipv6Addr};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
 /// Build packet ingress parameters from fuzz input bytes.
