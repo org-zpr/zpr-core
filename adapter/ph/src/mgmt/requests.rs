@@ -58,7 +58,7 @@ pub fn send_hello_request(
     let mut pkt = core::new_heap_packet();
     pkt.alloc_zeroed_header::<zdp::ZdpHelloRequestHeader>();
     super::helpers::put_window_size_tlv(asm, link_id, &mut pkt);
-    tlv::TlvEncoding::new_a2a_dh_pubkey(a2a_dh_pubkey).put(&mut pkt);
+    tlv::TlvEncoding::new_a2a_dh_pubkey(a2a_dh_pubkey).put(&mut pkt); //add public key to the packet
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, pkt)
 }
 
@@ -311,10 +311,12 @@ pub fn send_bind_actor_address_success_response<'a>(
 
     Tcst::Ip5Tuple.write_to_buf(&mut rsp_pkt).unwrap();
     tc.serialize(&mut rsp_pkt);
+
+    // Write the peer's public key, if present, to end of the packet.
     match peer_a2a_dh_pubkey {
         Some(key) => {
-            rsp_pkt.put_u16(key.as_bytes().len() as u16);
-            rsp_pkt.put_slice(key.as_bytes());
+            rsp_pkt.put_u16(key.as_bytes().len() as u16); // first write the length of the key as a u16
+            rsp_pkt.put_slice(key.as_bytes()); // then write the key itself as a slice of bytes
         }
         None => rsp_pkt.put_u16(0),
     }
@@ -451,10 +453,12 @@ pub fn send_bind_egress_stream_request<'a>(
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
     bind_req_hdr.tcst = Tcst::Ip5Tuple;
     tc.serialize(&mut req);
+
+    // Write the peer's public key, if present, to end of the packet.
     match peer_a2a_dh_pubkey {
         Some(key) => {
-            req.put_u16(key.as_bytes().len() as u16);
-            req.put_slice(key.as_bytes());
+            req.put_u16(key.as_bytes().len() as u16); // first write the length of the key as a u16
+            req.put_slice(key.as_bytes()); // then write the key itself as a slice of bytes
         }
         None => req.put_u16(0),
     }

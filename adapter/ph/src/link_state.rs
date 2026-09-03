@@ -634,6 +634,7 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
+            // Grab public key from keypair to send in hello request
             let pubkey = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
             mgmt::requests::send_hello_request(asm, self.id, pubkey).enqueue();
             self.set_timeout(asm, &mut locked_fsm, config::LINK_HELLO_TIMEOUT);
@@ -828,7 +829,7 @@ impl LinkStateWrapper {
         blob: String,
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
-        let a2a_dh_public_key = asm
+        let a2a_dh_public_key = asm //grab public key from its peer state
             .peer_table
             .inspect(link_id, |ps| *ps.a2a_dh_pubkey.get())
             .flatten();
@@ -895,6 +896,7 @@ impl LinkStateWrapper {
             .is_some_and(|vs_id| vs_id.get() == link_id);
 
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
+        // The vs is also sent the public key so it can distribute to peer adapter
         let conn_req =
             visa_mgmt::build_connect_request(asm, requested_addr, &d_blob, a2a_dh_public_key)?;
         drop(locked_fsm);

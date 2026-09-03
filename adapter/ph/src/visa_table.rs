@@ -135,6 +135,8 @@ impl Visa {
         tc::Ip5TupleTc::new(self.visa.dock_pep.as_ref().unwrap().get_five_tuple().into())
     }
 
+    /// Get the ingress A2A DH public key from the visa, if present.
+    /// Keys are 32 bytes long, so we attempt to convert the key slice to a 32-byte array
     pub fn get_ingress_a2a_dh_pubkey(&self) -> Option<x25519_dalek::PublicKey> {
         let key = &self.visa.dock_pep.as_ref()?.session_key.ingress_key;
         <[u8; 32]>::try_from(key.as_slice())
@@ -142,6 +144,8 @@ impl Visa {
             .map(x25519_dalek::PublicKey::from)
     }
 
+    /// Get the egress A2A DH public key from the visa, if present
+    /// Keys are 32 bytes long, so we attempt to convert the key slice to a 32-byte array
     pub fn get_egress_a2a_dh_pubkey(&self) -> Option<x25519_dalek::PublicKey> {
         let key = &self.visa.dock_pep.as_ref()?.session_key.egress_key;
         <[u8; 32]>::try_from(key.as_slice())

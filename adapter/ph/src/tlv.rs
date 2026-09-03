@@ -224,6 +224,7 @@ fn put_ipv4addr(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: &Ipv4Addr
     buf.put_slice(&value.octets());
 }
 
+/// Serialize the x25519 public key into the buffer
 fn put_x25519_pubkey(
     buf: &mut dyn bytes::BufMut,
     tlv_type: TlvType,
@@ -360,6 +361,7 @@ pub fn parse_from_buf(
                 }
             }
             DataType::A2A_DH_PUBKEY => {
+                // Parse an x25519 public key. It should be 32 bytes.
                 if tlv_length != X25519_KEY_LEN {
                     return Err(TlvError::BadStructure);
                 }
@@ -369,6 +371,7 @@ pub fn parse_from_buf(
                     .entry(tlv_type)
                     .or_insert_with(Vec::new)
                     .push(TlvValue::X25519PubKey(x25519_dalek::PublicKey::from(
+                        // Deserialize the public key from bytes
                         key_bytes,
                     )));
             }
