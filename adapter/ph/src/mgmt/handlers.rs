@@ -717,6 +717,7 @@ pub async fn handle_bind_egress_stream_request(
 
     let key_len = pkt.get_u16() as usize;
 
+    // deserialize the peer's A2A DH public key if present
     let peer_a2a_dh_pubkey = if key_len == 0 {
         None
     } else {
@@ -797,6 +798,7 @@ pub async fn handle_bind_actor_address_response(
 
             let key_len = pkt.get_u16() as usize;
 
+            // deserialize the peer's A2A DH public key if present
             let peer_a2a_dh_pubkey = if key_len == 0 {
                 None
             } else {

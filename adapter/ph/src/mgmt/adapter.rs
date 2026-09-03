@@ -45,6 +45,8 @@ pub fn bind_egress_stream(
         "bind_egress_stream(dock_link_id={}, txn_id={txn_id}, tc={tc}, peer_a2a_dh_pubkey={peer_a2a_dh_pubkey:?})",
         asm.formatted_link_id(dock_link_id.get()));
 
+    // Create the A2A shared secret with peer key (if present) via diffie-hellman
+    // If not present, warns rather than rejecting
     let a2a_shared_secret = match &peer_a2a_dh_pubkey {
         Some(pubkey) => Some(asm.a2a_dh_keypair.diffie_hellman(pubkey)),
         None => {
@@ -137,6 +139,8 @@ pub fn install_tether(
     // Bind succeeded; add to ELT.
     debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id} (peer_a2a_dh_pubkey={peer_a2a_dh_pubkey:?})");
 
+    // Create the A2A shared secret with peer key (if present) via diffie-hellman
+    // If not present, warns rather than rejecting
     let a2a_shared_secret = match &peer_a2a_dh_pubkey {
         Some(pubkey) => Some(asm.a2a_dh_keypair.diffie_hellman(pubkey)),
         None => {

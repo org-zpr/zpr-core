@@ -29,6 +29,7 @@ pub struct EltPep {
 }
 
 impl EltPep {
+    /// Constructor for an EltPep. The a2a_micv_key is derived from the a2a_shared_secret, if present.
     pub fn new(
         compression_mode: CompressionMode,
         tether_id: StreamId,
@@ -204,6 +205,7 @@ pub struct DltPep {
 }
 
 impl DltPep {
+    /// Constructor for a DltPep. The a2a_micv_key is derived from the a2a_shared_secret, if present.
     pub fn new(tc: tc::Ip5TupleTc, a2a_shared_secret: Option<x25519_dalek::SharedSecret>) -> Self {
         let a2a_micv_key = a2a_shared_secret
             .as_ref()
