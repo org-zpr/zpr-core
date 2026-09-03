@@ -121,6 +121,25 @@ pub struct CommonArgs {
     /// Current supported implementations: noise (default), null
     #[arg(long, default_value = "noise")]
     pub km_impl: String,
+
+    /// Security Testing: corrupt forwarded ICMP echo packets so that a
+    /// correct receiver must reject them.
+    #[cfg(feature = "enable-security-testing")]
+    #[arg(long)]
+    pub security_testing_mangle_forwarded_pings: bool,
+
+    /// Security Testing: fall back to old-style unkeyed A2A MICVs. Adapters
+    /// write and verify with the unkeyed hash; a malicious node forges with it.
+    #[cfg(feature = "enable-security-testing")]
+    #[arg(long)]
+    pub security_testing_unkeyed_a2a_micv: bool,
+
+    /// Security Testing: whether a mangling node recomputes the A2A MICV
+    /// (true, the default) or reuses the original (false). Reusing it proves the
+    /// MICV covers the payload: a mangled ping is then rejected even when unkeyed.
+    #[cfg(feature = "enable-security-testing")]
+    #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+    pub security_testing_recompute_micvs: bool,
 }
 
 #[derive(Subcommand, Debug)]

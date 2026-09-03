@@ -139,6 +139,32 @@ fn main() -> ExitCode {
 
     info!(target: STARTUP, "starting with PID {}", process::id());
 
+    #[cfg(feature = "enable-security-testing")]
+    {
+        error!(
+            target: STARTUP,
+            "\n\
+             ################################################################\n\
+             ##                                                            ##\n\
+             ##   W A R N I N G  SECURITY TESTING BUILD                    ##\n\
+             ##                                                            ##\n\
+             ##   Built with the `enable-security-testing` feature, which  ##\n\
+             ##   compiles in code that DELIBERATELY BREAKS the security   ##\n\
+             ##   guarantees of ZPR in order to test them.                 ##\n\
+             ##                                                            ##\n\
+             ##   NEVER RUN THIS BINARY IN A PRODUCTION ENVIRONMENT!       ##\n\
+             ##                                                            ##\n\
+             ################################################################"
+        );
+        error!(
+            target: STARTUP,
+            "security testing: mangle forwarded pings = {}, unkeyed a2a micv = {}, recompute micvs = {}",
+            config.security_testing_mangle_forwarded_pings,
+            config.security_testing_unkeyed_a2a_micv,
+            config.security_testing_recompute_micvs
+        );
+    }
+
     //
     // read key material
     //
@@ -686,6 +712,12 @@ fn main() -> ExitCode {
         batch_io_engine,
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.fastpath_batch_size,
+        #[cfg(feature = "enable-security-testing")]
+        mangle_forwarded_pings: asm.config.get().security_testing_mangle_forwarded_pings,
+        #[cfg(feature = "enable-security-testing")]
+        unkeyed_a2a_micv: asm.config.get().security_testing_unkeyed_a2a_micv,
+        #[cfg(feature = "enable-security-testing")]
+        recompute_micvs: asm.config.get().security_testing_recompute_micvs,
     };
 
     for (worker_index, socket, tun_dev, requeue_outq) in izip!(

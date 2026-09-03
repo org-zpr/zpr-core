@@ -47,6 +47,18 @@ pub struct FastpathWorkerConfig {
     pub batch_io_engine: &'static BatchIoEngine,
     pub buffer_count: usize,
     pub batch_size: usize,
+
+    /// Security Testing: node corrupts forwarded ICMP echo requests.
+    #[cfg(feature = "enable-security-testing")]
+    pub mangle_forwarded_pings: bool,
+
+    /// Security Testing: force old-style unkeyed A2A MICVs.
+    #[cfg(feature = "enable-security-testing")]
+    pub unkeyed_a2a_micv: bool,
+
+    /// Security Testing: recompute the A2A MICV after mangling (vs. reuse it).
+    #[cfg(feature = "enable-security-testing")]
+    pub recompute_micvs: bool,
 }
 
 pub struct QueuedEgressPacket {
@@ -315,6 +327,8 @@ impl FastpathWorker {
                 let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
                 let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
                 let a2a_micv = match pep.a2a_micv_key {
+                    #[cfg(feature = "enable-security-testing")]
+                    Some(_) if self.config.unkeyed_a2a_micv => blake3::hash(pkt.body()),
                     Some(micv_key) => blake3::keyed_hash(&micv_key, pkt.body()),
                     None => blake3::hash(pkt.body()),
                 };
@@ -379,6 +393,22 @@ impl FastpathWorker {
 
                 egress_link_id = pep.next_hop.0;
                 egress_stream_id = pep.next_hop.1;
+
+                // Security Testing: if this is an adapter-to-adapter transit
+                // stream, corrupt forwarded ICMP echo requests to prove the A2A
+                // MICV catches a malicious node.
+                #[cfg(feature = "enable-security-testing")]
+                if self.config.mangle_forwarded_pings
+                    && matches!(
+                        ingress_peer_state.peer_type(),
+                        crate::peer_table::PeerType::Adapter
+                    )
+                    && self.asm.peer_table.get(egress_link_id).is_some_and(|p| {
+                        matches!(p.peer_type(), crate::peer_table::PeerType::Adapter)
+                    })
+                {
+                    self.security_testing_mangle_ping(&mut pkt, pep.visa_id);
+                }
             }
         }
 
@@ -395,6 +425,117 @@ impl FastpathWorker {
 
             self.substrate_egress(pkt);
         }
+    }
+
+    /// Security Testing: acting as a malicious node, corrupt the payload of
+    /// a forwarded ICMP echo request and recompute its A2A MICV using a key we
+    /// (the node) are not supposed to possess. If the receiving adapter enforces
+    /// a real keyed MICV, our forged key will not match and it will drop the
+    /// packet; with an unkeyed MICV the forgery succeeds.
+    #[cfg(feature = "enable-security-testing")]
+    fn security_testing_mangle_ping(&self, pkt: &mut Packet, visa_id: VisaId) {
+        const PWNED: &[u8] = b"YOU HAVE BEEN PWNED";
+
+        let a2a_hdr_len = std::mem::size_of::<zdp::ZdpA2aHeader>();
+        let mac_len = zdp::ZDP_A2A_MAC_SIZE;
+
+        // Pull the five-tuple, compression mode, and the egress adapter's A2A
+        // public key out of the visa. (Either adapter's key would do.)
+        let (five_tuple, compression_mode, peer_a2a_pubkey) = {
+            let visa_table = self.asm.visa_table.read().unwrap();
+            let Some(visa) = visa_table.table.get(&visa_id) else {
+                return;
+            };
+            let tc = visa.get_tc();
+            (
+                *tc.five_tuple(),
+                tc.compression_mode(),
+                visa.get_egress_a2a_dh_pubkey(),
+            )
+        };
+
+        // We only handle ICMP echo requests (IPv4 or IPv6).
+        let is_v4_icmp = five_tuple.l3_type == L3Type::Ipv4
+            && five_tuple.l4_protocol == net_defs::ip_number::ICMP;
+        let is_v6_icmp = five_tuple.l3_type == L3Type::Ipv6
+            && five_tuple.l4_protocol == net_defs::ip_number::IPV6_ICMP;
+        if !is_v4_icmp && !is_v6_icmp {
+            return;
+        }
+
+        let body_len = pkt.body().len();
+        if body_len < a2a_hdr_len + mac_len {
+            return;
+        }
+        let compressed = &pkt.body()[a2a_hdr_len..body_len - mac_len];
+
+        // Expand a throwaway copy so we can (a) confirm it's an echo request and
+        // (b) compute the MICV over the same bytes the receiver will.
+        let mut temp = Packet::new(
+            Box::new([0u8; config::PACKET_BUFFER_SIZE]) as PacketBuffer,
+            config::DEFAULT_MESSAGE_HEADROOM,
+        );
+        temp.put(compressed);
+        compress::expand(compression_mode, &five_tuple, &mut temp);
+
+        // Locate the ICMP header in the expanded packet and pick the echo-request
+        // type for this family. (IPv4 header length is variable; the IPv6 header
+        // is a fixed 40 bytes, and our ping carries no extension headers.)
+        let (icmp_off, echo_type) = if is_v4_icmp {
+            (((temp.body()[0] & 0x0f) as usize) * 4, 8u8)
+        } else {
+            (40, 128u8)
+        };
+        let echo_data_off = icmp_off + 8; // ICMP echo header: type/code/csum/id/seq
+        if temp.body().len() < echo_data_off {
+            return;
+        }
+        // Echo Request is type 8 (v4) / 128 (v6), code 0.
+        if temp.body()[icmp_off] != echo_type || temp.body()[icmp_off + 1] != 0 {
+            return;
+        }
+        let echo_data_len = temp.body().len() - echo_data_off;
+        if echo_data_len < PWNED.len() {
+            return; // not enough room; leave the packet alone
+        }
+
+        // Overwrite the echo payload in the real packet -- this is the mangle.
+        let mac_start = body_len - mac_len;
+        let echo_start = mac_start - echo_data_len;
+        pkt.body_mut()[echo_start..echo_start + PWNED.len()].copy_from_slice(PWNED);
+
+        if !self.config.recompute_micvs {
+            // Leave the original MICV in place. A receiver whose MICV actually
+            // covers the payload will reject this regardless of keying -- which
+            // is what proves the MICV covers the payload and not just a prefix.
+            warn!(
+                target: DATAPATH,
+                "SECURITY TESTING: mangled forwarded ping (visa {visa_id}, kept original MICV)"
+            );
+            return;
+        }
+
+        // Recompute the MICV over the mangled packet and forge the trailer.
+        // With --security-testing-unkeyed-a2a-micv, forge with the unkeyed hash
+        // (which needs no secret and will pass an unkeyed verifier).
+        temp.body_mut()[echo_data_off..echo_data_off + PWNED.len()].copy_from_slice(PWNED);
+        let keyed = peer_a2a_pubkey.is_some() && !self.config.unkeyed_a2a_micv;
+        let forged_micv = if keyed {
+            let pubkey = peer_a2a_pubkey.unwrap();
+            // DH between our node key and the adapter's public key, which
+            // yields the WRONG shared secret.
+            let shared = self.asm.a2a_dh_keypair.diffie_hellman(&pubkey);
+            let micv_key = blake3::derive_key(zdp::ZDP_A2A_MICV_KEY_CONTEXT, shared.as_bytes());
+            blake3::keyed_hash(&micv_key, temp.body())
+        } else {
+            blake3::hash(temp.body())
+        };
+        pkt.body_mut()[mac_start..].copy_from_slice(&forged_micv.as_bytes()[..mac_len]);
+
+        warn!(
+            target: DATAPATH,
+            "SECURITY TESTING: mangled forwarded ping (visa {visa_id}, recomputed MICV, keyed={keyed})"
+        );
     }
 
     /// Send a compressed actor packet to the actor.
@@ -435,6 +576,8 @@ impl FastpathWorker {
         // check A2A MAC
         // TODO: use actual A2A SAID
         let a2a_micv = match pep.a2a_micv_key {
+            #[cfg(feature = "enable-security-testing")]
+            Some(_) if self.config.unkeyed_a2a_micv => blake3::hash(pkt.body()),
             Some(micv_key) => blake3::keyed_hash(&micv_key, pkt.body()),
             None => blake3::hash(pkt.body()),
         };

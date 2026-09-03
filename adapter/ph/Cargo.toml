@@ -67,6 +67,7 @@ tokio = { workspace = true, features = ["test-util"] }
 [features]
 default = ["io-uring", "rcu-crossbeam-epoch"]
 ci = []
+enable-security-testing = []
 rcu-aarc = ["rcu/rcu-aarc", "zpr/rcu-aarc"]
 rcu-arc-swap = ["rcu/rcu-arc-swap", "zpr/rcu-arc-swap"]
 rcu-crossbeam-epoch = ["rcu/rcu-crossbeam-epoch", "zpr/rcu-crossbeam-epoch"]

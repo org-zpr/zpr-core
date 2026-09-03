@@ -180,6 +180,18 @@ pub struct Config {
 
     /// Type of key manager implementation
     pub km_impl: KmId,
+
+    /// Security testing for A2A Pubkeys
+    #[cfg(feature = "enable-security-testing")]
+    pub security_testing_mangle_forwarded_pings: bool,
+
+    /// Security testing: force old-style unkeyed A2A MICVs.
+    #[cfg(feature = "enable-security-testing")]
+    pub security_testing_unkeyed_a2a_micv: bool,
+
+    /// Security testing: recompute the A2A MICV after mangling (vs. reuse it).
+    #[cfg(feature = "enable-security-testing")]
+    pub security_testing_recompute_micvs: bool,
 }
 
 impl Config {
@@ -583,6 +595,14 @@ impl Config {
             }
         };
 
+        #[cfg(feature = "enable-security-testing")]
+        {
+            self.security_testing_mangle_forwarded_pings =
+                common.security_testing_mangle_forwarded_pings;
+            self.security_testing_unkeyed_a2a_micv = common.security_testing_unkeyed_a2a_micv;
+            self.security_testing_recompute_micvs = common.security_testing_recompute_micvs;
+        }
+
         Ok(())
     }
 }
@@ -610,6 +630,12 @@ impl Default for Config {
             bas_key_path: None,
             batch_io_engine: batch_io::AUTO_ENGINE_NAME.to_owned(),
             km_impl: KM_ID_NOISE,
+            #[cfg(feature = "enable-security-testing")]
+            security_testing_mangle_forwarded_pings: false,
+            #[cfg(feature = "enable-security-testing")]
+            security_testing_unkeyed_a2a_micv: false,
+            #[cfg(feature = "enable-security-testing")]
+            security_testing_recompute_micvs: true,
         }
     }
 }
