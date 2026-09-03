@@ -448,7 +448,7 @@ fn requested_visa_granted(
                 return requested_visa_denied(asm, ingress_link_id, txn_id);
             };
             tc = Some(visa.get_tc());
-            peer_a2a_dh_pubkey = visa.get_ingress_a2a_dh_pubkey(); // Egress adapter needs egress adapter's pubkey for DH
+            peer_a2a_dh_pubkey = visa.get_ingress_a2a_dh_pubkey(); // Egress adapter needs ingress adapter's pubkey for DH
         }
 
         PeerType::Dock | PeerType::Unknown => {
