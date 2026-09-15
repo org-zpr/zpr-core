@@ -69,6 +69,3 @@ pub use assembly::test;
 
 #[cfg(feature = "fuzzing")]
 pub mod fuzz_harness;
-
-#[cfg(feature = "fuzzing")]
-pub mod fuzz_harness_light;

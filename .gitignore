@@ -6,3 +6,4 @@ integration-test/valkey-server
 target/
 completions/
 *.pcap
+fuzz/artifacts/
