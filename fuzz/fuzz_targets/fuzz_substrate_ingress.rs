@@ -19,10 +19,24 @@ fuzz_target!(|data: &[u8]| {
             *opt = Some(fuzz_harness::make_test_worker());
         }
         if let Some(worker) = opt.as_mut() {
-            // Build packet ingress parameters from fuzz input
-            let (peer_addr, iface_addr, pkt) = fuzz_harness::build_from_bytes(data);
-            // Reuse the worker for substrate_ingress calls
-            worker.substrate_ingress(&peer_addr, &iface_addr, pkt);
+            // Extract parameters from fuzz input
+            let (peer_addr, iface_addr) = fuzz_harness::build_packet_params(data);
+
+            // Get a fresh packet buffer from the worker's pool
+            let mut pkts = Vec::with_capacity(1);
+            let n = worker.get_fresh_packets(1, &mut pkts);
+
+            // Only proceed if we got a packet from the pool
+            if n > 0 && !pkts.is_empty() {
+                let mut pkt = pkts.pop().unwrap();
+
+                // Fill the packet with fuzz input data
+                fuzz_harness::fill_packet_from_bytes(&mut pkt, data);
+
+                // Call substrate_ingress — this should not panic or crash
+                // Packet ownership passes to substrate_ingress which returns it to the pool
+                worker.substrate_ingress(&peer_addr, &iface_addr, pkt);
+            }
         }
     });
 });

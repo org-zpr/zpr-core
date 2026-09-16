@@ -1,7 +1,7 @@
 //! Fuzz testing harness for substrate_ingress.
 //! Only available with feature="fuzzing".
 
-use crate::assembly::{test::TestAssemblyBuilder, test::create_assembly};
+use crate::assembly::{test::create_assembly, test::TestAssemblyBuilder};
 use crate::batch_io;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::packet::Packet;
@@ -27,8 +27,8 @@ pub fn make_test_worker() -> FastpathWorker {
     FastpathWorker::new(config, 0, asm)
 }
 
-/// Build packet ingress parameters from fuzz input bytes.
-pub fn build_from_bytes(data: &[u8]) -> (SubstrateAddr, ScopedIpAddr, Packet) {
+/// Extract fuzz input parameters (peer_addr, interface_addr) from bytes.
+pub fn build_packet_params(data: &[u8]) -> (SubstrateAddr, ScopedIpAddr) {
     use std::net::{Ipv6Addr, SocketAddrV6};
 
     // Extract port from first two bytes
@@ -49,15 +49,13 @@ pub fn build_from_bytes(data: &[u8]) -> (SubstrateAddr, ScopedIpAddr, Packet) {
     // Create ScopedIpAddr::V6 — use unspecified address and zero scope for fuzz testing
     let iface = ScopedIpAddr::V6(ScopedIpv6Addr::new(Ipv6Addr::UNSPECIFIED, 0));
 
-    // Build packet from remaining bytes
-    const MAX_PKT_SIZE: usize = 2048;
-    let pkt_data = &data[std::cmp::min(32, data.len())..];
+    (peer_addr, iface)
+}
 
-    let mut buf = Box::new([0u8; MAX_PKT_SIZE]);
-    let n = pkt_data.len().min(MAX_PKT_SIZE);
-    buf[..n].copy_from_slice(&pkt_data[..n]);
-
-    let pkt = Packet::new(buf, crate::config::DEFAULT_MESSAGE_HEADROOM);
-
-    (peer_addr, iface, pkt)
+/// Fill a packet buffer with fuzz input data.
+/// Writes up to the full body length with fuzz data.
+pub fn fill_packet_from_bytes(pkt: &mut Packet, data: &[u8]) {
+    let body = pkt.body_mut();
+    let n = std::cmp::min(data.len(), body.len());
+    body[..n].copy_from_slice(&data[..n]);
 }
