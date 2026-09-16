@@ -27,7 +27,11 @@ pub fn make_test_worker() -> FastpathWorker {
     FastpathWorker::new(config, 0, asm)
 }
 
+/// Number of bytes used for packet parameters (2 for port + 16 for IPv6)
+pub const PARAMS_SIZE: usize = 18;
+
 /// Extract fuzz input parameters (peer_addr, interface_addr) from bytes.
+/// Consumes the first PARAMS_SIZE bytes of data.
 pub fn build_packet_params(data: &[u8]) -> (SubstrateAddr, ScopedIpAddr) {
     use std::net::{Ipv6Addr, SocketAddrV6};
 

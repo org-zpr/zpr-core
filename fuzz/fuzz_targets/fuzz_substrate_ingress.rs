@@ -9,8 +9,8 @@ thread_local! {
 }
 
 fuzz_target!(|data: &[u8]| {
-    if data.len() < 2 {
-        return; // Need at least some data to work with
+    if data.len() < fuzz_harness::PARAMS_SIZE {
+        return; // Need at least PARAMS_SIZE bytes for parameters
     }
 
     WORKER.with(|cell| {
@@ -19,8 +19,11 @@ fuzz_target!(|data: &[u8]| {
             *opt = Some(fuzz_harness::make_test_worker());
         }
         if let Some(worker) = opt.as_mut() {
-            // Extract parameters from fuzz input
-            let (peer_addr, iface_addr) = fuzz_harness::build_packet_params(data);
+            // Split input: first PARAMS_SIZE bytes for parameters, rest for packet body
+            let (params_data, body_data) = data.split_at(fuzz_harness::PARAMS_SIZE);
+            
+            // Extract parameters from first segment
+            let (peer_addr, iface_addr) = fuzz_harness::build_packet_params(params_data);
 
             // Get a fresh packet buffer from the worker's pool
             let mut pkts = Vec::with_capacity(1);
@@ -30,8 +33,8 @@ fuzz_target!(|data: &[u8]| {
             if n > 0 && !pkts.is_empty() {
                 let mut pkt = pkts.pop().unwrap();
 
-                // Fill the packet with fuzz input data
-                fuzz_harness::fill_packet_from_bytes(&mut pkt, data);
+                // Fill the packet with body data (second segment)
+                fuzz_harness::fill_packet_from_bytes(&mut pkt, body_data);
 
                 // Call substrate_ingress — this should not panic or crash
                 // Packet ownership passes to substrate_ingress which returns it to the pool
