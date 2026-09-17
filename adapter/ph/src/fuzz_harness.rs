@@ -4,39 +4,75 @@
 use crate::assembly::{test::create_assembly, test::TestAssemblyBuilder};
 use crate::batch_io;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
-use crate::mgmt::dispatch;
+use crate::mgmt_dispatch_worker;
 use crate::packet::Packet;
 use crate::prelude::*;
+use crate::queues::{MgmtDispatch, MgmtDispatchFactory, MgmtDispatchMessage, MgmtHairpinDispatch};
+use crate::two_way_queue;
 use std::sync::Arc;
+use tokio::runtime::Runtime;
+use tokio::sync::mpsc;
 use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
-/// Create a minimal FastpathWorker for fuzzing.
-pub fn make_test_worker() -> (FastpathWorker, Arc<Assembly>) {
-    // Use TestAssemblyBuilder to create a minimal Assembly with all required fields.
-    let builder = TestAssemblyBuilder::new();
+/// Wrapper for fuzzing infrastructure including worker, queues, and async runtime.
+pub struct FuzzContext {
+    pub worker: FastpathWorker,
+    pub asm: Arc<Assembly>,
+    pub runtime: Runtime,
+    pub mgmt_dispatch_sender: Option<MgmtDispatch>,
+}
+
+/// Create a fuzz context with Tokio runtime and mgmt_dispatch_worker.
+pub fn make_fuzz_context() -> FuzzContext {
+    // Create Tokio runtime
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+
+    // Create separate queues for mgmt_dispatch
+    let (md_inq_factory, md_outq) = two_way_queue::two_way_queue(64);
+    let (mhd_inq, mhd_outq) = mpsc::channel(64);
+
+    // Build Assembly with proper queue factories
+    let mut builder = TestAssemblyBuilder::new();
+    builder.mgmt_dispatch_factory = Some(MgmtDispatchFactory::new(md_inq_factory));
+    builder.mgmt_hairpin_dispatch = Some(MgmtHairpinDispatch::new(mhd_inq));
+
     let asm = Arc::new(create_assembly(builder));
 
-    // Get a suitable batch I/O engine for this platform
-    let batch_io_engine = batch_io::auto_select_engine();
+    // Create mgmt_dispatch sender for packets
+    let ret_q = two_way_queue::ReturnQueue::new();
+    let md_dispatch = asm.mgmt_dispatch_factory.make(&ret_q);
 
+    // Spawn mgmt_dispatch_worker in the runtime
+    let asm_for_worker = asm.clone();
+    runtime.spawn(async move {
+        mgmt_dispatch_worker::launch(asm_for_worker, md_outq, mhd_outq).await;
+    });
+
+    // Create FastpathWorker
+    let batch_io_engine = batch_io::auto_select_engine();
     let config = FastpathWorkerConfig {
         buffer_count: 8,
         batch_size: 8,
         batch_io_engine,
     };
-
     let worker = FastpathWorker::new(config, 0, asm.clone());
-    (worker, asm)
+
+    FuzzContext {
+        worker,
+        asm,
+        runtime,
+        mgmt_dispatch_sender: Some(md_dispatch),
+    }
 }
 
-/// Process a packet through link creation (dispatch) if needed.
-/// This simulates what mgmt_dispatch_worker would do with unidentified packets.
-pub fn dispatch_packet_if_unidentified(asm: &Arc<Assembly>, peer_addr: SubstrateAddr, iface_addr: ScopedIpAddr, mut pkt: Packet) {
-    // Check if the packet would have been dispatched to mgmt_dispatch.
-    // For simplicity in fuzzing, we can attempt dispatch directly.
-    // The dispatch function will handle it appropriately based on the packet's
-    // link ID and other metadata.
-    dispatch::dispatch_mgmt_packet_with_addr(asm, peer_addr, iface_addr, &mut pkt);
+/// Process pending mgmt_dispatch by giving the Tokio runtime a chance to run.
+pub fn drain_mgmt_dispatch(ctx: &mut FuzzContext) {
+    // Yield to Tokio runtime for a brief moment to process queued packets
+    // This allows mgmt_dispatch_worker to handle messages
+    ctx.runtime.block_on(async {
+        // Give the event loop one chance to process pending work
+        tokio::task::yield_now().await;
+    });
 }
 
 /// Number of bytes used for packet parameters (2 for port + 16 for IPv6)
@@ -75,3 +111,4 @@ pub fn fill_packet_from_bytes(pkt: &mut Packet, data: &[u8]) {
     let n = std::cmp::min(data.len(), body.len());
     body[..n].copy_from_slice(&data[..n]);
 }
+

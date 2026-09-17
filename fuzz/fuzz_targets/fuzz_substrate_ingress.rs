@@ -4,9 +4,8 @@ use ph::fuzz_harness;
 use std::cell::RefCell;
 
 thread_local! {
-    // Per-thread cached worker and assembly to avoid reallocating each iteration.
-    // The assembly contains the mgmt_dispatch path needed for link creation.
-    static WORKER_DATA: RefCell<Option<(ph::fastpath::FastpathWorker, std::sync::Arc<ph::assembly::Assembly>)>> = RefCell::new(None);
+    // Per-thread cached fuzz context with Tokio runtime and mgmt_dispatch_worker.
+    static FUZZ_CTX: RefCell<Option<fuzz_harness::FuzzContext>> = RefCell::new(None);
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -14,12 +13,12 @@ fuzz_target!(|data: &[u8]| {
         return; // Need at least PARAMS_SIZE bytes for parameters
     }
 
-    WORKER_DATA.with(|cell| {
+    FUZZ_CTX.with(|cell| {
         let mut opt = cell.borrow_mut();
         if opt.is_none() {
-            *opt = Some(fuzz_harness::make_test_worker());
+            *opt = Some(fuzz_harness::make_fuzz_context());
         }
-        if let Some((worker, asm)) = opt.as_mut() {
+        if let Some(ctx) = opt.as_mut() {
             // Split input: first PARAMS_SIZE bytes for parameters, rest for packet body
             let (params_data, body_data) = data.split_at(fuzz_harness::PARAMS_SIZE);
             
@@ -28,7 +27,7 @@ fuzz_target!(|data: &[u8]| {
 
             // Get a fresh packet buffer from the worker's pool
             let mut pkts = Vec::with_capacity(1);
-            let n = worker.get_fresh_packets(1, &mut pkts);
+            let n = ctx.worker.get_fresh_packets(1, &mut pkts);
 
             // Only proceed if we got a packet from the pool
             if n > 0 && !pkts.is_empty() {
@@ -37,22 +36,12 @@ fuzz_target!(|data: &[u8]| {
                 // Fill the packet with body data (second segment)
                 fuzz_harness::fill_packet_from_bytes(&mut pkt, body_data);
 
-                // Call substrate_ingress — processes the pre-auth packet
-                worker.substrate_ingress(&peer_addr, &iface_addr, pkt);
+                // Call substrate_ingress to process the pre-auth packet
+                ctx.worker.substrate_ingress(&peer_addr, &iface_addr, pkt);
                 
-                // Attempt to dispatch the packet for link creation.
-                // For unidentified packets, this starts the link authentication process.
-                // The dispatch function handles various packet types appropriately.
-                // Note: This is a simplification; in production, the mgmt_dispatch_worker
-                // would drain a queue. Here we directly invoke dispatch for fuzzing.
-                
-                // Get a fresh packet for dispatch (we consumed the previous one)
-                let mut pkts2 = Vec::with_capacity(1);
-                if worker.get_fresh_packets(1, &mut pkts2) > 0 {
-                    if let Some(pkt2) = pkts2.pop() {
-                        fuzz_harness::dispatch_packet_if_unidentified(asm, peer_addr, iface_addr, pkt2);
-                    }
-                }
+                // Drain the mgmt_dispatch queue to process any link creation or auth requests.
+                // This allows the mgmt_dispatch_worker to handle packets that need special processing.
+                fuzz_harness::drain_mgmt_dispatch(ctx);
             }
         }
     });
