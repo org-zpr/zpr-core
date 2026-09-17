@@ -4,13 +4,14 @@
 use crate::assembly::{test::create_assembly, test::TestAssemblyBuilder};
 use crate::batch_io;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
+use crate::mgmt::dispatch;
 use crate::packet::Packet;
 use crate::prelude::*;
 use std::sync::Arc;
 use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
 /// Create a minimal FastpathWorker for fuzzing.
-pub fn make_test_worker() -> FastpathWorker {
+pub fn make_test_worker() -> (FastpathWorker, Arc<Assembly>) {
     // Use TestAssemblyBuilder to create a minimal Assembly with all required fields.
     let builder = TestAssemblyBuilder::new();
     let asm = Arc::new(create_assembly(builder));
@@ -19,12 +20,23 @@ pub fn make_test_worker() -> FastpathWorker {
     let batch_io_engine = batch_io::auto_select_engine();
 
     let config = FastpathWorkerConfig {
-        batch_io_engine,
         buffer_count: 8,
         batch_size: 8,
+        batch_io_engine,
     };
 
-    FastpathWorker::new(config, 0, asm)
+    let worker = FastpathWorker::new(config, 0, asm.clone());
+    (worker, asm)
+}
+
+/// Process a packet through link creation (dispatch) if needed.
+/// This simulates what mgmt_dispatch_worker would do with unidentified packets.
+pub fn dispatch_packet_if_unidentified(asm: &Arc<Assembly>, peer_addr: SubstrateAddr, iface_addr: ScopedIpAddr, mut pkt: Packet) {
+    // Check if the packet would have been dispatched to mgmt_dispatch.
+    // For simplicity in fuzzing, we can attempt dispatch directly.
+    // The dispatch function will handle it appropriately based on the packet's
+    // link ID and other metadata.
+    dispatch::dispatch_mgmt_packet_with_addr(asm, peer_addr, iface_addr, &mut pkt);
 }
 
 /// Number of bytes used for packet parameters (2 for port + 16 for IPv6)
