@@ -38,10 +38,9 @@ fuzz_target!(|data: &[u8]| {
 
                 // Call substrate_ingress to process the pre-auth packet
                 ctx.worker.substrate_ingress(&peer_addr, &iface_addr, pkt);
-                
-                // Drain the mgmt_dispatch queue to process any link creation or auth requests.
-                // This allows the mgmt_dispatch_worker to handle packets that need special processing.
-                fuzz_harness::drain_mgmt_dispatch(ctx);
+
+                // Synchronously drain any packets queued for management dispatch.
+                fuzz_harness::dispatch_pending_mgmt_packets(ctx);
             }
         }
     });

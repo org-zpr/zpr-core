@@ -4,32 +4,36 @@
 use crate::assembly::{test::create_assembly, test::TestAssemblyBuilder};
 use crate::batch_io;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
-use crate::mgmt_dispatch_worker;
+use crate::mgmt::dispatch::{dispatch_mgmt_packet_with_addr, dispatch_mgmt_packet_with_link};
 use crate::packet::Packet;
 use crate::prelude::*;
-use crate::queues::{MgmtDispatch, MgmtDispatchFactory, MgmtDispatchMessage, MgmtHairpinDispatch};
+use crate::queues::{MgmtDispatchFactory, MgmtDispatchMessage, MgmtHairpinDispatch};
 use crate::two_way_queue;
 use std::sync::Arc;
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
-/// Wrapper for fuzzing infrastructure including worker, queues, and async runtime.
+/// Wrapper for fuzzing infrastructure including the worker and the receiving
+/// end of the mgmt_dispatch queue.
 pub struct FuzzContext {
     pub worker: FastpathWorker,
     pub asm: Arc<Assembly>,
-    pub runtime: Runtime,
-    pub mgmt_dispatch_sender: Option<MgmtDispatch>,
+    /// The consumer half of the mgmt_dispatch queue.  In production this is
+    /// read by the asynchronous `mgmt_dispatch_worker` task; here we drain it
+    /// synchronously (see `dispatch_pending_mgmt_packets`) so that fuzzer
+    /// crashes can be attributed to a specific input.
+    pub mgmt_dispatch_receiver: two_way_queue::Receiver<MgmtDispatchMessage, PacketBuffer>,
 }
 
-/// Create a fuzz context with Tokio runtime and mgmt_dispatch_worker.
+/// Create a fuzz context with a `FastpathWorker` and the receiving end of the
+/// mgmt_dispatch queue.
 pub fn make_fuzz_context() -> FuzzContext {
-    // Create Tokio runtime
-    let runtime = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-
-    // Create separate queues for mgmt_dispatch
-    let (md_inq_factory, md_outq) = two_way_queue::two_way_queue(64);
-    let (mhd_inq, mhd_outq) = mpsc::channel(64);
+    // Create the two-way queue used for mgmt_dispatch.  `worker` (below) will
+    // hold a `Sender` for this queue (as `worker.mgmt_dispatch`), whose return
+    // path is the worker's own `return_q`.  We keep the `Receiver` here so we
+    // can synchronously pull packets off of it and dispatch them ourselves.
+    let (md_inq_factory, mgmt_dispatch_receiver) = two_way_queue::two_way_queue(64);
+    let (mhd_inq, _mhd_outq) = mpsc::channel(64);
 
     // Build Assembly with proper queue factories
     let mut builder = TestAssemblyBuilder::new();
@@ -38,17 +42,9 @@ pub fn make_fuzz_context() -> FuzzContext {
 
     let asm = Arc::new(create_assembly(builder));
 
-    // Create mgmt_dispatch sender for packets
-    let ret_q = two_way_queue::ReturnQueue::new();
-    let md_dispatch = asm.mgmt_dispatch_factory.make(&ret_q);
-
-    // Spawn mgmt_dispatch_worker in the runtime
-    let asm_for_worker = asm.clone();
-    runtime.spawn(async move {
-        mgmt_dispatch_worker::launch(asm_for_worker, md_outq, mhd_outq).await;
-    });
-
-    // Create FastpathWorker
+    // Create FastpathWorker.  This creates its own `mgmt_dispatch` sender
+    // (from `asm.mgmt_dispatch_factory`) whose return path is the worker's
+    // own `return_q`.
     let batch_io_engine = batch_io::auto_select_engine();
     let config = FastpathWorkerConfig {
         buffer_count: 8,
@@ -60,19 +56,43 @@ pub fn make_fuzz_context() -> FuzzContext {
     FuzzContext {
         worker,
         asm,
-        runtime,
-        mgmt_dispatch_sender: Some(md_dispatch),
+        mgmt_dispatch_receiver,
     }
 }
 
-/// Process pending mgmt_dispatch by giving the Tokio runtime a chance to run.
-pub fn drain_mgmt_dispatch(ctx: &mut FuzzContext) {
-    // Yield to Tokio runtime for a brief moment to process queued packets
-    // This allows mgmt_dispatch_worker to handle messages
-    ctx.runtime.block_on(async {
-        // Give the event loop one chance to process pending work
-        tokio::task::yield_now().await;
-    });
+/// Synchronously process any packets pending on the mgmt_dispatch queue.
+///
+/// This stands in for the asynchronous `mgmt_dispatch_worker` task: it pulls
+/// each pending packet off of the queue (via `try_recv()`), dispatches it
+/// using the same logic `mgmt_dispatch_worker` would use, and then drops the
+/// message so its buffer is returned along the queue's return path (the
+/// worker's `return_q`).  Finally, any buffers that have made their way back
+/// are reclaimed into the worker's buffer pool.
+pub fn dispatch_pending_mgmt_packets(ctx: &mut FuzzContext) {
+    while let Some(mut msg) = ctx.mgmt_dispatch_receiver.try_recv() {
+        match &mut *msg {
+            MgmtDispatchMessage::WithLink(pkt) => {
+                dispatch_mgmt_packet_with_link(&ctx.asm, pkt);
+            }
+            MgmtDispatchMessage::WithAddr {
+                peer_sa,
+                interface_addr,
+                packet,
+            } => {
+                dispatch_mgmt_packet_with_addr(&ctx.asm, *peer_sa, *interface_addr, packet);
+            }
+        }
+
+        // Dropping the guard returns the packet's buffer along the queue's
+        // return path (the worker's `return_q`), just as would happen once
+        // `mgmt_dispatch_worker` finishes processing a message.
+        drop(msg);
+    }
+
+    // Reclaim any buffers that have made their way back to the worker's pool.
+    ctx.worker
+        .return_q
+        .try_recv_many_returns(&mut ctx.worker.buffers, ctx.worker.config.buffer_count);
 }
 
 /// Number of bytes used for packet parameters (2 for port + 16 for IPv6)
@@ -111,4 +131,3 @@ pub fn fill_packet_from_bytes(pkt: &mut Packet, data: &[u8]) {
     let n = std::cmp::min(data.len(), body.len());
     body[..n].copy_from_slice(&data[..n]);
 }
-
