@@ -7,3 +7,5 @@ target/
 completions/
 *.pcap
 fuzz/artifacts/
+fuzz/coverage/
+/crash-*
