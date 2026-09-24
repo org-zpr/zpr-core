@@ -1,5 +1,5 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use ph::fuzz_harness;
 use std::cell::RefCell;
 
@@ -8,9 +8,9 @@ thread_local! {
     static FUZZ_CTX: RefCell<Option<fuzz_harness::FuzzContext>> = RefCell::new(None);
 }
 
-fuzz_target!(|data: &[u8]| {
+fuzz_target!(|data: &[u8]| -> Corpus {
     if data.len() < fuzz_harness::PARAMS_SIZE {
-        return; // Need at least PARAMS_SIZE bytes for parameters
+        return Corpus::Reject; // Need at least PARAMS_SIZE bytes for parameters
     }
 
     FUZZ_CTX.with(|cell| {
@@ -41,7 +41,14 @@ fuzz_target!(|data: &[u8]| {
 
                 // Synchronously drain any packets queued for management dispatch.
                 fuzz_harness::dispatch_pending_mgmt_packets(ctx);
+
+                Corpus::Keep
+            } else {
+                // No packet buffer available; nothing was exercised.
+                Corpus::Reject
             }
+        } else {
+            Corpus::Reject
         }
-    });
+    })
 });
