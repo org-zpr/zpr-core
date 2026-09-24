@@ -125,9 +125,13 @@ pub fn build_packet_params(data: &[u8]) -> (SubstrateAddr, ScopedIpAddr) {
 }
 
 /// Fill a packet buffer with fuzz input data.
-/// Writes up to the full body length with fuzz data.
+///
+/// A freshly obtained packet has an empty body (zero length), so writing via
+/// `body_mut()` has no effect -- there's nothing there to write into.
+/// Instead, use the `BufMut` impl on `Packet`, which appends into the
+/// tailroom and grows the body accordingly (via `put_slice()`).  Only as much
+/// of `data` as fits in the available tailroom is written.
 pub fn fill_packet_from_bytes(pkt: &mut Packet, data: &[u8]) {
-    let body = pkt.body_mut();
-    let n = std::cmp::min(data.len(), body.len());
-    body[..n].copy_from_slice(&data[..n]);
+    let n = std::cmp::min(data.len(), pkt.remaining_mut());
+    pkt.put_slice(&data[..n]);
 }
