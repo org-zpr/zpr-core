@@ -21,7 +21,7 @@ fuzz_target!(|data: &[u8]| -> Corpus {
         if let Some(ctx) = opt.as_mut() {
             // Split input: first PARAMS_SIZE bytes for parameters, rest for packet body
             let (params_data, body_data) = data.split_at(fuzz_harness::PARAMS_SIZE);
-            
+
             // Extract parameters from first segment
             let (peer_addr, iface_addr) = fuzz_harness::build_packet_params(params_data);
 
