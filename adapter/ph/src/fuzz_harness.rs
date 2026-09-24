@@ -1,7 +1,7 @@
 //! Fuzz testing harness for substrate_ingress.
 //! Only available with feature="fuzzing".
 
-use crate::assembly::{test::create_assembly, test::TestAssemblyBuilder};
+use crate::assembly::{test::TestAssemblyBuilder, test::create_assembly};
 use crate::batch_io;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::mgmt::dispatch::{dispatch_mgmt_packet_with_addr, dispatch_mgmt_packet_with_link};
