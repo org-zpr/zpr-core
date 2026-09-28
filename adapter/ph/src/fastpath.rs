@@ -18,7 +18,7 @@ use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use classifier::{IPv4Header, IPv6Header};
-use internet_checksum;
+use ip4sum;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use zpr_ext::std::num::NonZeroExt;
@@ -728,7 +728,7 @@ pub fn maybe_capture_batch<'a>(
 /// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
 pub fn encrypt_null(pkt: &mut Packet) {
     let mut csum =
-        internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]);
+        ip4sum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).to_be_bytes();
 
     if (pkt.body().len() - std::mem::size_of::<zdp::ZdpZpiHeader>()) % 2 != 0 {
         // TODO: this is hack to allow misaligned checksum to still pass validation...
@@ -831,9 +831,12 @@ impl From<DecryptError> for FastpathCounterType {
 /// "Decrypt" a packet using NULL encryption.
 fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
-    if internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
-        != [0u8; 2]
-    {
+    let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>();
+    if pkt.body().len() < zpi_hdr_len + 2 {
+        return Err(DecryptError::BadStructure);
+    }
+
+    if ip4sum::checksum(&pkt.body()[zpi_hdr_len..]) != 0 {
         return Err(DecryptError::BadChecksum);
     }
 
@@ -1163,6 +1166,29 @@ mod test {
         assert!(res.is_ok());
 
         assert!(pkt.body().len() == orig_len); // did remove checksum
+    }
+
+    #[test]
+    fn test_decrypt_null_rejects_short_packet() {
+        for body in [&[][..], &[0u8][..], &[0u8, 0][..]] {
+            let mut pkt = packet_with_body(PACKET_BUFFER_SIZE, 64, body);
+
+            assert!(matches!(
+                decrypt_null(&mut pkt),
+                Err(DecryptError::BadStructure)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_decrypt_null_rejects_bad_checksum_without_overflow() {
+        let body = [0xff; 230];
+        let mut pkt = packet_with_body(PACKET_BUFFER_SIZE, 64, &body);
+
+        assert!(matches!(
+            decrypt_null(&mut pkt),
+            Err(DecryptError::BadChecksum)
+        ));
     }
 
     /// A codec that expands its input, like a real AEAD does: an 8-byte

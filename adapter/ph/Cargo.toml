@@ -28,7 +28,7 @@ ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "alloc"] }
 enum-map = { version = "2.7.3" }
 enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
-internet-checksum = { workspace = true }
+ip4sum = { workspace = true }
 ipnet = { workspace = true }
 itertools = "0.14"
 libc = { version = "0.2.183" }

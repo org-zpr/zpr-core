@@ -2047,12 +2047,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "internet-checksum"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc6d6206008e25125b1f97fbe5d309eb7b85141cf9199d52dbd3729a1584dd16"
-
-[[package]]
 name = "io-uring"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2062,6 +2056,12 @@ dependencies = [
  "cfg-if",
  "libc",
 ]
+
+[[package]]
+name = "ip4sum"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e1519785539e84d256e882053cc330fda5e7c65876fcb5553cb418e81888ab4"
 
 [[package]]
 name = "ip_network_table-deps-treebitmap"
@@ -2796,8 +2796,8 @@ dependencies = [
  "enumset",
  "futures",
  "hdrhistogram",
- "internet-checksum",
  "io-uring",
+ "ip4sum",
  "ipnet",
  "itertools 0.14.0",
  "libc",
@@ -5497,11 +5497,11 @@ dependencies = [
 
 [[package]]
 name = "zpr-utils"
-version = "0.2.1"
-source = "git+https://github.com/org-zpr/zpr-utils.git?tag=zpr-utils-v0.2.1#5787849d761a58a88044b277a344e6fe23bf1b0d"
+version = "0.2.2"
+source = "git+https://github.com/org-zpr/zpr-utils.git?tag=zpr-utils-v0.2.2#b78d4863fa3ddb47a354adab3d198feb9f07f8f2"
 dependencies = [
  "aws-lc-rs",
- "internet-checksum",
+ "ip4sum",
  "pem-rfc7468",
  "zerocopy",
  "zpr 0.8.1",

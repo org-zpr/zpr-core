@@ -4,7 +4,7 @@ use crate::classifier;
 use crate::defs::FiveTuple;
 use crate::prelude::*;
 use bytes::Buf;
-use internet_checksum;
+use ip4sum;
 use zerocopy::*;
 use zpr::packet_info::compression_mode::*;
 use zpr_ext::bytes::BufExt;
@@ -97,7 +97,7 @@ fn expand_ipv4(compression_mode: CompressionMode, five_tuple: &FiveTuple, pkt: &
     hdr.dst_address = five_tuple.dst_address.read_as_v4();
 
     let header_len = (hl as usize) << 2;
-    let csum = internet_checksum::checksum(&pkt.body()[..header_len]);
+    let csum = ip4sum::checksum(&pkt.body()[..header_len]).to_be_bytes();
     classifier::IPv4Header::mut_from_prefix(pkt.body_mut())
         .unwrap()
         .0

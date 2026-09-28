@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::defs::FiveTuple;
 use arrayref::array_ref;
-use internet_checksum;
+use ip4sum;
 use std::mem::size_of;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
@@ -184,7 +184,7 @@ fn classify_ipv4(
             return Err("Packet length error");
         }
 
-        if internet_checksum::checksum(&body[..header_length]) != [0u8; 2] {
+        if ip4sum::checksum(&body[..header_length]) != 0 {
             return Err("Bad L3 checksum");
         }
     }
@@ -364,7 +364,7 @@ fn classify_icmp(
     // NOTE: we do not currently check ICMP length
     if !options.ignore_bad_checksums
         && !options.ignore_truncated_packets
-        && internet_checksum::checksum(body) != [0u8; 2]
+        && ip4sum::checksum(body) != 0
     {
         return Err("Bad L4 checksum");
     }
