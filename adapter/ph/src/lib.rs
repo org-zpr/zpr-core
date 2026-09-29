@@ -14,6 +14,7 @@ pub mod adapter_tables;
 pub mod address_pool;
 pub mod admin_worker;
 pub mod auth;
+#[cfg_attr(not(all(unix, feature = "capnp-ancillary")), allow(dead_code))]
 pub mod capture_worker;
 pub mod classifier;
 pub mod compress;
@@ -35,13 +36,12 @@ pub mod mgmt_dispatch_worker;
 pub mod mgmt_processor_worker;
 pub mod packet_queue;
 pub mod packet_steering;
+#[cfg_attr(not(all(unix, feature = "capnp-ancillary")), allow(dead_code))]
 pub mod pcap_writer;
 pub mod peer_table;
 pub mod pki;
 pub mod prelude;
 pub mod sample_ring;
-#[cfg(not(feature = "capnp-ancillary"))]
-pub mod set_capture_file_worker;
 pub mod signal_worker;
 pub mod special_peers;
 pub mod sys;

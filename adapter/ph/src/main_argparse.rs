@@ -309,7 +309,6 @@ mod test {
         let mut tomltxt = r#"
         [global]
         control_path = "$CONTROLFILE"
-        capture_path = "$CAPTUREFILE"
         self_addr = "192.168.0.1:12345"
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
@@ -325,14 +324,12 @@ mod test {
 
         let ca_file = TempFile::touch();
         let control_file = TempFile::touch();
-        let capture_file = TempFile::touch();
         let cert_file = TempFile::touch();
         let pk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
-            .replace("$CAPTUREFILE", capture_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
@@ -405,7 +402,6 @@ mod test {
         let mut tomltxt = r#"
         [global]
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         self_addr = "192.168.0.1:12345"
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
@@ -462,7 +458,6 @@ mod test {
         let mut tomltxt = r#"
         [global]
         control_path = "$CONTROLFILE"
-        capture_path = "$CAPTUREFILE"
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
@@ -475,13 +470,11 @@ mod test {
         let ca_file = TempFile::touch();
         let cert_file = TempFile::touch();
         let control_file = TempFile::touch();
-        let capture_file = TempFile::touch();
         let pk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
-            .replace("$CAPTUREFILE", capture_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
@@ -548,7 +541,6 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
@@ -610,7 +602,6 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         zpr_addr = [ "10.0.0.1" ]
         "#;
 
@@ -669,8 +660,6 @@ mod test {
             &pk_file_fname,
             "--control-path",
             "/tmp/control.sock",
-            "--capture-path",
-            "/tmp/capture.sock",
             "--zpr-addr",
             "10.0.0.1",
         ];
@@ -719,8 +708,6 @@ mod test {
             &pk_file_fname,
             "--control-path",
             "/tmp/control.sock",
-            "--capture-path",
-            "/tmp/capture.sock",
             "--zpr-addr",
             "10.0.0.1",
             "--self-addr",
@@ -756,7 +743,6 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         self_addr = "0.0.0.0:12345"
         zpr_addr = [ "10.0.0.1" ]
 
@@ -819,8 +805,6 @@ mod test {
             &pk_file_fname,
             "--control-path",
             "/tmp/control.sock",
-            "--capture-path",
-            "/tmp/capture.sock",
             "--zpr-addr",
             "10.0.0.1",
             "--advertised-substrate-addr",
@@ -846,7 +830,6 @@ mod test {
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
@@ -893,7 +876,6 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -923,7 +905,6 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         name = "my-adapter"
@@ -952,7 +933,6 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -982,7 +962,6 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         name = "config-name"
@@ -1019,7 +998,6 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         node_addr = "192.168.0.2:5000"

@@ -1,9 +1,14 @@
-//! Receives commands, either from the cli or from someone directly interfacing
-//! with the socket, performs action based on received command
-//! To avoid excess parsing, the command must not have spaces
+//! Serves the Packet Handler's Cap'n Proto administrative interface.
 
 #![allow(unused_imports)]
 #![allow(dead_code)]
+
+#[cfg(all(unix, feature = "capnp-ancillary"))]
+use capnp_futures_patched as capnp_futures;
+#[cfg(all(unix, feature = "capnp-ancillary"))]
+use capnp_patched as capnp;
+#[cfg(all(unix, feature = "capnp-ancillary"))]
+use capnp_rpc_patched as capnp_rpc;
 
 use crate::link_state::{LinkEvent, LinkState};
 use crate::logging;
@@ -11,7 +16,6 @@ use crate::logging::{levels, targets};
 use crate::prelude::*;
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
-use admin_api::rpc_commands::RpcCommands;
 use admin_api::v1 as cli;
 use cbpf_rs;
 use cli::cmd_line_inter as svc;
@@ -19,22 +23,15 @@ use core::future::Future;
 use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
-use std::io::Error;
-use std::io::IoSliceMut;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::str::FromStr;
 use std::time::{Duration, Instant};
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::UnixListener;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::task::JoinSet;
 use tokio::time::interval;
 use tokio_util::compat::*;
-use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
-use zpr_ext::tokio::net::*;
 
 pub async fn launch_capnp(
     asm: Arc<Assembly>,
@@ -45,7 +42,7 @@ pub async fn launch_capnp(
 
         let (reader, writer) = sock.into_split();
 
-        #[cfg(not(feature = "capnp-ancillary"))]
+        #[cfg(not(all(unix, feature = "capnp-ancillary")))]
         let network = capnp_rpc::twoparty::VatNetwork::new(
             tokio::io::BufReader::new(reader).compat(),
             tokio::io::BufWriter::new(writer).compat_write(),
@@ -54,7 +51,7 @@ pub async fn launch_capnp(
         );
 
         //use an FD-passing transport instead of a plain byte stream.
-        #[cfg(feature = "capnp-ancillary")]
+        #[cfg(all(unix, feature = "capnp-ancillary"))]
         let network = capnp_rpc::twoparty::io::VatNetwork::new_with_fds(
             capnp_futures::io::tokio::UnixFdStream::new(reader),
             capnp_futures::io::tokio::UnixFdStream::new(writer),
@@ -161,7 +158,7 @@ impl svc::Server for AdminServiceImpl {
         Ok(())
     }
 
-    #[cfg(not(feature = "capnp-ancillary"))]
+    #[cfg(not(all(unix, feature = "capnp-ancillary")))]
     async fn set_capture_file(
         self: Rc<Self>,
         _: svc::SetCaptureFileParams,
@@ -173,7 +170,7 @@ impl svc::Server for AdminServiceImpl {
     }
 
     /// Opens the capture file from an FD received as ancillary data.
-    #[cfg(feature = "capnp-ancillary")]
+    #[cfg(all(unix, feature = "capnp-ancillary"))]
     async fn set_capture_file(
         self: Rc<Self>,
         params: svc::SetCaptureFileParams,
@@ -674,43 +671,6 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     let _ = write!(&mut values, "\n");
 
     values
-}
-
-// Takes in ancillary data, extracts the file descriptor, and creates a file using the
-// fd
-async fn set_capture_file(asm: &Assembly, ancillary: SocketAncillary<'_>) -> String {
-    info!(target: RPC, "Setting capture file");
-    // Get the ancillary data
-    let anc_message = ancillary.into_messages().nth(0).unwrap();
-    // Get the SCM rights from the ancillary data
-    if let AncillaryData::ScmRights(mut scm_rights) = anc_message.unwrap() {
-        debug!(target: RPC, "SCM Rights exist");
-        // See if there's actually data in the scm_rights, if yes try to open a
-        // capture file, otherwise report failure to open file
-        match scm_rights.nth(0) {
-            Some(fd) => {
-                let std_file = std::fs::File::from(fd.try_into_owned().unwrap()); // tokio::fs::File doesn't implement From<OwnedFd>
-                let tokio_file = File::from(std_file);
-                match asm.capture_worker.open_capture_file(tokio_file).await {
-                    Ok(()) => {
-                        debug!(target: RPC, "Capture file opened");
-                        format!("Capture file opened\n")
-                    }
-                    Err(err) => {
-                        debug!(target: RPC, "Error opening Capture file: {}\n", err);
-                        format!("Error opening Capture file: {}\n", err)
-                    }
-                }
-            }
-            None => {
-                debug!(target: RPC, "Error opening Capture file: no ancillary data received\n");
-                format!("Error opening Capture file: no ancillary data received\n")
-            }
-        }
-    } else {
-        debug!(target: RPC, "Error opening Capture file: no ancillary data received\n");
-        format!("Error opening Capture file: no ancillary data received\n")
-    }
 }
 
 // Helper for show_link_summary

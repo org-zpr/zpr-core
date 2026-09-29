@@ -70,9 +70,6 @@ pub const ACTOR_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duratio
 /// How long to wait when we expect the VS to have to talk to external auth services.
 pub const VS_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-#[cfg(not(feature = "capnp-ancillary"))]
-pub const ANCILLARY_BUFFER_SIZE: usize = 128;
-
 const DEFAULT_BUFFER_COUNT: usize = 512; // should be at least 5x batch size; see fastpath_worker.rs for explanation
 const DEFAULT_BATCH_SIZE: usize = 64;
 const DEFAULT_DATAPATH_QUEUE_SIZE: usize = 256;
@@ -119,8 +116,6 @@ pub struct Config {
 
     /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
-
-    pub capture_path: PathBuf,
 
     /// Source address for our UDP substrate socket. For an adapter this should (always?) be `0.0.0.0:0`.
     /// For a node this is the nodes dock listening address.
@@ -329,16 +324,6 @@ impl Config {
                 Err(e) => return Err(e),
             }
         }
-        if self.capture_path.as_os_str().is_empty() {
-            return Err("capture_path".arg_missing());
-        }
-        // For capture path, the parent dir must exist or there will be an error later.
-        if let Some(parent) = self.capture_path.parent() {
-            match check_file_exists("capture socket parent directory", parent) {
-                Ok(_) => {}
-                Err(e) => return Err(e),
-            }
-        }
         if let Some(ca_file) = &self.ca_file {
             check_file_exists("certificate authority file", ca_file)?;
         }
@@ -399,13 +384,6 @@ impl Config {
                 self.control_path = base_dir.join(control_path);
             } else {
                 self.control_path = control_path.clone();
-            }
-        }
-        if let Some(capture_path) = &config.capture_path {
-            if capture_path.is_relative() {
-                self.capture_path = base_dir.join(capture_path);
-            } else {
-                self.capture_path = capture_path.clone();
             }
         }
         if let Some(self_addr) = &config.self_addr {
@@ -525,15 +503,6 @@ impl Config {
                 )))
             })?;
         }
-        if let Some(capture_path) = &common.capture_path {
-            let cp = PathBuf::from(capture_path);
-            self.capture_path = path::absolute(cp).or_else(|e| {
-                Err(ArgsError::PathError(format!(
-                    "path error for capture_path: {:?}",
-                    e
-                )))
-            })?;
-        }
         if let Some(self_addr) = &common.self_addr {
             self.self_addr = *self_addr;
         }
@@ -612,7 +581,6 @@ impl Default for Config {
         Self {
             name: String::new(),
             control_path: get_data_home().join("control.sock"),
-            capture_path: get_data_home().join("capture.sock"),
             self_addr: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0),
             ca_file: None,
             certificate_file: None,
@@ -674,7 +642,6 @@ pub struct NodeConfigSection {
 #[derive(Deserialize, Debug, Clone)]
 pub struct GlobalConfigSection {
     pub control_path: Option<PathBuf>,
-    pub capture_path: Option<PathBuf>,
     pub self_addr: Option<SocketAddr>,
     pub ca_file: Option<PathBuf>,
     pub certificate_file: Option<PathBuf>,
