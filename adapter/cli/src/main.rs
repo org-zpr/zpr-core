@@ -5,26 +5,21 @@
 mod main_args;
 mod rusty_helper;
 
-#[cfg(all(unix, feature = "capnp-ancillary"))]
-use crate::main_args::CaptureCommands;
 use crate::main_args::{CliCommand, CmdlineArgs, Commands, LinkCommands};
 #[cfg(all(unix, feature = "capnp-ancillary"))]
-extern crate capnp_futures_patched as capnp_futures;
-#[cfg(all(unix, feature = "capnp-ancillary"))]
-extern crate capnp_patched as capnp;
-#[cfg(all(unix, feature = "capnp-ancillary"))]
-extern crate capnp_rpc_patched as capnp_rpc;
+use {
+    crate::main_args::CaptureCommands,
+    capnp_futures_patched as capnp_futures, capnp_patched as capnp, capnp_rpc_patched as capnp_rpc,
+    std::fs::OpenOptions,
+    std::os::fd::{AsFd, BorrowedFd, OwnedFd},
+};
 
 use admin_api::v1 as cli;
 use clap::Parser;
 use cli::cmd_line_inter as svc;
 use rustyline::{CompletionType, Config, Editor, error::ReadlineError, history::FileHistory};
-#[cfg(all(unix, feature = "capnp-ancillary"))]
-use std::fs::OpenOptions;
 use std::io::Error;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-#[cfg(all(unix, feature = "capnp-ancillary"))]
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::time::{Duration, sleep};

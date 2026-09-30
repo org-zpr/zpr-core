@@ -4,11 +4,9 @@
 #![allow(dead_code)]
 
 #[cfg(all(unix, feature = "capnp-ancillary"))]
-use capnp_futures_patched as capnp_futures;
-#[cfg(all(unix, feature = "capnp-ancillary"))]
-use capnp_patched as capnp;
-#[cfg(all(unix, feature = "capnp-ancillary"))]
-use capnp_rpc_patched as capnp_rpc;
+use {
+    capnp_futures_patched as capnp_futures, capnp_patched as capnp, capnp_rpc_patched as capnp_rpc,
+};
 
 use crate::link_state::{LinkEvent, LinkState};
 use crate::logging;
