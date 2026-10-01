@@ -41,7 +41,9 @@ PWNED_STRING="YOU HAVE BEEN PWNED"
 
 source "$(dirname $0)/lib/common_funcs.sh"
 
-ZPR_USER=$USER
+# Re-exec inside an unprivileged user+network namespace; everything below
+# runs there and needs no sudo.
+enter_test_namespace "$@"
 
 # Optionally force old-style unkeyed A2A MICVs on all PH instances (the "old way"
 # the A2A key replaced).  With this set the forgery succeeds and the test fails.
@@ -191,7 +193,7 @@ emit_vs_config ca vs.zpr > vs-config.toml
 
 echo "Launching ValKey"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VALKEY_SERVER_BIN" \
+in_ns zpr-vs "$VALKEY_SERVER_BIN" \
     --save "" \
     --appendonly no 2>&1 | tee valkey.log | prefix_log valkey &
 
@@ -199,7 +201,7 @@ wait_for 15 check_vs_valkey_port
 
 echo "Launching Visa Service"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" XDG_DATA_HOME=/tmp "$VS_BIN" \
+in_ns zpr-vs env XDG_DATA_HOME=/tmp "$VS_BIN" \
     -c vs-config.toml \
     --clear-state \
     "$PREGEN/$POLICY_BIN" 2>&1 | tee vs.log | prefix_log vs &
@@ -212,7 +214,7 @@ sleep 2
 
 echo "Launching Node (MALICIOUS: mangling forwarded pings${UNKEYED_ARG:+, unkeyed MICVs}${RECOMPUTE_ARG:+, reusing original MICV})"
 
-sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-node "$PH_BIN" \
   node \
   --logging "$DEBUG_TARGETS" \
   --control-path "$NODE_SOCK" \
@@ -231,7 +233,7 @@ sleep 2
 
 echo "Launching Adapters"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-vs "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$VS_SOCK" \
@@ -249,7 +251,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sleep 5
 
-sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-a "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER1_SOCK" \
@@ -264,7 +266,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --zpr-addr "$A_ZPR_ADDR" \
   $UNKEYED_ARG 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
-sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-b "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER2_SOCK" \
@@ -304,22 +306,26 @@ if [[ "$PASS" == 0 ]]; then
   # poll() ignoring catchable signals. -U writes each packet immediately, so the
   # pcap is complete even under a hard kill.
   # The unique pcap path makes the pkill match exactly this tcpdump.
-  sudo -E ip netns exec zpr-b timeout -s TERM --kill-after=3 30 \
-    tcpdump -i tun0 -n -U -w "$PWNED_PCAP" icmp6 2>/dev/null &
+  # -Z root: tcpdump's default privilege drop to the `tcpdump` user cannot
+  # work inside the user namespace (that uid is unmapped); as the namespace's
+  # mapped root we keep our own (unprivileged-outside) identity instead.
+  in_ns zpr-b timeout -s TERM --kill-after=3 30 \
+    tcpdump -Z root -i tun0 -n -U -w "$PWNED_PCAP" icmp6 2>/dev/null &
   sleep 2
 
   echo "TEST STARTING: ping zpr-a -> zpr-b"
   # We do NOT check whether the ping succeeds: a correctly-rejected forgery just
   # means no reply, which is the passing case.
-  sudo ip netns exec zpr-a ping -6 -q -c 5 -w 5 "$B_ZPR_ADDR" || true
+  in_ns zpr-a ping -6 -q -c 5 -w 5 "$B_ZPR_ADDR" || true
 
   sleep 2
   # Stop the capture: SIGTERM first so tcpdump cleans up and restores the tty,
-  # then SIGKILL as a backstop if it's stuck idle. DON'T block on wait: the outer
-  # sudo wrapper does not reliably reap, which previously hung the whole script.
-  sudo pkill -TERM -f "tcpdump -i tun0 -n -U -w $PWNED_PCAP" 2>/dev/null || true
+  # then SIGKILL as a backstop if it's stuck idle. DON'T block on wait: the
+  # process does not reliably get reaped promptly, which previously hung the
+  # whole script.
+  pkill -TERM -f "tcpdump -Z root -i tun0 -n -U -w $PWNED_PCAP" 2>/dev/null || true
   sleep 1
-  sudo pkill -KILL -f "tcpdump -i tun0 -n -U -w $PWNED_PCAP" 2>/dev/null || true
+  pkill -KILL -f "tcpdump -Z root -i tun0 -n -U -w $PWNED_PCAP" 2>/dev/null || true
   stty sane 2>/dev/null || true
 
   #
@@ -333,10 +339,9 @@ if [[ "$PASS" == 0 ]]; then
   fi
 fi
 
-# The pcap was written by root (tcpdump ran under sudo), so it is write-protected
-# for us. Remove it as root here so the trap cleanup's rm doesn't stop for an
-# interactive "remove write-protected file?" prompt.
-sudo rm -f "$PWNED_PCAP" 2>/dev/null || true
+# The pcap is owned by the invoking user now (no sudo involved), but keep the
+# explicit removal so the trap cleanup's rm never prompts.
+rm -f "$PWNED_PCAP" 2>/dev/null || true
 
 #
 # Cleanup
@@ -347,7 +352,7 @@ do
   echo
   echo "Terminating $pid"
   sleep 1
-  sudo kill -SIGINT "$pid"
+  kill -SIGINT "$pid"
   sleep 1
 done
 

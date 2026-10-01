@@ -21,7 +21,9 @@ NETEM_PARAMS=${NETEM_PARAMS:-}
 
 source "$(dirname $0)/lib/common_funcs.sh"
 
-ZPR_USER=$USER
+# Re-exec inside an unprivileged user+network namespace; everything below
+# runs there and needs no sudo.
+enter_test_namespace "$@"
 
 # TODO: IPv6 link-local??
 NODE_SUBSTRATE_ADDR_VS=10.0.0.1
@@ -137,7 +139,7 @@ emit_vs_config ca vs.zpr > vs-config.toml
 
 echo "Launching ValKey"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VALKEY_SERVER_BIN" \
+in_ns zpr-vs "$VALKEY_SERVER_BIN" \
     --save "" \
     --appendonly no 2>&1 | tee valkey.log | prefix_log valkey &
 
@@ -145,7 +147,7 @@ wait_for 15 check_vs_valkey_port
 
 echo "Launching Visa Service"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" XDG_DATA_HOME=/tmp "$VS_BIN" \
+in_ns zpr-vs env XDG_DATA_HOME=/tmp "$VS_BIN" \
     -c vs-config.toml \
     --clear-state \
     "$PREGEN/$POLICY_BIN" 2>&1 | tee vs.log | prefix_log vs &
@@ -158,7 +160,7 @@ sleep 2
 
 echo "Launching Node"
 
-sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-node "$PH_BIN" \
   node \
   --logging "$DEBUG_TARGETS" \
   --control-path "$NODE_SOCK" \
@@ -175,7 +177,7 @@ sleep 2  # TODO: remove?
 
 echo "Launching Adapters"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-vs "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$VS_SOCK" \
@@ -192,7 +194,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sleep 5
 
-sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-a "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER1_SOCK" \
@@ -206,7 +208,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-addr "$NODE_SUBSTRATE_ADDR_A" \
   --zpr-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
-sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-b "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER2_SOCK" \
@@ -223,7 +225,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
   # Note, this adapter we connect to the "alternative" dock address
   # on this interface, to test that replies are still routed correctly.
-  sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  in_ns zpr-c "$PH_BIN" \
     adapter \
     --logging "$DEBUG_TARGETS" \
     --control-path "$ADAPTER3_SOCK" \
@@ -300,7 +302,7 @@ do
   echo
   echo "Terminating $pid"
   sleep 1
-  sudo kill -SIGINT "$pid"
+  kill -SIGINT "$pid"
   sleep 1
 done
 
