@@ -262,7 +262,10 @@ close_program "$ADAPTER1_SOCK"
 close_program "$ADAPTER2_SOCK"
 
 # Make sure at least both actor and mgmt packets were captured.
-tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' >"$TMPDIR/checker.txt"
+# -Z root: tcpdump's default privilege drop to the `tcpdump` user cannot work
+# inside the user namespace (that uid is unmapped); as the namespace's mapped
+# root we keep our own (unprivileged-outside) identity instead.
+tcpdump -Z root -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' >"$TMPDIR/checker.txt"
 
 # The node is configured in main.rs to expect ZPI 5 for management packets and 6 for transit
 # when getting messages from peer 1.

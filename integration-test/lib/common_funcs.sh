@@ -306,6 +306,15 @@ function emitlog() {
 
 
 function cleanup() {
+  # Kill the known test processes (ph/vs/valkey and the netns holders) first:
+  # `jobs -p` only yields each pipeline's leader, and killing that leaves the
+  # actual daemons running with the `tee`s still holding their pipes, which
+  # would make the `wait -f` below hang until the CI job times out whenever a
+  # test aborts mid-run.
+  for pid in $(get_descendants)
+  do kill -9 "$pid" 2> /dev/null || true
+  done
+
   for child in $(jobs -p)
   do kill -9 "$child" 2> /dev/null || true
   done
