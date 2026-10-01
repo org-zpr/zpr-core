@@ -202,7 +202,9 @@ mod io_uring {
 
         fn build_op(&mut self, fd: types::Fd, buf: &[u8], _idx: usize) -> (squeue::Entry, ()) {
             (
-                opcode::Write::new(fd, buf.as_ptr(), buf.len() as u32).build(),
+                opcode::Write::new(fd, buf.as_ptr(), buf.len() as u32)
+                    .rw_flags(libc::RWF_NOWAIT)
+                    .build(),
                 (),
             )
         }
@@ -231,7 +233,9 @@ mod io_uring {
         ) -> (squeue::Entry, &'a mut dyn BufMut) {
             let chunk = buf.chunk_mut();
             (
-                opcode::Read::new(fd, chunk.as_mut_ptr(), chunk.len() as u32).build(),
+                opcode::Read::new(fd, chunk.as_mut_ptr(), chunk.len() as u32)
+                    .rw_flags(libc::RWF_NOWAIT)
+                    .build(),
                 buf,
             )
         }
@@ -279,7 +283,7 @@ mod io_uring {
 
             (
                 opcode::SendMsg::new(fd, msghdr_ref as *const _)
-                    .flags(flags as u32)
+                    .flags(flags as u32 | libc::MSG_DONTWAIT as u32)
                     .build(),
                 (),
             )
@@ -352,7 +356,7 @@ mod io_uring {
 
             (
                 opcode::SendMsg::new(fd, msghdr_ref as *const _)
-                    .flags(flags as u32)
+                    .flags(flags as u32 | libc::MSG_DONTWAIT as u32)
                     .build(),
                 (),
             )
@@ -400,7 +404,12 @@ mod io_uring {
                 msg_flags: 0,
             });
 
-            (opcode::RecvMsg::new(fd, msghdr_ref as *mut _).build(), buf)
+            (
+                opcode::RecvMsg::new(fd, msghdr_ref as *mut _)
+                    .flags(libc::MSG_DONTWAIT as u32)
+                    .build(),
+                buf,
+            )
         }
 
         fn process_result(
@@ -465,7 +474,12 @@ mod io_uring {
                 msg_flags: 0,
             });
 
-            (opcode::RecvMsg::new(fd, msghdr_ref as *mut _).build(), buf)
+            (
+                opcode::RecvMsg::new(fd, msghdr_ref as *mut _)
+                    .flags(libc::MSG_DONTWAIT as u32)
+                    .build(),
+                buf,
+            )
         }
 
         fn process_result(
@@ -506,7 +520,6 @@ mod io_uring {
         pub const MAX_ENTRIES: usize = MAX_ENTRIES;
 
         const REQUIRED_OPCODES: &[u8] = &[
-            opcode::AsyncCancel::CODE,
             opcode::Write::CODE,
             opcode::Read::CODE,
             opcode::SendMsg::CODE,
@@ -533,7 +546,7 @@ mod io_uring {
 
             let io_uring = IoUring::<squeue::Entry, cqueue::Entry>::builder()
                 .dontfork()
-                .build((2 * entries) as u32)?;
+                .build(entries as u32)?;
 
             Ok(Self { io_uring })
         }
@@ -551,8 +564,7 @@ mod io_uring {
 
             let mut squeue = self.io_uring.submission();
 
-            // Each operation consumes two entries (one for the operation, one for the cancel request).
-            let max_to_submit = (squeue.capacity() - squeue.len()) / 2;
+            let max_to_submit = squeue.capacity() - squeue.len();
 
             let mut state_slab = Slab::new();
 
@@ -562,95 +574,79 @@ mod io_uring {
                     break;
                 }
 
-                // Attach a unique identifier to each item in the batch.
-                // Needed for canceling the operations, and for identifying their results.
-                let user_data = (submitted as u64) + 1;
+                // Attach a unique identifier to each item in the batch, so we
+                // can identify its result and correlate it with its state.
+                let user_data = submitted as u64;
 
                 // Build the operation entry, and stow any state we need for processing the result.
                 let (entry, state) = batch_op.build_op(fd, item, submitted);
                 state_slab.push(Some(state));
 
-                let entries = [
-                    entry.user_data(user_data),
-                    opcode::AsyncCancel::new(user_data).build(),
-                ];
-
-                // NOTE: ideally we'd use LINK and O_NONBLOCK, but:
-                // (a) since all reads from a TUN are "short", LINK treats them as failures,
-                //     -> see call to need_complete_io() in io_uring/rw.c:977... shouldn't this address this??
-                //        -> req->flags & REQ_F_ISREG || S_ISBLK()
-                // (b) O_NONBLOCK is ignored by io_uring, and
-                //     -> what about IO_URING_F_NONBLOCK issue flag in io_uring/rw.c:916?
-                //        -> this is used for polling... should we poll first instead?
-                //     -> what about REQ_F_FORCE_ASYNC?
-                // (c) RWF_NOWAIT is not supported by TUN devices.
+                // We rely on RWF_NOWAIT (for reads/writes) or MSG_DONTWAIT
+                // (for sendmsg/recvmsg), set by each BatchOp's build_op above,
+                // to make the operation fail immediately with -EAGAIN instead
+                // of blocking/running asynchronously when it is not
+                // immediately able to proceed.  This lets us simulate
+                // nonblocking I/O without any separate cancel request.
                 //
-                // So instead we must manually cancel all requests which
-                // weren't immediately fulfilled (since they otherwise will
-                // run asynchronously).  This means we must live with the
-                // (rare) possibility that reads after the first which would
-                // have blocked actually complete (since we are racing with
-                // the TUN device).
-                //
-                // (Note, even if (b) and (c) were solved, HARDLINK puts us in the same situation.)
-                //
-                // (Note also that, batch cancellation (which is supported
-                // only on newer kernels anyway) only cancels the first item
-                // of a linked chain!)
+                // We previously paired each operation with a racing
+                // AsyncCancel instead, since (we believed) O_NONBLOCK was
+                // ignored by io_uring and RWF_NOWAIT was unsupported by TUN
+                // devices.  The latter turned out to be false (TUN devices do
+                // check IOCB_NOWAIT, both for reads and writes), so we no
+                // longer need that workaround -- which is good, because that
+                // approach suffered from a kernel bug where AsyncCancel can
+                // spuriously fail to cancel an operation which is, in fact,
+                // still genuinely pending, causing submit_and_wait() to block
+                // indefinitely (see the (removed) `test_recv_stress_no_stall`
+                // test's history for more detail).
 
                 // SAFETY: the buf ptrs are valid for our entire body, and we
                 // are waiting on completion before we exit.
-                unsafe { squeue.push_multiple(&entries) }.unwrap();
+                unsafe { squeue.push(&entry.user_data(user_data)) }.unwrap();
                 submitted += 1;
             }
 
             drop(squeue);
 
-            // Submit the operations and "wait" for completion (which should not block,
-            // thanks to our cancels).
-            // TODO: do we actually need `_and_wait` here?
-            let completed = self.io_uring.submit_and_wait(2 * submitted)?;
-            assert_eq!(completed, 2 * submitted);
+            // Submit the operations and wait for completion (which should not
+            // block, thanks to RWF_NOWAIT/MSG_DONTWAIT).
+            let completed = self.io_uring.submit_and_wait(submitted)?;
+            assert_eq!(completed, submitted);
 
             // Read results from the completion queue.
             let mut cqueue = self.io_uring.completion();
-            let mut completions = [const { MaybeUninit::uninit() }; MAX_ENTRIES * 2];
+            let mut completions = [const { MaybeUninit::uninit() }; MAX_ENTRIES];
             let completions = cqueue.fill(&mut completions);
-            assert_eq!(completions.len(), 2 * submitted);
+            assert_eq!(completions.len(), submitted);
 
             let results_base = results.len();
             results.reserve(submitted);
 
-            // Process results, skipping over the results of our cancel operations.
             for entry in completions {
-                if entry.user_data() == 0 {
-                    // a cancel request
-                    continue;
-                }
-
                 let result = entry.result();
 
-                if result == -libc::ECANCELED {
-                    // This operation was cancelled.  Don't append to `results`,
-                    // under the assumption that the remainder of operations were
-                    // cancelled as well.
+                if result == -libc::EAGAIN {
+                    // This operation would have blocked.  Don't append to
+                    // `results`, under the assumption that the remainder of
+                    // operations would have blocked as well.
                     //
                     // Note though that, because io_uring processing is racing
-                    // against the rest of the system, and we are unable to use
-                    // linking to stop processing at the first error for the reasons
-                    // above, we may see successful operations after cancelled ones.
-                    // So we must `continue` here, and not `break`.
-                    // Filling in the gaps in the `results` vector is handled below.
+                    // against the rest of the system, we may see successful
+                    // operations after ones that would have blocked (e.g. if
+                    // more data arrives between two operations being
+                    // processed). So we must `continue` here, and not
+                    // `break`. Filling in the gaps in the `results` vector is
+                    // handled below.
 
                     continue;
                 }
 
                 // Grab the unique identifier of the operation.
-                let idx = (entry.user_data() - 1) as usize;
+                let idx = entry.user_data() as usize;
 
                 if idx >= results.len() - results_base {
                     // Note that, for some reason, results may come out of order.
-                    // (It seems that cancel operations may be processed asynchronously.)
                     // So, fill skipped-over results with EWOULDBLOCK.
 
                     results.resize_with(results_base + idx + 1, || {
