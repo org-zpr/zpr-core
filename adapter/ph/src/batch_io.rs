@@ -577,7 +577,12 @@ mod io_uring {
 
                 // NOTE: ideally we'd use LINK and O_NONBLOCK, but:
                 // (a) since all reads from a TUN are "short", LINK treats them as failures,
+                //     -> see call to need_complete_io() in io_uring/rw.c:977... shouldn't this address this??
+                //        -> req->flags & REQ_F_ISREG || S_ISBLK()
                 // (b) O_NONBLOCK is ignored by io_uring, and
+                //     -> what about IO_URING_F_NONBLOCK issue flag in io_uring/rw.c:916?
+                //        -> this is used for polling... should we poll first instead?
+                //     -> what about REQ_F_FORCE_ASYNC?
                 // (c) RWF_NOWAIT is not supported by TUN devices.
                 //
                 // So instead we must manually cancel all requests which
@@ -1548,6 +1553,149 @@ mod tests {
     }
 
     // NOTE: we don't have any way of really testing the "send_from" functionality as a unit test
+
+    #[test]
+    fn test_recv_stress_no_stall() {
+        // zipline#117: a batch receive on an empty or partly-filled socket
+        // must never block the calling thread waiting for traffic that has
+        // not arrived.
+        //
+        // On the io_uring engine, each batch op was paired with an
+        // AsyncCancel and the engine waited for every completion, relying on
+        // each cancel finding its op.  A cancel can return -ENOENT while its
+        // op is still pending (e.g. the op was woken by a datagram that a
+        // sibling op then consumed, and re-armed its poll), leaving
+        // submit_and_wait() blocked until the next unrelated datagram
+        // completes the op -- observed as ~600 ms fastpath stalls in the
+        // netns integration tier.
+        //
+        // Reproduce: the sender sends sequenced datagrams one at a time at
+        // randomized sub-millisecond offsets while the receiver busy-loops
+        // 64-op batch receives on the otherwise empty socket, so datagrams
+        // keep arriving inside the submit/cancel window.  The receiver acks
+        // each newly-seen datagram; the sender sends the next only on an
+        // ack, or after GAP if the ack never comes (i.e. the receiver is
+        // blocked inside a batch call).  A stalled call is thus always
+        // unblocked by a later datagram, its duration is measured, and no
+        // datagram can paper over a preceding one's stall.  Any batch call
+        // taking STALL or longer fails the test, as does any datagram that
+        // is never returned.
+
+        const BATCH: usize = 64;
+        const NDATAGRAMS: u64 = 1000;
+        const STALL: Duration = Duration::from_millis(50);
+        const GAP: Duration = Duration::from_millis(100);
+        const HEARTBEAT: u64 = u64::MAX;
+
+        // Iterate posix_unbatched (the control engine) first, so an io_uring
+        // failure does not mask its result.
+        for engine in ENGINES.iter().rev() {
+            let engine_name = engine.engine_name();
+
+            let inq = udp_socket().unwrap();
+            let outq = udp_socket().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_nonblocking(true).unwrap();
+            inq.connect(outq.local_addr().unwrap()).unwrap();
+
+            let mut bio = engine.instantiate(BATCH).unwrap();
+
+            let (ack_tx, ack_rx) = std::sync::mpsc::channel::<()>();
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+            let sender_stop = stop.clone();
+            let sender = std::thread::spawn(move || {
+                let mut rng = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .subsec_nanos() as u64
+                    | 1;
+
+                let mut seq = 0u64;
+                while seq < NDATAGRAMS {
+                    // One datagram at a randomized sub-millisecond offset, to
+                    // land it at an arbitrary point of the receiver's batch
+                    // calls; then wait for its ack before the next, so that a
+                    // stall shows up as a >= GAP batch call instead of being
+                    // cut short by the following datagram.
+                    std::thread::sleep(Duration::from_micros(xorshift(&mut rng) % 700));
+                    inq.send(&seq.to_le_bytes()).unwrap();
+                    seq += 1;
+                    let _ = ack_rx.recv_timeout(GAP);
+                }
+
+                // Keep the receiver unblockable while it drains the last
+                // bursts: a stalled batch call only returns when the next
+                // datagram arrives.
+                while !sender_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    inq.send(&HEARTBEAT.to_le_bytes()).unwrap();
+                    std::thread::sleep(GAP);
+                }
+            });
+
+            let mut seen = vec![false; NDATAGRAMS as usize];
+            let mut nseen = 0usize;
+            let mut max_elapsed = Duration::ZERO;
+            let mut bufs = vec![Vec::with_capacity(64); BATCH];
+            let mut results = Vec::new();
+            let deadline = std::time::Instant::now() + Duration::from_secs(120);
+
+            while nseen < NDATAGRAMS as usize {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "[{engine_name}] lost datagram(s): only {nseen} of {NDATAGRAMS} received"
+                );
+
+                bufs.iter_mut().for_each(|b| b.clear());
+                results.clear();
+
+                let start = std::time::Instant::now();
+                match bio.try_recv_buf_from_batch(&outq, bufs.iter_mut(), &mut results) {
+                    Ok(_) => (),
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => (),
+                    Err(err) => panic!("[{engine_name}] batch receive failed: {err}"),
+                }
+                let elapsed = start.elapsed();
+                max_elapsed = max_elapsed.max(elapsed);
+
+                assert!(
+                    elapsed < STALL,
+                    "[{engine_name}] batch receive blocked for {elapsed:?} (>= {STALL:?}) \
+                     after {nseen} of {NDATAGRAMS} datagrams: an operation was left in \
+                     flight and the engine waited for traffic that had not arrived"
+                );
+
+                for (buf, result) in bufs.iter().zip(results.drain(..)) {
+                    let Ok(packet) = result else { continue };
+                    assert_eq!(packet.size, 8, "[{engine_name}] short datagram");
+                    let seq = u64::from_le_bytes(buf[..8].try_into().unwrap());
+                    if seq == HEARTBEAT || seq as usize >= seen.len() {
+                        continue;
+                    }
+                    if !seen[seq as usize] {
+                        seen[seq as usize] = true;
+                        nseen += 1;
+                        let _ = ack_tx.send(());
+                    }
+                }
+            }
+
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            sender.join().unwrap();
+
+            println!(
+                "engine {engine_name}: received all {NDATAGRAMS} datagrams, \
+                 max batch call {max_elapsed:?}"
+            );
+        }
+    }
+
+    fn xorshift(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
 
     fn udp_socket() -> Result<UdpSocket> {
         UdpSocket::bind(std::net::SocketAddrV6::new(
