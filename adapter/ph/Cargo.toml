@@ -58,9 +58,9 @@ zpr-ext = { workspace = true, features = ["bytes", "tokio", "socket2", "zerocopy
 zpr-utils = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-capnp-patched = { package = "capnp", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cfbcb9b", optional = true }
-capnp-rpc-patched = { package = "capnp-rpc", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cfbcb9b", optional = true }
-capnp-futures-patched = { package = "capnp-futures", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cfbcb9b", optional = true }
+capnp-patched = { package = "capnp", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+capnp-rpc-patched = { package = "capnp-rpc", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+capnp-futures-patched = { package = "capnp-futures", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7.4", optional = true }
