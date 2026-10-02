@@ -7,6 +7,7 @@ members = ["adapter/admin-api", "adapter/ph", "adapter/cli", "libnode2", "fuzz"]
 version = "0.7.0"
 edition = "2024"
 license = "Apache-2.0"
+rust-version = "1.98.1"
 
 [workspace.dependencies]
 aws-lc-rs = "1.17"
