@@ -21,8 +21,8 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "admin-api"
 version = "0.7.0"
 dependencies = [
- "capnp 0.25.6",
- "capnp 0.26.2",
+ "capnp 0.26.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "capnp 0.26.2 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
  "capnpc 0.25.3",
  "capnpc 0.26.0",
  "strum 0.27.2",
@@ -423,6 +423,15 @@ dependencies = [
 [[package]]
 name = "capnp"
 version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58ddce707ad9fb2ae92770523cd0e17a0cf34e79b66a9ca4db2dd993535fe718"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
+name = "capnp"
+version = "0.26.2"
 source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2#cb619b2efbe7d8b0f969038d556be82d216df8f9"
 dependencies = [
  "embedded-io",
@@ -430,11 +439,11 @@ dependencies = [
 
 [[package]]
 name = "capnp-futures"
-version = "0.25.2"
+version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73b69dfddccc57844f9a90f9d72b44b97c326914851ea94fb7da40ef9cad6e8d"
+checksum = "e2a0655816a8c19628e54f9f9c373549e4a7166effd0cf92c3d05e3426e85d4e"
 dependencies = [
- "capnp 0.25.6",
+ "capnp 0.26.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-channel",
  "futures-util",
 ]
@@ -444,7 +453,7 @@ name = "capnp-futures"
 version = "0.26.1"
 source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2#cb619b2efbe7d8b0f969038d556be82d216df8f9"
 dependencies = [
- "capnp 0.26.2",
+ "capnp 0.26.2 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
  "futures-channel",
  "futures-core",
  "futures-io",
@@ -454,25 +463,25 @@ dependencies = [
 
 [[package]]
 name = "capnp-rpc"
-version = "0.25.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3c74c337e87f75f3174ffb3513738ab0acc631c04f64cc33b867c60f84771da"
+version = "0.26.1"
+source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2#cb619b2efbe7d8b0f969038d556be82d216df8f9"
 dependencies = [
- "capnp 0.25.6",
- "capnp-futures 0.25.2",
- "futures",
+ "capnp 0.26.2 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
+ "capnp-futures 0.26.1 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
 ]
 
 [[package]]
 name = "capnp-rpc"
-version = "0.26.1"
-source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2#cb619b2efbe7d8b0f969038d556be82d216df8f9"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44dc4aa9dc0f725ef11deb423cea95d9b64c2e0692d0621e4334cc463fd69d95"
 dependencies = [
- "capnp 0.26.2",
- "capnp-futures 0.26.1",
- "futures-channel",
- "futures-io",
- "futures-util",
+ "capnp 0.26.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "capnp-futures 0.26.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures",
 ]
 
 [[package]]
@@ -489,7 +498,7 @@ name = "capnpc"
 version = "0.26.0"
 source = "git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2#cb619b2efbe7d8b0f969038d556be82d216df8f9"
 dependencies = [
- "capnp 0.26.2",
+ "capnp 0.26.2 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
 ]
 
 [[package]]
@@ -2284,8 +2293,8 @@ name = "libnode2"
 version = "0.7.0"
 dependencies = [
  "aws-lc-rs",
- "capnp 0.25.6",
- "capnp-rpc 0.25.1",
+ "capnp 0.26.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "capnp-rpc 0.26.3",
  "clap",
  "crossterm",
  "ratatui",
@@ -2823,11 +2832,11 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "bytes",
- "capnp 0.25.6",
- "capnp 0.26.2",
- "capnp-futures 0.26.1",
- "capnp-rpc 0.25.1",
+ "capnp 0.26.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "capnp 0.26.2 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
+ "capnp-futures 0.26.1 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
  "capnp-rpc 0.26.1",
+ "capnp-rpc 0.26.3",
  "cbpf-rs",
  "chrono",
  "clap",
@@ -2879,11 +2888,11 @@ name = "ph-cli"
 version = "0.7.0"
 dependencies = [
  "admin-api",
- "capnp 0.25.6",
- "capnp 0.26.2",
- "capnp-futures 0.26.1",
- "capnp-rpc 0.25.1",
+ "capnp 0.26.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "capnp 0.26.2 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
+ "capnp-futures 0.26.1 (git+https://github.com/emilazy/capnproto-rust.git?rev=cb619b2)",
  "capnp-rpc 0.26.1",
+ "capnp-rpc 0.26.3",
  "cbpf-rs",
  "clap",
  "clap_complete",
