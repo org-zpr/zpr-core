@@ -33,7 +33,7 @@ ipnet = { workspace = true }
 itertools = "0.14"
 libc = { version = "0.2.183" }
 libnode = { package = "libnode2", path = "../../libnode2" }
-nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll", "uio"] }
+nix = { version = "0.31", features = ["fs", "ioctl", "net", "poll", "uio"] }
 open-enum = { version = "0.5.1" }
 pkcs8 = "0.11"
 rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.1", default-features = false }
@@ -65,7 +65,7 @@ capnp-futures-patched = { package = "capnp-futures", git = "https://github.com/e
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7.4", optional = true }
-tokio-tun = { version = "0.11.5" }
+tokio-tun = { version = "0.15" }
 
 [dev-dependencies]
 futures = "0.3.31"

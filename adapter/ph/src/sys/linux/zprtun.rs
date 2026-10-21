@@ -59,7 +59,8 @@ impl ZprTun {
             }
         }
         let tok_tun_devs = bldr
-            .try_build_mq(concurrency)
+            .queues(concurrency)
+            .build()
             .or_else(|e| Err(ZprTunError::PlatformError(e.to_string())))?;
 
         //let tun_ifname = String::from(tok_tun_devs[0].name());

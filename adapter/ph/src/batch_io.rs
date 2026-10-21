@@ -952,7 +952,7 @@ mod posix_unbatched {
                     // SAFETY: We will only be writing to the chunk.
                     let chunk =
                         unsafe { slice_assume_init_mut(buf.chunk_mut().as_uninit_slice_mut()) };
-                    let amt = unistd::read(fd.as_raw_fd(), chunk).map_err(errno_to_error)?;
+                    let amt = unistd::read(fd, chunk).map_err(errno_to_error)?;
                     // SAFETY: We know we've written the given number of bytes in the BufMut.
                     unsafe { buf.advance_mut(amt as usize) };
                     Ok(amt)

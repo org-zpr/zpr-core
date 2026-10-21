@@ -28,7 +28,7 @@ fn map_nix_err(errno: errno::Errno) -> std::io::Error {
 
 fn set_nonblocking(fd: impl AsFd) -> Result<()> {
     let _ = fcntl::fcntl(
-        fd.as_fd().as_raw_fd(),
+        fd.as_fd(),
         fcntl::FcntlArg::F_SETFL(fcntl::OFlag::O_NONBLOCK),
     )
     .map_err(map_nix_err)?;
@@ -83,7 +83,7 @@ impl Notify {
     pub fn consume(&self) -> bool {
         let mut buf = [0u8; 4096];
 
-        match unistd::read(self.reader.as_raw_fd(), &mut buf) {
+        match unistd::read(&self.reader, &mut buf) {
             Ok(0) => panic!("Unexpected end of file"),
             Ok(n) if n < buf.len() => return true,
             Ok(_) => (),
@@ -105,7 +105,7 @@ impl Notify {
         let mut remaining = fionread(&self.reader).unwrap() as isize;
 
         while remaining > 0 {
-            match unistd::read(self.reader.as_raw_fd(), &mut buf) {
+            match unistd::read(&self.reader, &mut buf) {
                 Ok(0) => panic!("Unexpected end of file"),
                 Ok(n) if n < buf.len() => break,
                 Ok(n) => remaining -= n as isize,
