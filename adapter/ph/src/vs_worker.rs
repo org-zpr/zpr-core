@@ -88,31 +88,30 @@ pub async fn launch(
             };
 
             if connected {
+                // VSS registration snapshots both actors' A2A keys into its callback
+                // visa. Register the bootstrapped VS adapter before minting that visa.
+                let deferred = asm.deferred_vs_connect.lock().unwrap().take();
+                if let Some((vs_link_id, assigned_addr, conn_req)) = deferred {
+                    if let Err(e) = visa_mgmt::send_deferred_vs_connect(
+                        &asm,
+                        vs_link_id,
+                        assigned_addr,
+                        conn_req,
+                    )
+                    .await
+                    {
+                        panic!(
+                            "{}: deferred visa service adapter connect failed: {e}",
+                            asm.formatted_link_id(vs_link_id)
+                        );
+                    }
+                }
                 match vs_handle.register_vss(vss_addr).await {
                     Ok(ops) => {
                         info!(target: STARTUP, "registered VSS, received {} pending visa ops", ops.len());
                         for op in ops {
                             if let Err(e) = vss_worker::process_visaop(&asm, op) {
                                 error!(target: STARTUP, "failed to process initial visa op from VS: {e:?}");
-                            }
-                        }
-
-                        // The route to the visa service runs through the VS adapter's own tunnel, so its
-                        // connect request could not be sent at bootstrap. That tunnel is up now.
-                        let deferred = asm.deferred_vs_connect.lock().unwrap().take();
-                        if let Some((vs_link_id, assigned_addr, conn_req)) = deferred {
-                            if let Err(e) = visa_mgmt::send_deferred_vs_connect(
-                                &asm,
-                                vs_link_id,
-                                assigned_addr,
-                                conn_req,
-                            )
-                            .await
-                            {
-                                panic!(
-                                    "{}: deferred visa service adapter connect failed: {e}",
-                                    asm.formatted_link_id(vs_link_id)
-                                );
                             }
                         }
 

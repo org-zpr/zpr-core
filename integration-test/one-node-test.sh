@@ -223,6 +223,13 @@ in_ns zpr-b "$PH_BIN" \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
+  ACTOR3_ADDRESS_ARGS=(--zpr-addr "$C_ZPR_ADDR")
+  if [[ "$ACTOR_PROTOCOL" == ipv6 ]]; then
+    # Cover VS allocation as well as the requested addresses on actors A and B.
+    in_ns zpr-c ip -6 addr del "$C_ZPR_ADDR" peer "$ZPR_SUBNET" dev tun0
+    in_ns zpr-c ip -6 route replace "$ZPR_SUBNET" dev tun0
+    ACTOR3_ADDRESS_ARGS=()
+  fi
   # Note, this adapter we connect to the "alternative" dock address
   # on this interface, to test that replies are still routed correctly.
   in_ns zpr-c "$PH_BIN" \
@@ -236,7 +243,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --km-impl "$KM_IMPL" \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT" \
-    --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
+    "${ACTOR3_ADDRESS_ARGS[@]}" 2>&1 | tee adapter3.log | prefix_log zpr-c &
 fi
 
 #
@@ -260,6 +267,26 @@ fi
 
 if [[ "$PASS" == 0 ]] then
 echo "Carrier has arrived."
+echo "Wait for actor authorization..."
+wait_for 15 check_actor_authorized "$VS_SOCK" || { PASS=1; }
+wait_for 15 check_actor_authorized "$ADAPTER1_SOCK" || { PASS=1; }
+wait_for 15 check_actor_authorized "$ADAPTER2_SOCK" || { PASS=1; }
+if [[ "$NUM_ACTORS" -ge 3 ]]; then
+  wait_for 15 check_actor_authorized "$ADAPTER3_SOCK" || { PASS=1; }
+  if [[ "$PASS" == 0 && "$ACTOR_PROTOCOL" == ipv6 ]]; then
+    C_ZPR_ADDR=$(in_ns zpr-c ip -6 -o addr show dev tun0 scope global |
+      awk '$4 !~ /:aaa:/ { sub(/\/.*/, "", $4); print $4 }')
+    if [[ -z "$C_ZPR_ADDR" || "$C_ZPR_ADDR" == *$'\n'* ]]; then
+      echo "Expected exactly one dynamically granted actor address"
+      PASS=1
+    else
+      echo "Actor C received dynamic address $C_ZPR_ADDR"
+    fi
+  fi
+fi
+fi
+
+if [[ "$PASS" == 0 ]] then
 # This sleep solves a display issue because magic
 sleep 1
 

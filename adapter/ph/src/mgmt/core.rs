@@ -83,6 +83,16 @@ pub fn send_per_flow_txn_mgmt(
     )
 }
 
+pub fn send_non_flow_txn_mgmt(
+    asm: &Assembly,
+    link_id: LinkId,
+    packet_type: zdp::ZdpPacketType,
+    txn_id: super::txn_mgr::TxnId,
+    packet: Packet,
+) -> Sent<'_> {
+    send_mgmt_helper(asm, link_id, packet_type, None, Some(txn_id), packet)
+}
+
 pub fn send_acknowledgement(asm: &Assembly, link_id: LinkId, sequence_number: SeqNum) {
     send_zdpr_common(
         asm,

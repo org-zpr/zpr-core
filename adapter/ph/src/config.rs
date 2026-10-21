@@ -60,15 +60,10 @@ pub const MIN_VISA_ID: u64 = 1000;
 /// wait this long before retry.
 pub const VSCONN_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Slightly longer -- asking visa service to grant an address
-/// means it may have to do a lot of work to verify auth.
-pub const VS_GRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
 /// How long to wait for an actor to finish out of band authentication.
 pub const ACTOR_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-
-/// How long to wait when we expect the VS to have to talk to external auth services.
-pub const VS_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+pub const ACTOR_AUTH_RETRY_INITIAL: std::time::Duration = std::time::Duration::from_secs(1);
+pub const ACTOR_AUTH_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(30);
 
 const DEFAULT_BUFFER_COUNT: usize = 512; // should be at least 5x batch size; see fastpath_worker.rs for explanation
 const DEFAULT_BATCH_SIZE: usize = 64;

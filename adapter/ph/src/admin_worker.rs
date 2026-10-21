@@ -339,8 +339,8 @@ impl svc::Server for AdminServiceImpl {
                 let lsm = &peer.link_state_machine;
 
                 format!(
-                    "Link {id} info:\nSubstrate Address: {}\n{}",
-                    peer.substrate_addr, lsm,
+                    "Link {id} info:\nSubstrate Address: {}\n{}{}",
+                    peer.substrate_addr, lsm, peer.actor_auth,
                 )
             }
             None => format!("No such link {id}\n"),
@@ -675,9 +675,10 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
 fn get_link_summary(asm: &Arc<Assembly>, link_id: LinkId) -> String {
     match asm.peer_table.get(link_id) {
         Some(peer) => format!(
-            "{} ({:?})",
+            "{} ({:?})\n{}",
             peer.substrate_addr,
-            peer.link_state_machine.get_state()
+            peer.link_state_machine.get_state(),
+            peer.actor_auth,
         ),
         None => format!("Unconfigured"),
     }

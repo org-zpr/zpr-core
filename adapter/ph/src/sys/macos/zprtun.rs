@@ -61,6 +61,19 @@ impl ZprTun {
     }
 
     pub fn add_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
+        self.add_address_impl(addr, prefix_len, false)
+    }
+
+    pub fn add_authentication_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
+        self.add_address_impl(addr, prefix_len, true)
+    }
+
+    fn add_address_impl(
+        &self,
+        addr: IpAddr,
+        prefix_len: u8,
+        authentication: bool,
+    ) -> std::io::Result<()> {
         let mtx = self
             .mtx
             .lock()
@@ -85,6 +98,9 @@ impl ZprTun {
             }
         }
         c.arg("alias");
+        if authentication {
+            c.arg("deprecated");
+        }
         debug!(target: NET_OS, "{:?}", c);
         let output = c.output()?;
         if !output.status.success() {
@@ -137,7 +153,7 @@ impl ZprTun {
         Ok(())
     }
 
-    fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
+    pub fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
         if addr.is_ipv4() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
@@ -164,9 +180,17 @@ impl ZprTun {
                 ),
             ));
         }
-        // Just look for the pattern "inet6 <addr>" + "%" in the output.
         let out_str = String::from_utf8_lossy(&output.stdout);
-        Ok(out_str.contains(&format!("inet6 {}%", addr)))
+        Ok(out_str.lines().any(|line| {
+            let mut fields = line.split_whitespace();
+            fields.next() == Some("inet6")
+                && fields.next().and_then(|field| {
+                    field
+                        .split('%')
+                        .next()
+                        .and_then(|ip| ip.parse::<IpAddr>().ok())
+                }) == Some(addr)
+        }))
     }
 }
 

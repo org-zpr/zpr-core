@@ -9,6 +9,7 @@ pub mod packet;
 pub mod queues;
 
 // Public modules
+pub mod actor_auth;
 pub mod adapter_manager_worker;
 pub mod adapter_tables;
 pub mod address_pool;
