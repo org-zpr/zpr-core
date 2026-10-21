@@ -2743,6 +2743,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls",
  "tokio-tun",
  "tokio-util",
  "toml",

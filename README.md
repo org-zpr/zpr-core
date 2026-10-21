@@ -45,6 +45,10 @@ To run the ZPRnet you need at least:
 
 ## How to setup a ZPRnet
 
+Adapter-node link establishment and actor authorization have independent
+lifecycles. See [actor authorization](diagrams/actor_authorization.md) for the
+state machines, wire protocol, retry policy, and bootstrap exception.
+
 A minimal ZPRnet has a node and a visa service. You will probably also
 want a service or two that run on the net, plus some client adapters
 that connect in and access the services.

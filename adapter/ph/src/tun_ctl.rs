@@ -7,6 +7,8 @@ use std::sync::Arc;
 /// its state.  Its API is limited to restrict coupling of the full system
 /// with the TUN device.
 pub trait TunCtl: Sync {
+    fn has_address(&self, addr: IpAddr) -> Result<bool>;
+
     /// Inform the kernel's networking layer whether a carrier is present.
     /// (I.e. whether we are passing packets.)  This is reflected on the
     /// interface itself and is used by the kernel to make routing decisions.
@@ -14,6 +16,9 @@ pub trait TunCtl: Sync {
 
     /// Adds an IP address of the TUN device.
     fn add_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()>;
+
+    /// Add AAA as a valid but non-preferred source; authentication binds it explicitly.
+    fn add_authentication_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()>;
 
     /// Clear an IP address from the TUN device.  Does not error if address is not set to begin with.
     fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()>;
@@ -32,11 +37,18 @@ impl TunCtlImpl {
 }
 
 impl TunCtl for TunCtlImpl {
+    fn has_address(&self, addr: IpAddr) -> Result<bool> {
+        self.tun.has_address(addr)
+    }
+
     fn set_carrier(&self, carrier: bool) -> Result<()> {
         self.tun.set_carrier(carrier)
     }
     fn add_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
         self.tun.add_address(addr, prefix_len)
+    }
+    fn add_authentication_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
+        self.tun.add_authentication_address(addr, prefix_len)
     }
     fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
         self.tun.clear_address(addr, prefix_len)

@@ -113,6 +113,11 @@ impl std::fmt::Debug for SetActiveError {
 }
 
 impl EndpointLookupTable {
+    pub fn clear(&self) {
+        self.table.clear();
+        self.pending.clear();
+    }
+
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),
@@ -230,6 +235,12 @@ pub struct DockLookupTable {
 pub type DltPepGuard<'a> = RcuCslabEntryGuard<'a, DltPep>;
 
 impl DockLookupTable {
+    pub fn clear(&self) {
+        let mut table = self.table.lock().unwrap();
+        *table = RcuCslab::with_fixed_capacity(DOCK_LOOKUP_TABLE_SIZE);
+        self.reader.write(table.reader());
+    }
+
     pub fn new() -> Self {
         let table = RcuCslab::with_fixed_capacity(DOCK_LOOKUP_TABLE_SIZE);
         let reader = table.reader();
@@ -264,7 +275,6 @@ impl DockLookupTable {
     pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
-        std::mem::drop(table);
         self.reader.write(new_reader);
     }
 }
