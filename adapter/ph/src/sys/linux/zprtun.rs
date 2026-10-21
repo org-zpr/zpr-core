@@ -45,6 +45,10 @@ impl ZprTun {
         address: Option<IpAddr>,
     ) -> std::result::Result<Vec<Self>, ZprTunError> {
         let mut bldr = TunBuilder::new();
+        // tokio-tun 0.15 defaults to IFF_NO_PI (0.11 defaulted to packet info
+        // enabled). ph's TUN framing expects the 4-byte PI header on Linux
+        // (see zprtun::TUN_HAS_PI / sys::TunPi), so request it explicitly.
+        bldr = bldr.packet_info();
         if let Some(ifname) = ifname {
             bldr = bldr.name(&ifname);
         }
