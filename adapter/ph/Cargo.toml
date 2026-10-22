@@ -71,6 +71,7 @@ tokio-tun = { version = "0.15" }
 futures = "0.3.31"
 serial_test = "4.0"
 tokio = { workspace = true, features = ["test-util"] }
+tokio-rustls = "0.26"
 
 [features]
 default = ["io-uring", "rcu-crossbeam-epoch", "capnp-ancillary"]

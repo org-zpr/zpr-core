@@ -144,9 +144,8 @@ pub fn bind_actor_address(
 
     // Ensure this adapter actually owns this source address.
 
-    if !peer_state
-        .link_state_machine
-        .has_actor_address(&five_tuple.src_address)
+    if !peer_state.actor_auth.owns_address(&five_tuple.src_address)
+        && peer_state.link_state_machine.aaa_address() != Some(five_tuple.src_address)
     {
         warn!(target: FLOW_MGMT, "{}: bind request: source address {} does not match actor address", asm.formatted_link_id(ingress_link_id.get()), &five_tuple.src_address);
         return requested_visa_denied(asm, ingress_link_id, txn_id);

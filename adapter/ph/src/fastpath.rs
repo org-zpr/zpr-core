@@ -300,6 +300,12 @@ impl FastpathWorker {
     pub fn actor_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
         // lookup five tuple in ELT
         let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
+        if self.asm.ph_mode == crate::assembly::PhMode::Adapter
+            && !self.asm.adapter_owns_address(five_tuple.src_address)
+        {
+            self.drop_and_count(pkt, FastpathCounterType::OtherError);
+            return;
+        }
         let Some(entry) = self.asm.elt.get(&five_tuple) else {
             if !allow_bind_request {
                 // avoid the (all-but purely theoretical) chance of a packet loop,
@@ -574,6 +580,15 @@ impl FastpathWorker {
             self.drop_and_count(pkt, FastpathCounterType::UnknownStreamId);
             return;
         };
+        if self.asm.ph_mode == crate::assembly::PhMode::Adapter
+            && !self
+                .asm
+                .adapter_owns_address(pep.tc.five_tuple().dst_address)
+        {
+            drop(pep);
+            self.drop_and_count(pkt, FastpathCounterType::OtherError);
+            return;
+        }
 
         compress::expand(pep.tc.compression_mode(), &pep.tc.five_tuple(), &mut pkt);
 

@@ -132,6 +132,9 @@ pub enum ManagementCounterType {
     PeerRemoved,
     PeerHandshakeSuccess,
     PeerHandshakeFailure,
+    ActorAuthorizationSuccess,
+    ActorAuthorizationRejected,
+    ActorAuthorizationRetry,
 
     // RFC 6.5 § 8.2.1
     SequenceError,
@@ -220,6 +223,9 @@ impl ManagementCounterType {
             Self::PeerRemoved => "Management Peer Removed",
             Self::PeerHandshakeSuccess => "Peer Handshake Success",
             Self::PeerHandshakeFailure => "Peer Handshake Failure",
+            Self::ActorAuthorizationSuccess => "Actor Authorization Success",
+            Self::ActorAuthorizationRejected => "Actor Authorization Rejected",
+            Self::ActorAuthorizationRetry => "Actor Authorization Retry",
 
             // § 8.2.1 ZDP errors
             Self::SequenceError => "Sequence Error",

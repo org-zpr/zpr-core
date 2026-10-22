@@ -32,7 +32,11 @@ impl DataType {
     pub const WINDOW_SIZE: TlvType = 6;
     pub const A2A_DH_PUBKEY: TlvType = 7; // Actor to Actor Diffie-Hellman Public Key
     pub const BOOTSTRAP_VISA: TlvType = 8;
+    pub const ACTOR_AUTH_PROTOCOL: TlvType = 9;
+    pub const VS_BOOTSTRAP_LINK: TlvType = 10;
 }
+
+pub const ACTOR_AUTH_PROTOCOL_VERSION: u16 = 1;
 
 /// TlvEncoding is a designed to be an easy way to create and write TLV data
 /// into a buffer.
@@ -42,6 +46,20 @@ pub struct TlvEncoding {
 }
 
 impl TlvEncoding {
+    pub fn new_actor_auth_protocol() -> Self {
+        Self {
+            tlv_type: DataType::ACTOR_AUTH_PROTOCOL,
+            value: TlvValue::U16(ACTOR_AUTH_PROTOCOL_VERSION),
+        }
+    }
+
+    pub fn new_vs_bootstrap_link() -> Self {
+        Self {
+            tlv_type: DataType::VS_BOOTSTRAP_LINK,
+            value: TlvValue::U16(1),
+        }
+    }
+
     pub fn new_policy_id(policy_id: i64) -> TlvEncoding {
         TlvEncoding {
             tlv_type: DataType::POLICY_ID,
@@ -375,7 +393,7 @@ pub fn parse_from_buf(
                         key_bytes,
                     )));
             }
-            DataType::WINDOW_SIZE => {
+            DataType::WINDOW_SIZE | DataType::ACTOR_AUTH_PROTOCOL | DataType::VS_BOOTSTRAP_LINK => {
                 if tlv_length != 2 {
                     return Err(TlvError::BadStructure);
                 }
