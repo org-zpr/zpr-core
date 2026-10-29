@@ -32,6 +32,14 @@ pub enum LinkState {
     Error,
 }
 
+#[derive(Clone, Debug)]
+pub struct HelloResponse {
+    pub status: ResponseCode,
+    pub aaa_address: Option<IpAddress>,
+    pub asa_addresses: Option<Vec<SocketAddr>>,
+    pub vs_bootstrap: bool,
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Debug, strum::IntoStaticStr)]
 pub enum LinkEvent {
@@ -39,12 +47,12 @@ pub enum LinkEvent {
     KeyingDone,
     ReceivedHelloRequest,
     AssignedAAA(IpAddress), // Assigned AAA address for this link
-    ReceivedHelloResponse(
-        ResponseCode,
-        Option<IpAddress>,
-        Option<Vec<SocketAddr>>,
-        bool,
-    ), // response, AAA, ASA, VS bootstrap link
+    ReceivedHelloResponse {
+        status: ResponseCode,
+        aaa_address: Option<IpAddress>,
+        asa_addresses: Option<Vec<SocketAddr>>,
+        vs_bootstrap: bool,
+    },
 
     ReceivedKeepAliveResponse,
     ReceivedTerminateLink(TerminateReason),
@@ -297,13 +305,10 @@ impl LinkStateWrapper {
     fn process_hello_response(
         &self,
         asm: &Arc<Assembly>,
-        code: ResponseCode,
-        aaa: Option<IpAddress>,
-        asa: Option<Vec<SocketAddr>>,
-        vs_bootstrap: bool,
+        response: HelloResponse,
     ) -> Result<(), LinkStateError> {
-        if code != ResponseCode::Success {
-            warn!(target: LINK_STATE, "{}: Hello failed: {code:?}", asm.formatted_link_id(self.id));
+        if response.status != ResponseCode::Success {
+            warn!(target: LINK_STATE, "{}: Hello failed: {:?}", asm.formatted_link_id(self.id), response.status);
             return self.initiate_close(asm, TerminateReason::Other);
         }
         let locked_fsm = self.locked_fsm.lock().unwrap();
@@ -313,17 +318,17 @@ impl LinkStateWrapper {
                 "ReceivedHelloResponse",
             ));
         }
-        if aaa.is_none() && !vs_bootstrap {
+        if response.aaa_address.is_none() && !response.vs_bootstrap {
             return Err(LinkStateError::InvalidOperation(
                 "ordinary link established without AAA".into(),
             ));
         }
         {
             let mut data = self.locked_data.lock().unwrap();
-            data.aaa_address = aaa;
-            data.asa_addresses = asa;
+            data.aaa_address = response.aaa_address;
+            data.asa_addresses = response.asa_addresses;
         }
-        if let Some(aaa) = aaa {
+        if let Some(aaa) = response.aaa_address {
             let exists = asm
                 .tun_ctl
                 .has_address(aaa.into())
@@ -388,9 +393,20 @@ impl LinkStateWrapper {
             LinkEvent::KeyingDone => self.process_keying_done(asm),
             LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
             LinkEvent::AssignedAAA(addr) => self.process_assigned_aaa(asm, addr),
-            LinkEvent::ReceivedHelloResponse(code, aaa_addr, maybe_asa_addrs, vs_bootstrap) => {
-                self.process_hello_response(asm, code, aaa_addr, maybe_asa_addrs, vs_bootstrap)
-            }
+            LinkEvent::ReceivedHelloResponse {
+                status,
+                aaa_address,
+                asa_addresses,
+                vs_bootstrap,
+            } => self.process_hello_response(
+                asm,
+                HelloResponse {
+                    status,
+                    aaa_address,
+                    asa_addresses,
+                    vs_bootstrap,
+                },
+            ),
 
             LinkEvent::ReceivedKeepAliveResponse => self.process_keep_alive_response(asm),
             LinkEvent::ReceivedTerminateLink(code) => self.process_terminate_link(asm, code),
@@ -1110,8 +1126,16 @@ mod tests {
                     .parse::<std::net::IpAddr>()
                     .unwrap()
                     .into();
-                link.process_hello_response(&asm, ResponseCode::Success, Some(aaa), None, false)
-                    .unwrap();
+                link.process_hello_response(
+                    &asm,
+                    HelloResponse {
+                        status: ResponseCode::Success,
+                        aaa_address: Some(aaa),
+                        asa_addresses: None,
+                        vs_bootstrap: false,
+                    },
+                )
+                .unwrap();
                 assert!(link.is_ready());
                 assert_eq!(link.aaa_address(), Some(aaa));
                 assert!(link.locked_fsm.lock().unwrap().timeout_handle.is_some());
@@ -1128,7 +1152,15 @@ mod tests {
                 let adapter = hello_link(LinkType::AdapterToNode);
                 assert!(
                     adapter
-                        .process_hello_response(&asm, ResponseCode::Success, None, None, false)
+                        .process_hello_response(
+                            &asm,
+                            HelloResponse {
+                                status: ResponseCode::Success,
+                                aaa_address: None,
+                                asa_addresses: None,
+                                vs_bootstrap: false,
+                            },
+                        )
                         .is_err()
                 );
                 assert!(!adapter.is_ready());
@@ -1154,7 +1186,15 @@ mod tests {
                 assert!(node.aaa_address().is_none());
                 let adapter = hello_link(LinkType::AdapterToNode);
                 adapter
-                    .process_hello_response(&asm, ResponseCode::Success, None, None, true)
+                    .process_hello_response(
+                        &asm,
+                        HelloResponse {
+                            status: ResponseCode::Success,
+                            aaa_address: None,
+                            asa_addresses: None,
+                            vs_bootstrap: true,
+                        },
+                    )
                     .unwrap();
                 assert!(adapter.is_ready());
             })
