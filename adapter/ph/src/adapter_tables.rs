@@ -113,6 +113,11 @@ impl std::fmt::Debug for SetActiveError {
 }
 
 impl EndpointLookupTable {
+    pub fn clear(&self) {
+        self.table.clear();
+        self.pending.clear();
+    }
+
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),
@@ -230,6 +235,12 @@ pub struct DockLookupTable {
 pub type DltPepGuard<'a> = RcuCslabEntryGuard<'a, DltPep>;
 
 impl DockLookupTable {
+    pub fn clear(&self) {
+        let mut table = self.table.lock().unwrap();
+        let reader = table.clear();
+        self.reader.write(reader);
+    }
+
     pub fn new() -> Self {
         let table = RcuCslab::with_fixed_capacity(DOCK_LOOKUP_TABLE_SIZE);
         let reader = table.reader();
@@ -266,5 +277,30 @@ impl DockLookupTable {
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
         std::mem::drop(table);
         self.reader.write(new_reader);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defs::FiveTuple;
+
+    #[test]
+    fn dlt_clear_publishes_empty_reader_and_keeps_old_guards_valid() {
+        let dlt = DockLookupTable::new();
+        let id = dlt
+            .insert(DltPep::new(tc::Ip5TupleTc::new(FiveTuple::default()), None))
+            .unwrap();
+        let old_guard = dlt.get(id).unwrap();
+
+        dlt.clear();
+
+        assert!(dlt.get(id).is_none());
+        assert_eq!(old_guard.tc.five_tuple(), &FiveTuple::default());
+        drop(old_guard);
+        assert!(
+            dlt.insert(DltPep::new(tc::Ip5TupleTc::new(FiveTuple::default()), None))
+                .is_ok()
+        );
     }
 }

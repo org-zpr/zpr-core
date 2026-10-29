@@ -34,6 +34,8 @@ pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
     pub interface_addr: ScopedIpAddr,
     pub link_state_machine: LinkStateWrapper,
+    // Shared with the actor worker and detached VS completion tasks, which outlive peer-table guards.
+    pub actor_auth: Arc<crate::actor_auth::ActorAuthorization>,
     pub pft: PeerForwardingTable,
     pub node_state: mgmt::node::NodePeerState,
     pub mgmt_processor: queues::MgmtProcessor,
@@ -110,6 +112,10 @@ impl PeerState {
             substrate_addr,
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
+            actor_auth: Arc::new(crate::actor_auth::ActorAuthorization::new(
+                link_id.get(),
+                link_type,
+            )),
             pft: PeerForwardingTable::new(),
             node_state: mgmt::node::NodePeerState::new(),
             mgmt_processor,
@@ -541,6 +547,10 @@ pub mod test {
             substrate_addr,
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
+            actor_auth: Arc::new(crate::actor_auth::ActorAuthorization::new(
+                link_id.get(),
+                link_type,
+            )),
             pft: PeerForwardingTable::new(),
             node_state: mgmt::node::NodePeerState::new(),
             mgmt_processor,

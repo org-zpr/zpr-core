@@ -153,6 +153,36 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
             packet_type => Err(HandleMgmtError::UnknownType(packet_type.0)),
         }
     } else {
+        if matches!(
+            base_hdr.packet_type,
+            ZdpPacketType::StartAuthentication
+                | ZdpPacketType::AbandonAuthenticationAttempt
+                | ZdpPacketType::InitAuthenticationRequest
+                | ZdpPacketType::AcquireZprAddress
+                | ZdpPacketType::GrantZprAddress
+        ) {
+            let hdr = ZdpTransactionHeader::read_from_buf(&mut pkt)
+                .map_err(|_| HandleMgmtError::BadStructure)?;
+            let txn = hdr.transaction_id.get();
+            return match base_hdr.packet_type {
+                ZdpPacketType::StartAuthentication => {
+                    handlers::handle_start_authentication(asm, txn, pkt).await
+                }
+                ZdpPacketType::AbandonAuthenticationAttempt => {
+                    handlers::handle_abandon_authentication(asm, txn, pkt).await
+                }
+                ZdpPacketType::InitAuthenticationRequest => {
+                    handlers::handle_init_authentication_request(asm, txn, pkt).await
+                }
+                ZdpPacketType::AcquireZprAddress => {
+                    handlers::handle_acquire_zpr_address_request(asm, txn, pkt).await
+                }
+                ZdpPacketType::GrantZprAddress => {
+                    handlers::handle_grant_zpr_address_request(asm, txn, pkt).await
+                }
+                _ => unreachable!(),
+            };
+        }
         match base_hdr.packet_type {
             ZdpPacketType::Report => handlers::handle_report(asm, pkt).await,
 
@@ -171,18 +201,6 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
             ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, pkt).await,
 
             ZdpPacketType::HelloResponse => handlers::handle_hello_response(asm, pkt).await,
-
-            ZdpPacketType::InitAuthenticationRequest => {
-                handlers::handle_init_authentication_request(asm, pkt).await
-            }
-
-            ZdpPacketType::AcquireZprAddress => {
-                handlers::handle_acquire_zpr_address_request(asm, pkt).await
-            }
-
-            ZdpPacketType::GrantZprAddress => {
-                handlers::handle_grant_zpr_address_request(asm, pkt).await
-            }
 
             packet_type => {
                 warn!("unhandled mgmt packet type {:?}", packet_type);

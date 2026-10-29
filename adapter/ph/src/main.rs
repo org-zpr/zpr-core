@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::*;
 
+mod actor_auth;
 mod adapter_manager_worker;
 mod adapter_tables;
 mod address_pool;
@@ -289,7 +290,7 @@ fn main() -> ExitCode {
 
     // TODO: Currently on linux we cannot configure a TUN interface with an IPv6 address.
     // So if you set tun_if in the config we assume TUN is there and has a static ZPR address.
-    let tun_addr = if !config.zpr_addr.is_empty() {
+    let tun_addr = if ph_mode == PhMode::Node && !config.zpr_addr.is_empty() {
         if config.tun_if.is_none() {
             Some(config.zpr_addr[0].clone())
         } else {
@@ -554,6 +555,7 @@ fn main() -> ExitCode {
     //
 
     let asm = Arc::new(Assembly {
+        actor_rejected: std::sync::atomic::AtomicBool::new(false),
         ph_mode,
         topology_config,
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
@@ -643,8 +645,8 @@ fn main() -> ExitCode {
                 asm.peer_table
                     .get(LOCAL_ACTOR_LINK_ID)
                     .unwrap()
-                    .link_state_machine
-                    .add_internal_actor_address(addr.into());
+                    .actor_auth
+                    .add_internal_address(addr.into());
             }
         }
     }

@@ -175,6 +175,24 @@ pub enum AuthError {
 
     #[error("Authentication Error: {0}")]
     AuthError(String),
+
+    #[error("authentication rejected: {0}")]
+    Rejected(String),
+
+    #[error("authentication service request failed: {0}")]
+    Service(#[from] reqwest::Error),
+}
+
+fn check_auth_status(status: StatusCode) -> Result<(), AuthError> {
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        Err(AuthError::Rejected(format!("HTTP {status}")))
+    } else if status.is_client_error() || status.is_server_error() {
+        Err(AuthError::AuthError(format!(
+            "authentication service HTTP {status}"
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -208,31 +226,11 @@ impl ZdpSelfSignedBlob {
 
     /// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].
     /// This extracts that data and checks that:
-    ///   - If the peer presented a certificate during keying, the CN in that
-    ///     certificate matches the CN in the blob. Adapters using self-generated
-    ///     keys send no certificate (`peer_cert` is `None`); there is then no
-    ///     cert CN to bind to, so this check is skipped and the blob CN is
-    ///     authenticated solely by the visa service's RSA signature check.
+    ///   - Actor identity is independent of the link certificate. The visa
+    ///     service authenticates the blob CN through its RSA signature.
     ///   - The HMAC in the blob is valid for the provided `key`.
     ///   - The blob is not older than `MAX_BLOB_AGE_SECONDS`.
-    pub fn verify_blob_challenge(
-        &self,
-        peer_cert: Option<&X509Certificate>,
-        key: &[u8; AUTH_KEY_SIZE_BYTES],
-    ) -> Result<(), AuthError> {
-        if let Some(peer_cert) = peer_cert {
-            if let Some(link_cn) = pki::common_name(peer_cert) {
-                if link_cn != self.cn {
-                    return Err(AuthError::FormatError(format!(
-                        "CN mismatch: expected {link_cn} found {}",
-                        self.cn
-                    )));
-                }
-            } else {
-                return Err(AuthError::FormatError("no CN in peer cert".to_string()));
-            }
-        }
-
+    pub fn verify_blob_challenge(&self, key: &[u8; AUTH_KEY_SIZE_BYTES]) -> Result<(), AuthError> {
         let payload_bytes = BASE64_STANDARD.decode(self.challenge.clone())?;
         if payload_bytes.len() != size_of::<ZdpInitAuthenticationPayload>() {
             return Err(AuthError::FormatError(format!(
@@ -303,7 +301,7 @@ pub fn decode_blob(blob_str: &str) -> Result<AuthBlob, AuthError> {
 
     let jobj: Value = serde_json::from_slice(&json_txt)?;
     let blob_type = jobj.get("blob_type").ok_or_else(|| {
-        AuthError::FormatError(format!("missing blob_type field in blob: {}", blob_str))
+        AuthError::FormatError("authentication evidence has no blob_type field".into())
     })?;
 
     match blob_type.as_str() {
@@ -315,10 +313,9 @@ pub fn decode_blob(blob_str: &str) -> Result<AuthBlob, AuthError> {
             let ac_blob = serde_json::from_slice::<ZdpAuthCodeBlob>(&json_txt)?;
             Ok(AuthBlob::AuthCode(ac_blob))
         }
-        _ => Err(AuthError::FormatError(format!(
-            "unknown blob_type: {:?}",
-            blob_type
-        ))),
+        _ => Err(AuthError::FormatError(
+            "unsupported authentication evidence type".into(),
+        )),
     }
 }
 
@@ -447,17 +444,20 @@ impl OAuthRsa {
         &self,
         service_addr: SocketAddr,
         tls_cert: X509Certificate,
+        source_addr: std::net::IpAddr,
     ) -> Result<ZdpAuthCodeBlob, AuthError> {
         let der = pki::to_der(&tls_cert)
             .map_err(|e| AuthError::FormatError(format!("cannot encode TLS certificate: {e}")))?;
         let tls_cert = Certificate::from_der(&der).unwrap();
 
-        let nonce_buf = self.preauthorize(service_addr, &tls_cert).await?;
+        let nonce_buf = self
+            .preauthorize(service_addr, &tls_cert, source_addr)
+            .await?;
 
         let signature = sign_rsa_key(&self.private_key, &nonce_buf);
 
         let auth_code = self
-            .authorize(service_addr, &tls_cert, &nonce_buf, &signature)
+            .authorize(service_addr, &tls_cert, &nonce_buf, &signature, source_addr)
             .await?;
 
         Ok(ZdpAuthCodeBlob {
@@ -475,25 +475,24 @@ impl OAuthRsa {
         &self,
         service_addr: SocketAddr,
         tls_cert: &Certificate,
+        source_addr: std::net::IpAddr,
     ) -> Result<Vec<u8>, AuthError> {
         // See https://github.com/org-zpr/zpr-core/issues/861
         let cb = reqwest::ClientBuilder::new()
+            .local_address(source_addr)
             .add_root_certificate(tls_cert.clone())
             .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
             .timeout(std::time::Duration::from_secs(10));
-        let client = cb.build().unwrap();
+        let client = cb.build()?;
 
         let resp = client
             .get(format!("https://{}/preauthorize", service_addr))
             .query(&[("response_type", "code"), ("client_id", &self.client_id)])
             .send()
-            .await
-            .map_err(|e| AuthError::AuthError(format!("failed to send request: {}", e)))?;
+            .await?;
+        check_auth_status(resp.status())?;
 
-        let pa_resp: PreauthResp = resp
-            .json()
-            .await
-            .map_err(|e| AuthError::AuthError(format!("failed to parse response: {}", e)))?;
+        let pa_resp: PreauthResp = resp.json().await?;
 
         Ok(BASE64_STANDARD.decode(pa_resp.nonce.as_bytes())?)
     }
@@ -506,6 +505,7 @@ impl OAuthRsa {
         tls_cert: &Certificate,
         nonce: &[u8],
         payload: &[u8],
+        source_addr: std::net::IpAddr,
     ) -> Result<String, AuthError> {
         let authreq = AuthReq {
             client_id: self.client_id.clone(),
@@ -515,18 +515,19 @@ impl OAuthRsa {
 
         // Note client set to NOT follow redirects since that is how we get our response.
         let cb = reqwest::ClientBuilder::new()
+            .local_address(source_addr)
             .add_root_certificate(tls_cert.clone())
             .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
             .redirect(Policy::none())
             .timeout(std::time::Duration::from_secs(10));
-        let client = cb.build().unwrap();
+        let client = cb.build()?;
 
         let resp = client
             .post(format!("https://{}/authorize", service_addr))
             .json(&authreq)
             .send()
-            .await
-            .map_err(|e| AuthError::AuthError(format!("failed to send POST request: {}", e)))?;
+            .await?;
+        check_auth_status(resp.status())?;
 
         // Expect status code FOUND
         if resp.status() != StatusCode::FOUND {
@@ -536,36 +537,32 @@ impl OAuthRsa {
             )));
         }
 
-        // Now extract the auth-code from the location header.
-        if let Some(loc) = resp.headers().get(header::LOCATION) {
-            if let Ok(loc_str) = loc.to_str() {
-                if loc_str.contains("error") {
-                    // TODO: We could parse this URL and get error & error_description
-                    return Err(AuthError::AuthError(format!(
-                        "failed to authorize: {}",
-                        loc_str
-                    )));
-                }
-                if let Some(code) = loc_str.split("code=").nth(1) {
-                    return Ok(code.to_string());
-                } else {
-                    return Err(AuthError::AuthError(format!(
-                        "failed to find code in location header: {}",
-                        loc_str
-                    )));
-                }
-            } else {
-                return Err(AuthError::AuthError(format!(
-                    "failed to parse location header: {}",
-                    loc.to_str().unwrap_or("invalid utf8")
-                )));
-            }
-        } else {
-            return Err(AuthError::AuthError(
-                "failed to find location header in response".to_string(),
-            ));
-        }
+        let location = resp
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or_else(|| AuthError::FormatError("missing or invalid OAuth Location".into()))?;
+        parse_auth_redirect(location)
     }
+}
+
+fn parse_auth_redirect(location: &str) -> Result<String, AuthError> {
+    let url = reqwest::Url::parse(location)
+        .map_err(|_| AuthError::FormatError("invalid OAuth redirect URL".into()))?;
+    let params: std::collections::HashMap<_, _> = url.query_pairs().collect();
+    if let Some(error) = params.get("error") {
+        return Err(match error.as_ref() {
+            "access_denied" | "invalid_client" | "unauthorized_client" | "invalid_grant" => {
+                AuthError::Rejected("OAuth credentials or access denied".into())
+            }
+            _ => AuthError::AuthError("OAuth service could not authorize request".into()),
+        });
+    }
+    params
+        .get("code")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .ok_or_else(|| AuthError::FormatError("OAuth redirect has no authorization code".into()))
 }
 
 #[cfg(test)]
@@ -573,6 +570,217 @@ mod test {
     use super::*;
     use aws_lc_rs::signature::{KeyPair, RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
     use std::path::PathBuf;
+
+    #[test]
+    fn evidence_errors_do_not_disclose_authorization_codes() {
+        let blob = BASE64_STANDARD.encode(br#"{"code":"private-authorization-code"}"#);
+        let error = decode_blob(&blob).unwrap_err().to_string();
+        assert!(!error.contains(&blob));
+        assert!(!error.contains("private-authorization-code"));
+    }
+
+    #[test]
+    fn expired_bootstrap_challenge_is_rejected() {
+        let key = [42; 32];
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut challenge = ZdpInitAuthenticationPayload {
+            nonce: [1; 8],
+            ctime: (now - MAX_BLOB_AGE_SECONDS - 1).into(),
+            hmac: [0; 32],
+        };
+        let mut hasher = blake3::Hasher::new_keyed(&key);
+        hasher.update(&challenge.nonce);
+        hasher.update(&challenge.ctime.to_bytes());
+        challenge.hmac = hasher.finalize().into();
+        let blob = ZdpSelfSignedBlob {
+            blob_type: BLOB_TYPE_SS.into(),
+            ts: now,
+            cn: "actor.identity".into(),
+            challenge: BASE64_STANDARD.encode(challenge.as_bytes()),
+            sig: String::new(),
+        };
+        assert!(matches!(
+            blob.verify_blob_challenge(&key),
+            Err(AuthError::ChallengeTooOld)
+        ));
+    }
+
+    #[test]
+    fn authentication_status_classification() {
+        for status in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
+            assert!(matches!(
+                check_auth_status(status),
+                Err(AuthError::Rejected(_))
+            ));
+        }
+        for status in [
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(matches!(
+                check_auth_status(status),
+                Err(AuthError::AuthError(_))
+            ));
+        }
+        assert!(check_auth_status(StatusCode::FOUND).is_ok());
+    }
+
+    #[test]
+    fn oauth_redirect_classification_and_decoding() {
+        assert_eq!(
+            parse_auth_redirect("https://auth.zpr/?state=abc&code=a%2Bb%2Fc%3D").unwrap(),
+            "a+b/c="
+        );
+        for error in [
+            "access_denied",
+            "invalid_client",
+            "unauthorized_client",
+            "invalid_grant",
+        ] {
+            assert!(matches!(
+                parse_auth_redirect(&format!("https://auth.zpr/?error={error}")),
+                Err(AuthError::Rejected(_))
+            ));
+        }
+        assert!(matches!(
+            parse_auth_redirect("https://auth.zpr/?error=temporarily_unavailable"),
+            Err(AuthError::AuthError(_))
+        ));
+        for invalid in [
+            "not a url",
+            "https://auth.zpr/?code=",
+            "https://auth.zpr/?state=x",
+        ] {
+            assert!(matches!(
+                parse_auth_redirect(invalid),
+                Err(AuthError::FormatError(_))
+            ));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn external_https_authentication_uses_the_authentication_source() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+
+        let keypath = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/rsa-key.pem");
+        let bootstrap = RsaBootstrapAuth::new("actor.identity", &keypath).unwrap();
+        let public_key = bootstrap.pkey.public_key().as_ref().to_vec();
+        let auth = OAuthRsa::new("actor.identity", bootstrap.pkey);
+        let cert_pem = include_bytes!("../../../integration-test/pregen/zpr-rsa-cert.pem");
+        let key_pem = include_bytes!("../../../integration-test/pregen/zpr-rsa-key.pem");
+        let config = tokio_rustls::rustls::ServerConfig::builder_with_provider(Arc::new(
+            tokio_rustls::rustls::crypto::aws_lc_rs::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![CertificateDer::from_pem_slice(cert_pem).unwrap()],
+            PrivateKeyDer::from_pem_slice(key_pem).unwrap(),
+        )
+        .unwrap();
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let service = listener.local_addr().unwrap();
+        let source: std::net::IpAddr = "127.0.0.2".parse().unwrap();
+        let server = async {
+            for preauthorize in [true, false] {
+                let (stream, peer) = listener.accept().await.unwrap();
+                assert_eq!(peer.ip(), source);
+                let mut stream = acceptor.accept(stream).await.unwrap();
+                let mut headers = Vec::new();
+                while !headers.ends_with(b"\r\n\r\n") {
+                    assert!(headers.len() < 8192);
+                    headers.push(stream.read_u8().await.unwrap());
+                }
+                let headers = String::from_utf8(headers).unwrap();
+                let content_len = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length: ")
+                            .map(|value| value.parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                let mut body = vec![0; content_len];
+                stream.read_exact(&mut body).await.unwrap();
+                if preauthorize {
+                    assert!(headers.starts_with("GET /preauthorize?"));
+                    assert!(headers.contains("client_id=actor.identity"));
+                    let body = r#"{"nonce":"AQID"}"#;
+                    stream.write_all(format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    ).as_bytes()).await.unwrap();
+                } else {
+                    assert!(headers.starts_with("POST /authorize "));
+                    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    assert_eq!(body["client_id"], "actor.identity");
+                    assert_eq!(body["nonce"], "AQID");
+                    let signature = BASE64_STANDARD
+                        .decode(body["payload"].as_str().unwrap())
+                        .unwrap();
+                    UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, &public_key)
+                        .verify(&[1, 2, 3], &signature)
+                        .unwrap();
+                    stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: https://auth.zpr/?code=auth%2Bcode\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                }
+                stream.shutdown().await.unwrap();
+            }
+        };
+        let request = async {
+            auth.authenticate(service, pki::from_pem(cert_pem).unwrap(), source)
+                .await
+                .unwrap()
+        };
+        let ((), blob) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::join!(server, request)
+        })
+        .await
+        .unwrap();
+        assert_eq!(blob.blob_type, BLOB_TYPE_AC);
+        assert_eq!(blob.client_id, "actor.identity");
+        assert_eq!(blob.asa, service.to_string());
+        assert_eq!(blob.code, "auth+code");
+        let asm = Arc::new(crate::assembly::test::create_assembly(
+            crate::assembly::test::TestAssemblyBuilder::new(),
+        ));
+        let req = crate::visa_mgmt::build_connect_request(
+            &asm,
+            zpr_utils::net_defs::IpAddress::UNSPECIFIED,
+            &AuthBlob::AuthCode(blob),
+            None,
+        )
+        .unwrap();
+        let [zpr::vsapi_types::AuthBlob::AC(evidence)] = req.blobs.as_slice() else {
+            panic!("expected auth-code evidence for the visa service");
+        };
+        assert_eq!(evidence.asa_addr, service.ip());
+        assert_eq!(evidence.code, "auth+code");
+        assert_eq!(evidence.client_id, "actor.identity");
+    }
+
+    #[test]
+    fn bootstrap_challenge_is_bound_to_link_key_not_actor_name() {
+        let keypath = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/rsa-key.pem");
+        let bootstrap = RsaBootstrapAuth::new("actor.not.transport.identity", &keypath).unwrap();
+        let link_key = [42; 32];
+        let challenge = ZdpInitAuthenticationPayload::new(&link_key);
+        let AuthBlob::SelfSigned(blob) =
+            decode_blob(&bootstrap.authenticate(&challenge).unwrap()).unwrap()
+        else {
+            panic!("expected self-signed evidence");
+        };
+        assert!(blob.verify_blob_challenge(&link_key).is_ok());
+        assert!(blob.verify_blob_challenge(&[43; 32]).is_err());
+        assert_eq!(blob.cn, "actor.not.transport.identity");
+    }
 
     #[test]
     fn test_rsa_bootstrap_auth() {
