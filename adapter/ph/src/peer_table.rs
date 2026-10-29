@@ -287,8 +287,9 @@ impl PeerTable {
             .unwrap();
 
         let new_reader = peer_slab.remove((link_id as usize).wrapping_sub(1));
-        std::mem::drop(peer_slab);
+        // Keep writers serialized through publication so an older reader cannot win.
         self.peer_slab_reader.write(new_reader);
+        std::mem::drop(peer_slab);
     }
 
     pub fn inspect_sync<T>(
@@ -526,6 +527,36 @@ pub mod test {
 
     use super::*;
     use std::sync::Mutex;
+
+    #[tokio::test]
+    async fn remove_then_insert_is_visible() {
+        let table = PeerTable::new();
+        let insert = || {
+            let entry = table.vacant_entry().unwrap();
+            let peer = create_dummy_peer_state(
+                entry.key(),
+                LinkType::Internal,
+                "[::]:0".parse().unwrap(),
+                ScopedIpv6Addr::new(std::net::Ipv6Addr::UNSPECIFIED, 0).into(),
+            );
+            entry.insert(peer).get()
+        };
+        let removed = insert();
+        let retained = insert();
+
+        assert!(table.get(removed).is_some());
+        table.remove(removed);
+        assert!(table.get(removed).is_none());
+        assert!(table.inspect(removed, |_| ()).is_none());
+
+        let inserted = insert();
+        assert_eq!(table.len(), 2);
+        for id in [retained, inserted] {
+            assert!(table.get(id).is_some());
+            assert!(table.inspect(id, |_| ()).is_some());
+            assert!(table.inspect_sync(id, |_| ()).is_some());
+        }
+    }
 
     #[allow(dead_code)]
     pub fn create_dummy_peer_state(
