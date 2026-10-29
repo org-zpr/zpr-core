@@ -264,7 +264,32 @@ impl DockLookupTable {
     pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
-        std::mem::drop(table);
+        // Keep writers serialized through publication so an older reader cannot win.
         self.reader.write(new_reader);
+        std::mem::drop(table);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_then_insert_is_visible() {
+        let table = DockLookupTable::new();
+        let pep = || DltPep::new(tc::Ip5TupleTc::new(FiveTuple::default()), None);
+        let removed = table.insert(pep()).unwrap();
+        let retained = table.insert(pep()).unwrap();
+
+        assert!(table.get(removed).is_some());
+        table.remove(removed);
+        assert!(table.get(removed).is_none());
+        assert!(table.inspect(removed, |_| ()).is_none());
+
+        let inserted = table.insert(pep()).unwrap();
+        for id in [retained, inserted] {
+            assert!(table.get(id).is_some());
+            assert!(table.inspect(id, |_| ()).is_some());
+        }
     }
 }
