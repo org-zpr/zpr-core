@@ -11,11 +11,11 @@ use crate::mgmt::txn_mgr::TxnHandle;
 use crate::packet::Packet;
 use crate::tc;
 use crate::zdp;
-use cslab_v013::{RcuCslab, RcuCslabReader};
+use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::mapref::one::Ref as DashMapRef;
-use rcu::{RcuBox, RcuGuard};
+use rcu::{RcuBox, RcuCslabEntryGuard};
 use std::sync::Mutex;
 use zpr::packet_info::{CompressionMode, StreamId};
 
@@ -232,19 +232,7 @@ pub struct DockLookupTable {
     reader: RcuBox<RcuCslabReader<DltPep>>,
 }
 
-pub struct DltPepGuard<'a> {
-    reader: RcuGuard<'a, RcuCslabReader<DltPep>>,
-    key: usize,
-}
-
-impl std::ops::Deref for DltPepGuard<'_> {
-    type Target = DltPep;
-
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: get() checks that this key is present in the guarded reader.
-        unsafe { self.reader.get_unchecked(self.key) }
-    }
-}
+pub type DltPepGuard<'a> = RcuCslabEntryGuard<'a, DltPep>;
 
 impl DockLookupTable {
     pub fn clear(&self) {
@@ -276,11 +264,8 @@ impl DockLookupTable {
     }
 
     pub fn get(&self, tether_id: StreamId) -> Option<DltPepGuard<'_>> {
-        let key = (tether_id as usize).wrapping_sub(1);
-        let reader = self.reader.get();
-        reader
-            .contains_key(key)
-            .then_some(DltPepGuard { reader, key })
+        self.reader
+            .get_guarded((tether_id as usize).wrapping_sub(1))
     }
 
     pub fn insert(&self, pep: DltPep) -> Result<StreamId, ()> {
@@ -290,8 +275,7 @@ impl DockLookupTable {
     pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
-        // Keep the writer lock through publication so a concurrent insert cannot
-        // publish a newer reader before this removal publishes its snapshot.
+        std::mem::drop(table);
         self.reader.write(new_reader);
     }
 }
