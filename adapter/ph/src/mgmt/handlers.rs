@@ -416,7 +416,12 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 
     asm.process_link_state_event(
         link_id,
-        LinkEvent::ReceivedHelloResponse(status, aaa_address, maybe_asa_addrs, vs_bootstrap),
+        LinkEvent::ReceivedHelloResponse {
+            status,
+            aaa_address,
+            asa_addresses: maybe_asa_addrs,
+            vs_bootstrap,
+        },
     )?;
 
     Ok(())

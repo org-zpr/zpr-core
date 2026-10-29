@@ -11,11 +11,11 @@ use crate::mgmt::txn_mgr::TxnHandle;
 use crate::packet::Packet;
 use crate::tc;
 use crate::zdp;
-use cslab::{RcuCslab, RcuCslabReader};
+use cslab_v013::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::mapref::one::Ref as DashMapRef;
-use rcu::{RcuBox, RcuCslabEntryGuard};
+use rcu::{RcuBox, RcuGuard};
 use std::sync::Mutex;
 use zpr::packet_info::{CompressionMode, StreamId};
 
@@ -232,13 +232,25 @@ pub struct DockLookupTable {
     reader: RcuBox<RcuCslabReader<DltPep>>,
 }
 
-pub type DltPepGuard<'a> = RcuCslabEntryGuard<'a, DltPep>;
+pub struct DltPepGuard<'a> {
+    reader: RcuGuard<'a, RcuCslabReader<DltPep>>,
+    key: usize,
+}
+
+impl std::ops::Deref for DltPepGuard<'_> {
+    type Target = DltPep;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: get() checks that this key is present in the guarded reader.
+        unsafe { self.reader.get_unchecked(self.key) }
+    }
+}
 
 impl DockLookupTable {
     pub fn clear(&self) {
         let mut table = self.table.lock().unwrap();
-        *table = RcuCslab::with_fixed_capacity(DOCK_LOOKUP_TABLE_SIZE);
-        self.reader.write(table.reader());
+        let reader = table.clear();
+        self.reader.write(reader);
     }
 
     pub fn new() -> Self {
@@ -264,8 +276,11 @@ impl DockLookupTable {
     }
 
     pub fn get(&self, tether_id: StreamId) -> Option<DltPepGuard<'_>> {
-        self.reader
-            .get_guarded((tether_id as usize).wrapping_sub(1))
+        let key = (tether_id as usize).wrapping_sub(1);
+        let reader = self.reader.get();
+        reader
+            .contains_key(key)
+            .then_some(DltPepGuard { reader, key })
     }
 
     pub fn insert(&self, pep: DltPep) -> Result<StreamId, ()> {
@@ -275,6 +290,33 @@ impl DockLookupTable {
     pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
+        // Keep the writer lock through publication so a concurrent insert cannot
+        // publish a newer reader before this removal publishes its snapshot.
         self.reader.write(new_reader);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defs::FiveTuple;
+
+    #[test]
+    fn dlt_clear_publishes_empty_reader_and_keeps_old_guards_valid() {
+        let dlt = DockLookupTable::new();
+        let id = dlt
+            .insert(DltPep::new(tc::Ip5TupleTc::new(FiveTuple::default()), None))
+            .unwrap();
+        let old_guard = dlt.get(id).unwrap();
+
+        dlt.clear();
+
+        assert!(dlt.get(id).is_none());
+        assert_eq!(old_guard.tc.five_tuple(), &FiveTuple::default());
+        drop(old_guard);
+        assert!(
+            dlt.insert(DltPep::new(tc::Ip5TupleTc::new(FiveTuple::default()), None))
+                .is_ok()
+        );
     }
 }

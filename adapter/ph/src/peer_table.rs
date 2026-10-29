@@ -34,6 +34,7 @@ pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
     pub interface_addr: ScopedIpAddr,
     pub link_state_machine: LinkStateWrapper,
+    // Shared with the actor worker and detached VS completion tasks, which outlive peer-table guards.
     pub actor_auth: Arc<crate::actor_auth::ActorAuthorization>,
     pub pft: PeerForwardingTable,
     pub node_state: mgmt::node::NodePeerState,

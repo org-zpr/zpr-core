@@ -16,12 +16,31 @@ from `LinkStateWrapper`, which owns AAA, transport state, and keepalives.
 ```mermaid
 stateDiagram-v2
     [*] --> Inactive
-    Inactive --> Keying
-    Keying --> Helloing
-    Helloing --> Active: Hello accepted and AAA usable
-    Active --> Closing: Link failure or shutdown
-    Closing --> Inactive
+    Inactive --> Keying: Start
+    Keying --> Helloing: KeyingDone
+    Helloing --> Active: Hello accepted (AAA or verified VS bootstrap)
+    Helloing --> Error: Hello timeout
+    Active --> Error: Keepalive timeout
+    Active --> Disconnecting: Close on node-to-VS link
+    Disconnecting --> Closing: VS disconnect complete
+    Error --> Disconnecting: Close on node-to-VS link
+    Active --> Closing: Close, terminate, or peer failure
+    Error --> Closing: Close
+    Closing --> Inactive: Adapter cleanup complete
+    Closing --> [*]: Node peer removed
+    Inactive --> Resetting: Reset
+    Keying --> Resetting: Reset
+    Helloing --> Resetting: Reset
+    Active --> Resetting: Reset
+    Disconnecting --> Resetting: Reset
+    Error --> Resetting: Reset
+    Closing --> Resetting: Reset
+    Resetting --> [*]: Cleanup and peer removal
 ```
+
+Close can be initiated from any running state; on a node-to-VS link with an
+active VS connection it first enters `Disconnecting`, otherwise it enters
+`Closing`. Reset enters `Resetting` from any state.
 
 Ordinary links cannot establish without AAA. If the node has not received its AAA
 pool from the visa service, Hello returns TemporarilyUnavailable and the adapter
