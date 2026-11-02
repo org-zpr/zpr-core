@@ -12,6 +12,7 @@ use crate::zdp::{ResponseCode, TerminateReason};
 use std::fmt::{Display, Formatter};
 use std::net::SocketAddr;
 use std::num::NonZero;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -102,7 +103,6 @@ pub struct LinkData {
     // Assuming no loss, 100 samples will store 5 minutes of latency data
     latency_data: SampleRing<Duration, 100>,
     asa_addresses: Option<Vec<SocketAddr>>, // Addresses of ASA servers told to us by our peer, if any
-    aaa_address: Option<IpAddress>,         // AAA address assigned this link (if any)
     installed_aaa: bool,
 }
 
@@ -113,7 +113,6 @@ impl LinkData {
             echo_timeout: 0,
             latency_data: SampleRing::new(Duration::ZERO),
             asa_addresses: None,
-            aaa_address: None,
             installed_aaa: false,
         }
     }
@@ -123,6 +122,7 @@ pub struct LinkStateMachine {
     id: LinkId,
     state: LinkState,
     status: LinkStatus,
+    ready: Arc<AtomicBool>,
     silent: bool,
 
     last_state_change: Instant,
@@ -144,6 +144,7 @@ impl LinkStateMachine {
             id: link_id,
             state: LinkState::Inactive,
             status: LinkStatus::Down,
+            ready: Arc::new(AtomicBool::new(false)),
             silent: false,
             last_state_change: std::time::Instant::now(),
             logical_clock: 0,
@@ -159,6 +160,10 @@ impl LinkStateMachine {
             debug!(target: LINK_STATE, "Link {} state transition {:?} => {:?}", self.id, self.state, new_state);
         }
         self.state = new_state;
+        self.ready.store(
+            self.status == LinkStatus::Up && new_state == LinkState::Active,
+            Ordering::Release,
+        );
         self.last_state_change = std::time::Instant::now();
         self.cancel_timeout();
         self.timeout_count = 0;
@@ -214,6 +219,9 @@ pub struct LinkStateWrapper {
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
     pub locked_data: Mutex<LinkData>,
+    // Shared with the FSM so every state transition publishes fastpath readiness.
+    ready: Arc<AtomicBool>,
+    aaa_address: rcu::RcuBox<Option<IpAddress>>,
     /// Internal links _may_ be associated with another internal link
     /// representing its remote side.
     pub internal_peer_id: Option<NonZero<LinkId>>,
@@ -225,13 +233,15 @@ impl LinkStateWrapper {
 
         if matches!(new_link_type, LinkType::Internal) {
             // Internal links are always up and active, that is, `is_ready()`.
-            lsm.state = LinkState::Active;
             lsm.status = LinkStatus::Up;
+            lsm.set_state(LinkState::Active);
         }
 
         Self {
             id: new_id,
             link_type: new_link_type,
+            ready: lsm.ready.clone(),
+            aaa_address: rcu::RcuBox::new(None),
             locked_fsm: Mutex::new(lsm),
             locked_data: Mutex::new(LinkData::new()),
             internal_peer_id: None,
@@ -247,17 +257,18 @@ impl LinkStateWrapper {
         self.locked_fsm.lock().unwrap().state
     }
 
+    /// Fastpath-readable readiness, published by every FSM state transition.
     pub fn is_ready(&self) -> bool {
-        let locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.status == LinkStatus::Up && locked_fsm.state == LinkState::Active
+        self.ready.load(Ordering::Acquire)
     }
 
     pub fn get_link_type(&self) -> LinkType {
         self.link_type
     }
 
+    /// Read the assigned AAA without taking the link-data mutex.
     pub fn aaa_address(&self) -> Option<IpAddress> {
-        self.locked_data.lock().unwrap().aaa_address
+        *self.aaa_address.get()
     }
 
     fn process_hello_request(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
@@ -325,7 +336,7 @@ impl LinkStateWrapper {
         }
         {
             let mut data = self.locked_data.lock().unwrap();
-            data.aaa_address = response.aaa_address;
+            self.aaa_address.write(response.aaa_address);
             data.asa_addresses = response.asa_addresses;
         }
         if let Some(aaa) = response.aaa_address {
@@ -571,8 +582,7 @@ impl LinkStateWrapper {
         // Just keep track of this for cleanup later.
         let link_id = self.id;
         debug!(target: LINK_STATE, "Link {link_id} assigned AAA address {aaa_addr}");
-        let mut link_data = self.locked_data.lock().unwrap();
-        link_data.aaa_address = Some(aaa_addr);
+        self.aaa_address.write(Some(aaa_addr));
         Ok(())
     }
 
@@ -806,7 +816,9 @@ impl LinkStateWrapper {
                 }
 
                 let mut link_data = self.locked_data.lock().unwrap();
-                if let Some(aaa_addr) = link_data.aaa_address.take() {
+                let aaa = self.aaa_address();
+                self.aaa_address.write(None);
+                if let Some(aaa_addr) = aaa {
                     if self.link_type == LinkType::AdapterToNode && link_data.installed_aaa {
                         if let Err(err) = asm
                             .tun_ctl
@@ -1110,10 +1122,97 @@ mod tests {
         let link = LinkStateWrapper::new(3, link_type);
         {
             let mut fsm = link.locked_fsm.lock().unwrap();
-            fsm.state = LinkState::Helloing;
             fsm.status = LinkStatus::Up;
+            fsm.set_state(LinkState::Helloing);
         }
         link
+    }
+
+    #[test]
+    fn readiness_tracks_all_link_states() {
+        let link = LinkStateWrapper::new(3, LinkType::AdapterToNode);
+        assert!(!link.is_ready());
+        assert!(LinkStateWrapper::new(1, LinkType::Internal).is_ready());
+
+        for state in [
+            LinkState::Inactive,
+            LinkState::Keying,
+            LinkState::Helloing,
+            LinkState::Disconnecting(TerminateReason::Other),
+            LinkState::Closing,
+            LinkState::Resetting,
+            LinkState::Error,
+        ] {
+            {
+                let mut fsm = link.locked_fsm.lock().unwrap();
+                fsm.status = LinkStatus::Up;
+                fsm.set_state(LinkState::Active);
+            }
+            assert!(link.is_ready());
+            link.locked_fsm.lock().unwrap().set_state(state);
+            assert!(!link.is_ready(), "unexpected readiness in {state:?}");
+        }
+
+        {
+            let mut fsm = link.locked_fsm.lock().unwrap();
+            fsm.status = LinkStatus::Down;
+            fsm.set_state(LinkState::Active);
+        }
+        assert!(!link.is_ready());
+    }
+
+    #[tokio::test]
+    async fn adapter_ownership_reads_do_not_wait_for_link_mutexes() {
+        use crate::peer_table::test::create_dummy_peer_state;
+        use std::net::{IpAddr, Ipv4Addr};
+        use zpr_utils::net_defs::ScopedIpAddr;
+
+        let asm = Arc::new(create_assembly(TestAssemblyBuilder::new()));
+        assert!(!asm.adapter_owns_address(IpAddress::UNSPECIFIED));
+        for id in 1..=DOCK_LINK_ID {
+            let entry = asm.peer_table.vacant_entry().unwrap();
+            assert_eq!(entry.key().get(), id);
+            let peer = create_dummy_peer_state(
+                entry.key(),
+                LinkType::AdapterToNode,
+                SubstrateAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), id.try_into().unwrap()),
+                ScopedIpAddr::V4(Ipv4Addr::LOCALHOST),
+            );
+            entry.insert(peer);
+        }
+        let peer = asm.peer_table.get(DOCK_LINK_ID).unwrap();
+        let link = &peer.link_state_machine;
+        let aaa = "fd5a:5052:0:aaa::1".parse::<IpAddr>().unwrap().into();
+        link.process_assigned_aaa(&asm, aaa).unwrap();
+        assert!(!asm.adapter_owns_address(aaa));
+
+        let mut fsm = link.locked_fsm.lock().unwrap();
+        fsm.status = LinkStatus::Up;
+        fsm.set_state(LinkState::Active);
+        let data = link.locked_data.lock().unwrap();
+        std::thread::scope(|scope| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let asm = &asm;
+            scope.spawn(move || {
+                tx.send((
+                    asm.adapter_owns_address(aaa),
+                    asm.adapter_owns_address(IpAddress::UNSPECIFIED),
+                ))
+                .unwrap();
+            });
+            let result = rx.recv_timeout(Duration::from_secs(2));
+            // Release before checking the result so a regressed reader can finish.
+            drop(data);
+            drop(fsm);
+            assert_eq!(result.unwrap(), (true, false));
+        });
+
+        link.locked_fsm
+            .lock()
+            .unwrap()
+            .set_state(LinkState::Closing);
+        assert_eq!(link.aaa_address(), Some(aaa));
+        assert!(!asm.adapter_owns_address(aaa));
     }
 
     #[tokio::test]
