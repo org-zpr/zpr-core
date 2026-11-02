@@ -83,6 +83,8 @@ Only the process's own TUN installations are
 removed during teardown; externally managed addresses are preserved. Packet/bind
 admission permits AAA and the granted actor address, not an ungranted configured
 address. The existing visa policy controls AAA-to-authentication-service flows.
+Fastpath ownership checks read an atomic link-ready flag and RCU-protected AAA
+and actor addresses rather than taking the link FSM or link-data mutexes.
 
 The node keeps a separate session per adapter: awaiting evidence, authorizing at
 the visa service, then authorized or idle. It validates the offered bootstrap
