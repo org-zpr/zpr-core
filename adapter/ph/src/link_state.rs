@@ -582,6 +582,8 @@ impl LinkStateWrapper {
         // Just keep track of this for cleanup later.
         let link_id = self.id;
         debug!(target: LINK_STATE, "Link {link_id} assigned AAA address {aaa_addr}");
+        // Writers share the data lock so cleanup can atomically take AAA ownership.
+        let _data = self.locked_data.lock().unwrap();
         self.aaa_address.write(Some(aaa_addr));
         Ok(())
     }
@@ -1213,6 +1215,35 @@ mod tests {
             .set_state(LinkState::Closing);
         assert_eq!(link.aaa_address(), Some(aaa));
         assert!(!asm.adapter_owns_address(aaa));
+    }
+
+    #[tokio::test]
+    async fn aaa_assignment_waits_for_cleanup_ownership() {
+        use std::net::IpAddr;
+
+        let asm = Arc::new(create_assembly(TestAssemblyBuilder::new()));
+        let link = LinkStateWrapper::new(3, LinkType::NodeToAdapter);
+        let aaa = "fd5a:5052:0:aaa::1".parse::<IpAddr>().unwrap().into();
+        let data = link.locked_data.lock().unwrap();
+        std::thread::scope(|scope| {
+            let (started_tx, started_rx) = std::sync::mpsc::channel();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let asm = &asm;
+            let link = &link;
+            scope.spawn(move || {
+                started_tx.send(()).unwrap();
+                link.process_assigned_aaa(asm, aaa).unwrap();
+                done_tx.send(()).unwrap();
+            });
+            started_rx.recv().unwrap();
+            let waited = done_rx.recv_timeout(Duration::from_millis(100)).is_err();
+            let unchanged = link.aaa_address().is_none();
+            drop(data);
+            done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(waited);
+            assert!(unchanged);
+        });
+        assert_eq!(link.aaa_address(), Some(aaa));
     }
 
     #[tokio::test]
