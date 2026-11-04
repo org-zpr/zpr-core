@@ -114,6 +114,8 @@ impl ActorAuthorization {
             return;
         }
         let mut data = self.data.lock().unwrap();
+        // Suppress duplicate readiness notifications within this link session.
+        // link_down takes the handle before aborting, so reconnect does not wait for cancellation.
         if data
             .worker
             .as_ref()
@@ -160,9 +162,16 @@ impl ActorAuthorization {
             {
                 return;
             }
-            let Ok(Reply::Offer(offer)) = reply.await else {
-                error!(target: LINK_STATE, "{}: actor exchange ended without an authentication offer", asm.formatted_link_id(self.id));
-                return;
+            let offer = match reply.await {
+                Ok(Reply::Offer(offer)) => offer,
+                Err(_) => {
+                    debug!(target: LINK_STATE, "{}: actor exchange closed while awaiting an authentication offer", asm.formatted_link_id(self.id));
+                    return;
+                }
+                Ok(Reply::Grant(_, _)) => {
+                    error!(target: LINK_STATE, "{}: actor exchange received an address grant instead of an authentication offer", asm.formatted_link_id(self.id));
+                    return;
+                }
             };
             let outcome = if offer.status == AuthenticationStatus::Success {
                 self.data.lock().unwrap().state = ActorState::Authenticating;
@@ -202,8 +211,12 @@ impl ActorAuthorization {
                                 ));
                                 status
                             }
-                            _ => {
-                                error!(target: LINK_STATE, "{}: actor exchange ended without an address grant", asm.formatted_link_id(self.id));
+                            Err(_) => {
+                                debug!(target: LINK_STATE, "{}: actor exchange closed while awaiting an address grant", asm.formatted_link_id(self.id));
+                                return;
+                            }
+                            Ok(Reply::Offer(_)) => {
+                                error!(target: LINK_STATE, "{}: actor exchange received an authentication offer instead of an address grant", asm.formatted_link_id(self.id));
                                 return;
                             }
                         }
@@ -300,6 +313,7 @@ impl ActorAuthorization {
     fn install_address(&self, asm: &Arc<Assembly>, addr: IpAddress) {
         let mut data = self.data.lock().unwrap();
         data.txn = None;
+        // TODO(#938): TUN subprocess I/O blocks the LocalSet while holding ActorData.
         let install = asm.tun_ctl.has_address(addr.into()).and_then(|existing| {
             if existing {
                 Ok(false)
@@ -633,6 +647,7 @@ impl ActorAuthorization {
         data.challenge = None;
         data.state = ActorState::WaitingForLink;
         if let Some(addr) = data.installed_address.take() {
+            // TODO(#938): TUN subprocess I/O blocks the LocalSet while holding ActorData.
             if let Err(err) = asm.tun_ctl.clear_address(addr.into(), ZPRNET_PREFIX_LEN) {
                 error!(target: LINK_STATE, "{}: cannot clear actor address: {err}", asm.formatted_link_id(self.id));
             }
@@ -861,6 +876,33 @@ mod tests {
         assert_eq!(data.state, ActorState::Rejected);
         assert!(data.worker.is_none());
         assert!(data.txn.is_none());
+    }
+
+    #[tokio::test]
+    async fn reconnect_starts_worker_before_previous_cancellation_completes() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let asm = Arc::new(create_assembly(TestAssemblyBuilder::new()));
+                let actor = actor();
+                let previous = tokio::task::spawn_local(std::future::pending::<()>());
+                actor.data.lock().unwrap().worker = Some(previous.abort_handle());
+
+                actor.link_down(&asm);
+                assert!(!previous.is_finished());
+                assert!(actor.data.lock().unwrap().worker.is_none());
+                let generation = actor.data.lock().unwrap().generation;
+
+                actor.link_ready(&asm);
+                let data = actor.data.lock().unwrap();
+                assert_ne!(data.generation, generation);
+                assert!(
+                    data.worker
+                        .as_ref()
+                        .is_some_and(|worker| !worker.is_finished())
+                );
+                assert!(!previous.is_finished());
+            })
+            .await;
     }
 
     #[test]
