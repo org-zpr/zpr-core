@@ -428,6 +428,10 @@ impl ActorAuthorization {
         addrs: Option<Vec<IpAddress>>,
         blob: String,
     ) -> HandleMgmtResult {
+        let peer = asm
+            .peer_table
+            .get(self.id)
+            .ok_or(HandleMgmtError::LinkClosed)?;
         self.require_node_link(asm)?;
         if addrs.as_ref().is_some_and(|addresses| addresses.len() > 1) {
             return Err(HandleMgmtError::BadStructure);
@@ -448,10 +452,6 @@ impl ActorAuthorization {
         let requested_addr = addrs
             .and_then(|a| a.first().copied())
             .unwrap_or(IpAddress::UNSPECIFIED);
-        let peer = asm
-            .peer_table
-            .get(self.id)
-            .ok_or(HandleMgmtError::LinkClosed)?;
         let blob = match auth::decode_blob(&blob) {
             Ok(blob) => blob,
             Err(err) => {
@@ -795,6 +795,34 @@ mod tests {
         assert!(mgr.try_open().is_none());
         actor.link_down(&asm);
         assert_eq!(mgr.try_open().unwrap().id(), id);
+    }
+
+    #[tokio::test]
+    async fn acquire_without_peer_preserves_pending_authentication() {
+        let asm = Arc::new(create_assembly(TestAssemblyBuilder::new()));
+        let actor = Arc::new(ActorAuthorization::new(3, LinkType::NodeToAdapter));
+        let challenge = auth::ZdpInitAuthenticationPayload::new(&[42; 32]);
+        {
+            let mut data = actor.data.lock().unwrap();
+            data.state = ActorState::AwaitingEvidence;
+            data.generation = 1;
+            data.remote_txn = Some(42);
+            data.challenge = Some(challenge.clone());
+        }
+
+        assert!(matches!(
+            actor.acquire_remote(&asm, 42, None, String::new()),
+            Err(HandleMgmtError::LinkClosed)
+        ));
+
+        let data = actor.data.lock().unwrap();
+        assert_eq!(data.state, ActorState::AwaitingEvidence);
+        assert_eq!(data.generation, 1);
+        assert_eq!(data.remote_txn, Some(42));
+        assert_eq!(
+            data.challenge.as_ref().unwrap().as_bytes(),
+            challenge.as_bytes()
+        );
     }
 
     #[tokio::test]
