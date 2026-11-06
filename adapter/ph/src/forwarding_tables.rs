@@ -74,8 +74,9 @@ impl PeerForwardingTable {
     pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
-        std::mem::drop(table);
+        // Keep writers serialized through publication so an older reader cannot win.
         self.reader.write(new_reader);
+        std::mem::drop(table);
     }
 
     pub fn len(&self) -> usize {
@@ -98,5 +99,33 @@ impl VacantPeerForwardingTableEntry<'_> {
 
     pub fn insert(mut self, pep: PftPep) -> StreamId {
         (self.table_guard.insert(pep).unwrap() + 1) as StreamId
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_then_insert_is_visible() {
+        let table = PeerForwardingTable::new();
+        let pep = PftPep {
+            next_hop: ForwardingEntry(1, 1),
+            visa_id: 1,
+        };
+        let removed = table.insert(pep.clone()).unwrap();
+        let retained = table.insert(pep.clone()).unwrap();
+
+        assert!(table.get(removed).is_some());
+        table.remove(removed);
+        assert!(table.get(removed).is_none());
+        assert!(table.inspect(removed, |_| ()).is_none());
+
+        let inserted = table.insert(pep).unwrap();
+        assert_eq!(table.len(), 2);
+        for id in [retained, inserted] {
+            assert_eq!(table.get(id).unwrap().visa_id, 1);
+            assert_eq!(table.inspect(id, |pep| pep.visa_id), Some(1));
+        }
     }
 }
