@@ -117,8 +117,13 @@ impl PeerCertificate {
             PeerCertificate::Unverified(cert) => cert,
         }
     }
+
     pub fn common_name(&self) -> Option<String> {
         pki::common_name(self.get_cert())
+    }
+
+    pub fn is_verified(&self) -> bool {
+        matches!(self, Self::Verified(_))
     }
 }
 
@@ -834,6 +839,14 @@ pub enum KmSMState {
 /// and decrypt entire buffers.  It is up to implemnentor to make sure that things like
 /// "ZPI" are left alone.
 pub trait Codec: Send + Sync {
+    /// The maximum number of bytes by which a ciphertext may exceed the
+    /// plaintext it was produced from (nonce, authentication tag, padding).
+    /// Callers use this to size, or to prove the sufficiency of, the output
+    /// buffer they hand to `encrypt_transport_stateless()`, and as the minimum
+    /// plausible length of a ciphertext handed to
+    /// `decrypt_transport_stateless()`.
+    fn max_overhead(self: &Self) -> usize;
+
     /// Encrypt `payload` into `message`.
     fn encrypt_transport_stateless(
         self: &Self,
@@ -858,6 +871,11 @@ impl UnimplCodec {
 }
 
 impl Codec for UnimplCodec {
+    /// No encryption is ever performed, so there is no overhead.
+    fn max_overhead(self: &Self) -> usize {
+        0
+    }
+
     /// Function is not implemented so always returns an error.
     fn encrypt_transport_stateless(
         self: &Self,
@@ -973,6 +991,10 @@ mod test {
     struct CopyCodec;
 
     impl Codec for CopyCodec {
+        fn max_overhead(self: &Self) -> usize {
+            0
+        }
+
         fn encrypt_transport_stateless(
             self: &Self,
             payload: &[u8],

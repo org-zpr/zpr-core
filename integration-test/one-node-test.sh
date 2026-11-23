@@ -21,7 +21,9 @@ NETEM_PARAMS=${NETEM_PARAMS:-}
 
 source "$(dirname $0)/lib/common_funcs.sh"
 
-ZPR_USER=$USER
+# Re-exec inside an unprivileged user+network namespace; everything below
+# runs there and needs no sudo.
+enter_test_namespace "$@"
 
 # TODO: IPv6 link-local??
 NODE_SUBSTRATE_ADDR_VS=10.0.0.1
@@ -86,11 +88,6 @@ VS_SOCK=vs.sock
 ADAPTER1_SOCK=adapter1.sock
 ADAPTER2_SOCK=adapter2.sock
 ADAPTER3_SOCK=adapter3.sock
-NODE_CAP_SOCK=node_cap.sock
-VS_CAP_SOCK=vs_cap.sock
-ADAPTER1_CAP_SOCK=adapter1_cap.sock
-ADAPTER2_CAP_SOCK=adapter2_cap.sock
-ADAPTER3_CAP_SOCK=adapter3_cap.sock
 
 function counters() {
   SOCKET=$1
@@ -124,9 +121,6 @@ fi
 create_ca_key_and_cert ca
 create_actor_key_and_cert ca vs.zpr
 #create_actor_key_and_cert ca node
-create_actor_key_and_cert ca adapter1
-create_actor_key_and_cert ca adapter2
-create_actor_key_and_cert ca adapter3
 
 # Temporary hack until our policy compiler is in-repo
 cp "$PREGEN/node.key" node.key
@@ -145,7 +139,7 @@ emit_vs_config ca vs.zpr > vs-config.toml
 
 echo "Launching ValKey"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VALKEY_SERVER_BIN" \
+in_ns zpr-vs "$VALKEY_SERVER_BIN" \
     --save "" \
     --appendonly no 2>&1 | tee valkey.log | prefix_log valkey &
 
@@ -153,7 +147,7 @@ wait_for 15 check_vs_valkey_port
 
 echo "Launching Visa Service"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" XDG_DATA_HOME=/tmp "$VS_BIN" \
+in_ns zpr-vs env XDG_DATA_HOME=/tmp "$VS_BIN" \
     -c vs-config.toml \
     --clear-state \
     "$PREGEN/$POLICY_BIN" 2>&1 | tee vs.log | prefix_log vs &
@@ -166,11 +160,11 @@ sleep 2
 
 echo "Launching Node"
 
-sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-node "$PH_BIN" \
   node \
   --logging "$DEBUG_TARGETS" \
   --control-path "$NODE_SOCK" \
-  --capture-path "$NODE_CAP_SOCK" \
+  --advertised-substrate-addr "$NODE_SUBSTRATE_ADDR_VS":5000 \
   --ca-file ca.crt \
   --certificate-file node.crt \
   --private-key-file node.key \
@@ -183,11 +177,10 @@ sleep 2  # TODO: remove?
 
 echo "Launching Adapters"
 
-sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-vs "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$VS_SOCK" \
-  --capture-path "$VS_CAP_SOCK" \
   --self-addr "$VS_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
   --certificate-file vs.zpr.crt \
@@ -197,63 +190,60 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --io-engine auto \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS" \
-  --node-public-key-file node.pubkey \
   --zpr-addr "$VS_ZPR_ADDR" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
 
 sleep 5
 
-sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-a "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER1_SOCK" \
-  --capture-path "$ADAPTER1_CAP_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
-  --certificate-file adapter1.crt \
-  --private-key-file adapter1.key \
   --bootstrap-key actor1-rsa.key \
+  --name adapter1 \
   --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --io-engine io_uring \
   --node-addr "$NODE_SUBSTRATE_ADDR_A" \
-  --node-public-key-file node.pubkey \
   --zpr-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
-sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
+in_ns zpr-b "$PH_BIN" \
   adapter \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER2_SOCK" \
-  --capture-path "$ADAPTER2_CAP_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
-  --certificate-file adapter2.crt \
-  --private-key-file adapter2.key \
   --bootstrap-key actor2-rsa.key \
+  --name adapter2 \
   --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --io-engine posix_unbatched \
   --node-addr "$NODE_SUBSTRATE_ADDR_B" \
-  --node-public-key-file node.pubkey \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
+  ACTOR3_ADDRESS_ARGS=(--zpr-addr "$C_ZPR_ADDR")
+  if [[ "$ACTOR_PROTOCOL" == ipv6 ]]; then
+    # Cover VS allocation as well as the requested addresses on actors A and B.
+    in_ns zpr-c ip -6 addr del "$C_ZPR_ADDR" peer "$ZPR_SUBNET" dev tun0
+    in_ns zpr-c ip -6 route replace "$ZPR_SUBNET" dev tun0
+    ACTOR3_ADDRESS_ARGS=()
+  fi
   # Note, this adapter we connect to the "alternative" dock address
   # on this interface, to test that replies are still routed correctly.
-  sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  in_ns zpr-c "$PH_BIN" \
     adapter \
     --logging "$DEBUG_TARGETS" \
     --control-path "$ADAPTER3_SOCK" \
-    --capture-path "$ADAPTER3_CAP_SOCK" \
     --self-addr "$C_SUBSTRATE_ADDR" \
     --ca-file ca.crt \
-    --certificate-file adapter3.crt \
-    --private-key-file adapter3.key \
     --bootstrap-key actor3-rsa.key \
+    --name adapter3 \
     --km-impl "$KM_IMPL" \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT" \
-    --node-public-key-file node.pubkey \
-    --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
+    "${ACTOR3_ADDRESS_ARGS[@]}" 2>&1 | tee adapter3.log | prefix_log zpr-c &
 fi
 
 #
@@ -277,6 +267,26 @@ fi
 
 if [[ "$PASS" == 0 ]] then
 echo "Carrier has arrived."
+echo "Wait for actor authorization..."
+wait_for 15 check_actor_authorized "$VS_SOCK" || { PASS=1; }
+wait_for 15 check_actor_authorized "$ADAPTER1_SOCK" || { PASS=1; }
+wait_for 15 check_actor_authorized "$ADAPTER2_SOCK" || { PASS=1; }
+if [[ "$NUM_ACTORS" -ge 3 ]]; then
+  wait_for 15 check_actor_authorized "$ADAPTER3_SOCK" || { PASS=1; }
+  if [[ "$PASS" == 0 && "$ACTOR_PROTOCOL" == ipv6 ]]; then
+    C_ZPR_ADDR=$(in_ns zpr-c ip -6 -o addr show dev tun0 scope global |
+      awk '$4 !~ /:aaa:/ { sub(/\/.*/, "", $4); print $4 }')
+    if [[ -z "$C_ZPR_ADDR" || "$C_ZPR_ADDR" == *$'\n'* ]]; then
+      echo "Expected exactly one dynamically granted actor address"
+      PASS=1
+    else
+      echo "Actor C received dynamic address $C_ZPR_ADDR"
+    fi
+  fi
+fi
+fi
+
+if [[ "$PASS" == 0 ]] then
 # This sleep solves a display issue because magic
 sleep 1
 
@@ -319,7 +329,7 @@ do
   echo
   echo "Terminating $pid"
   sleep 1
-  sudo kill -SIGINT "$pid"
+  kill -SIGINT "$pid"
   sleep 1
 done
 
