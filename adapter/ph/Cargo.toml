@@ -3,6 +3,10 @@ name = "ph"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
 
 [dependencies]
 admin-api = { path = "../admin-api" }
@@ -12,28 +16,26 @@ base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
 bytes = { version = "1.11.1" }
 capnp = { workspace = true }
-capnp-futures = { workspace = true, optional = true }
 capnp-rpc = { workspace = true }
 cbpf-rs = { workspace = true }
 chrono = "0.4.39"
 clap = { workspace = true, features = ["env"] }
 clap_complete = { workspace = true, optional = true }
-cslab = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "cslab-v0.1.2" }
+cslab = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "cslab-v0.1.3" }
 curve25519-dalek = "4.1.3"
 dashmap = { version = "6.0.1" }
-ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "alloc"] }
 enum-map = { version = "2.7.3" }
 enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
-internet-checksum = { workspace = true }
+ip4sum = { workspace = true }
 ipnet = { workspace = true }
 itertools = "0.14"
 libc = { version = "0.2.183" }
 libnode = { package = "libnode2", path = "../../libnode2" }
-nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll", "uio"] }
+nix = { version = "0.31", features = ["fs", "ioctl", "net", "poll", "uio"] }
 open-enum = { version = "0.5.1" }
 pkcs8 = "0.11"
-rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.1", default-features = false }
+rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.2", default-features = false }
 replace_with = "0.1.8"
 reqwest = { version = "0.13.1", features = ["json", "query"] }
 serde = { version = "1.0.214", features = ["derive"] }
@@ -55,25 +57,40 @@ zpr = { workspace = true }
 zpr-ext = { workspace = true, features = ["bytes", "tokio", "socket2", "zerocopy"] }
 zpr-utils = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+capnp-patched = { package = "capnp", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+capnp-rpc-patched = { package = "capnp-rpc", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+capnp-futures-patched = { package = "capnp-futures", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = { version = "0.7.4", optional = true }
-tokio-tun = { version = "0.11.5" }
+tokio-tun = { version = "0.15" }
 
 [dev-dependencies]
+ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "alloc"] }
 futures = "0.3.31"
-serial_test = "3.2"
+serial_test = "4.0"
 tokio = { workspace = true, features = ["test-util"] }
+tokio-rustls = "0.26"
 
 [features]
-default = ["io-uring", "rcu-crossbeam-epoch"]
+default = ["io-uring", "rcu-crossbeam-epoch", "capnp-ancillary"]
 ci = []
+enable-security-testing = []
 rcu-aarc = ["rcu/rcu-aarc", "zpr/rcu-aarc"]
 rcu-arc-swap = ["rcu/rcu-arc-swap", "zpr/rcu-arc-swap"]
 rcu-crossbeam-epoch = ["rcu/rcu-crossbeam-epoch", "zpr/rcu-crossbeam-epoch"]
 rcu-mutex-arc = ["rcu/rcu-mutex-arc", "zpr/rcu-mutex-arc"]
 rcu-rwlock = ["rcu/rcu-rwlock", "zpr/rcu-rwlock"]
 complete = ["clap_complete"]
-capnp-ancillary = ["dep:capnp-futures", "capnp-futures/tokio-unix-fd-stream"]
+capnp-ancillary = [
+    "dep:capnp-patched",
+    "dep:capnp-rpc-patched",
+    "dep:capnp-futures-patched",
+    "admin-api/capnp-ancillary",
+    "capnp-futures-patched/tokio-unix-fd-stream",
+]
+fuzzing = []
 
 [[bin]]
 name = "ph"

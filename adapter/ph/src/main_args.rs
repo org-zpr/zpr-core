@@ -63,9 +63,6 @@ pub struct CommonArgs {
     #[arg(long, value_name = "DOMAIN_SOCKET_PATH")]
     pub control_path: Option<String>,
 
-    #[arg(long, value_name = "CAPTURE_FILE_SOCKET_PATH")]
-    pub capture_path: Option<String>,
-
     /// For a node this is listen substrate address for dock,
     /// for adapter it is best to leave this at its default setting (0.0.0.0:0)
     ///
@@ -121,6 +118,25 @@ pub struct CommonArgs {
     /// Current supported implementations: noise (default), null
     #[arg(long, default_value = "noise")]
     pub km_impl: String,
+
+    /// Security Testing: corrupt forwarded ICMP echo packets so that a
+    /// correct receiver must reject them.
+    #[cfg(feature = "enable-security-testing")]
+    #[arg(long)]
+    pub security_testing_mangle_forwarded_pings: bool,
+
+    /// Security Testing: fall back to old-style unkeyed A2A MICVs. Adapters
+    /// write and verify with the unkeyed hash; a malicious node forges with it.
+    #[cfg(feature = "enable-security-testing")]
+    #[arg(long)]
+    pub security_testing_unkeyed_a2a_micv: bool,
+
+    /// Security Testing: whether a mangling node recomputes the A2A MICV
+    /// (true, the default) or reuses the original (false). Reusing it proves the
+    /// MICV covers the payload: a mangled ping is then rejected even when unkeyed.
+    #[cfg(feature = "enable-security-testing")]
+    #[arg(long, action = clap::ArgAction::Set, default_value_t = true)]
+    pub security_testing_recompute_micvs: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -144,10 +160,6 @@ pub enum Command {
         #[arg(long, short = 'N', value_name = "ADDR:PORT", value_parser = parse_socket_addr_or_scoped_ip_addr)]
         node_addr: Option<SocketAddr>,
 
-        /// PEM file holding the nodes noise public key
-        #[arg(long, short = 'b', value_name = "PATH")]
-        node_public_key_file: Option<PathBuf>, // noise public key for node (only specified when starting an adapter)
-
         /// PEM file holding the boostrap RSA private key
         #[arg(long, value_name = "PATH")]
         bootstrap_key: Option<PathBuf>,
@@ -162,6 +174,13 @@ pub enum Command {
         /// RSA private key used for authentication with the visa service.
         #[arg(long, value_name = "PATH")]
         auth_private_key: Option<PathBuf>,
+
+        /// Substrate address to advertise to the visa service, as a literal
+        /// IP:port (IPv6 in square brackets, e.g. [2001:db8::1]:5000). Required
+        /// when self_addr has an unspecified IP (e.g. 0.0.0.0), since a wildcard
+        /// address cannot be dialed by peers.
+        #[arg(long, value_name = "ADDR:PORT")]
+        advertised_substrate_addr: Option<String>,
 
         #[command(flatten)]
         common: CommonArgs,

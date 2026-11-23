@@ -92,12 +92,3 @@ private_key_file = "tests/private_key.pem"
     #              to.
     # ------------------------------------------------------------------------
 node_addr = "192.168.0.2:5000"
-
-    # ------------------------------------------------------------------------
-    # node_public_key_file
-    #
-    # [required] - Path to the PEM file containing the nodes
-    #              noise public key.
-    # ------------------------------------------------------------------------
-node_public_key_file = "tests/node_public_key.pem"
-

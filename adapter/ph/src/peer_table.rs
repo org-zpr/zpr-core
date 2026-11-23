@@ -5,6 +5,7 @@ use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::mgmt::{self, txn_mgr};
+use crate::prelude::*;
 use crate::queues;
 use crate::special_peers::*;
 use crate::zdpr;
@@ -18,6 +19,7 @@ use std::future::Future;
 use std::num::NonZero;
 use std::sync::atomic::{self, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use strum;
 use thiserror::Error;
 use tokio::sync::{Notify, mpsc};
 use tokio::task;
@@ -32,11 +34,14 @@ pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
     pub interface_addr: ScopedIpAddr,
     pub link_state_machine: LinkStateWrapper,
+    // Shared with the actor worker and detached VS completion tasks, which outlive peer-table guards.
+    pub actor_auth: Arc<crate::actor_auth::ActorAuthorization>,
     pub pft: PeerForwardingTable,
-    pub docking_session_state: mgmt::dock::DockingSessionPeerState,
+    pub node_state: mgmt::node::NodePeerState,
     pub mgmt_processor: queues::MgmtProcessor,
     pub mgmt_processor_worker: task::JoinHandle<()>,
     pub auth_key: [u8; 32], // set in ::new and never changed.
+    pub a2a_dh_pubkey: RcuBox<Option<x25519_dalek::PublicKey>>,
     pub zdpr_send: Mutex<zdpr::Sender<crate::packet::Packet>>,
     pub zdpr_recv: Mutex<zdpr::Receiver>,
     pub zdpr_retry_timer_reset: Notify,
@@ -69,6 +74,15 @@ impl PeerKmState {
     }
 }
 
+#[derive(Debug, strum::Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum PeerType {
+    Node,
+    Adapter,
+    Dock,
+    Unknown,
+}
+
 const MGMT_PROCESSOR_QUEUE_SIZE: usize = 16;
 
 impl PeerState {
@@ -98,11 +112,16 @@ impl PeerState {
             substrate_addr,
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
+            actor_auth: Arc::new(crate::actor_auth::ActorAuthorization::new(
+                link_id.get(),
+                link_type,
+            )),
             pft: PeerForwardingTable::new(),
-            docking_session_state: mgmt::dock::DockingSessionPeerState::new(),
+            node_state: mgmt::node::NodePeerState::new(),
             mgmt_processor,
             mgmt_processor_worker,
             auth_key: key,
+            a2a_dh_pubkey: RcuBox::new(None),
             zdpr_send: Mutex::new(zdpr::Sender::new()),
             zdpr_recv: Mutex::new(zdpr::Receiver::new(
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,
@@ -144,6 +163,22 @@ impl PeerState {
 
     pub fn is_internal(&self) -> bool {
         self.link_state_machine.is_internal()
+    }
+
+    /// What type of peer is this.  Accounts for well-known internal links
+    /// (local actor and dock).
+    pub fn peer_type(&self) -> PeerType {
+        match self.link_state_machine.get_link_type() {
+            LinkType::Internal => match self.link_state_machine.id {
+                LOCAL_ACTOR_LINK_ID => PeerType::Adapter,
+                DOCK_LINK_ID => PeerType::Dock,
+                _ => PeerType::Unknown,
+            },
+
+            LinkType::NodeToAdapter => PeerType::Adapter,
+            LinkType::AdapterToNode => PeerType::Dock,
+            LinkType::NodeToNode => PeerType::Node,
+        }
     }
 }
 
@@ -512,11 +547,16 @@ pub mod test {
             substrate_addr,
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
+            actor_auth: Arc::new(crate::actor_auth::ActorAuthorization::new(
+                link_id.get(),
+                link_type,
+            )),
             pft: PeerForwardingTable::new(),
-            docking_session_state: mgmt::dock::DockingSessionPeerState::new(),
+            node_state: mgmt::node::NodePeerState::new(),
             mgmt_processor,
             mgmt_processor_worker: task::spawn(async {}),
             auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
+            a2a_dh_pubkey: RcuBox::new(None),
             zdpr_send: Mutex::new(zdpr::Sender::new()),
             zdpr_recv: Mutex::new(zdpr::Receiver::new(
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,

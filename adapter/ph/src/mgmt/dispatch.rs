@@ -65,69 +65,72 @@ pub fn dispatch_mgmt_packet_with_addr(
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
 pub fn dispatch_mgmt_packet_with_link(asm: &Assembly, pkt: &mut Packet) {
-    match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
-        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
+    let Ok((base_hdr, rest)) = zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) else {
+        core::count_event(asm, ManagementCounterType::BadStructure);
+        return;
+    };
+
+    match base_hdr.packet_type {
+        zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
-            handle_key_management(asm, pkt);
+            return handle_key_management(asm, pkt);
         }
 
-        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::Acknowledgement => {
+        zdp::ZdpPacketType::Acknowledgement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
-            handle_acknowledgement(asm, pkt)
+            return handle_acknowledgement(asm, pkt);
         }
 
-        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::Cancel => {
+        zdp::ZdpPacketType::Cancel => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
-            handle_cancel(asm, pkt)
+            return handle_cancel(asm, pkt);
         }
 
-        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::Canceled => {
+        zdp::ZdpPacketType::Canceled => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
-            handle_canceled(asm, pkt)
+            return handle_canceled(asm, pkt);
         }
 
-        Ok((_base_hdr, rest)) => {
-            let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::ref_from_prefix(rest).unwrap();
+        _ => (),
+    }
 
-            let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-                core::count_event(asm, ManagementCounterType::PeerRemoved);
+    let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::ref_from_prefix(rest).unwrap();
+
+    let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
+        core::count_event(asm, ManagementCounterType::PeerRemoved);
+        return;
+    };
+
+    // expand sequence number and store in packet metadata
+    let mut receiver = peer_state.zdpr_recv.lock().unwrap();
+    let seq_num = mgmt_hdr.sequence_number.get();
+    pkt.metadata_mut().seq_num = seq_num;
+
+    // attempt to queue packet if processing is indicated by ZDPR
+    if receiver.should_process_packet(seq_num) {
+        let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+        match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
+            Ok(()) => (),
+            Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
+                // we were unable to queue the packet; treat it as if
+                // we never received it (so, no ACK or updating ZDPR)
+                core::count_event(asm, ManagementCounterType::QueueBackpressure);
                 return;
-            };
-
-            // expand sequence number and store in packet metadata
-            let mut receiver = peer_state.zdpr_recv.lock().unwrap();
-            let seq_num = mgmt_hdr.sequence_number.get();
-            pkt.metadata_mut().seq_num = seq_num;
-
-            // attempt to queue packet if processing is indicated by ZDPR
-            if receiver.should_process_packet(seq_num) {
-                let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
-                match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
-                    Ok(()) => (),
-                    Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
-                        // we were unable to queue the packet; treat it as if
-                        // we never received it (so, no ACK or updating ZDPR)
-                        core::count_event(asm, ManagementCounterType::QueueBackpressure);
-                        return;
-                    }
-                }
-            }
-
-            // update ZDPR that we've accepted the packet
-            let disp = receiver.process_packet(seq_num);
-            count_zdpr_receiver_stats(&asm.counters.management, &mut receiver);
-            drop(receiver);
-
-            if disp.should_ack() {
-                if disp.ack_is_canceled() {
-                    core::send_canceled(&asm, pkt.metadata().ingress_link_id, seq_num);
-                } else {
-                    core::send_acknowledgement(&asm, pkt.metadata().ingress_link_id, seq_num);
-                }
             }
         }
+    }
 
-        Err(_) => core::count_event(asm, ManagementCounterType::BadStructure),
+    // update ZDPR that we've accepted the packet
+    let disp = receiver.process_packet(seq_num);
+    count_zdpr_receiver_stats(&asm.counters.management, &mut receiver);
+    drop(receiver);
+
+    if disp.should_ack() {
+        if disp.ack_is_canceled() {
+            core::send_canceled(&asm, pkt.metadata().ingress_link_id, seq_num);
+        } else {
+            core::send_acknowledgement(&asm, pkt.metadata().ingress_link_id, seq_num);
+        }
     }
 }
 

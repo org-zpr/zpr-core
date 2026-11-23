@@ -60,18 +60,10 @@ pub const MIN_VISA_ID: u64 = 1000;
 /// wait this long before retry.
 pub const VSCONN_RETRY_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Slightly longer -- asking visa service to grant an address
-/// means it may have to do a lot of work to verify auth.
-pub const VS_GRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-
 /// How long to wait for an actor to finish out of band authentication.
 pub const ACTOR_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-
-/// How long to wait when we expect the VS to have to talk to external auth services.
-pub const VS_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
-#[cfg(not(feature = "capnp-ancillary"))]
-pub const ANCILLARY_BUFFER_SIZE: usize = 128;
+pub const ACTOR_AUTH_RETRY_INITIAL: std::time::Duration = std::time::Duration::from_secs(1);
+pub const ACTOR_AUTH_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(30);
 
 const DEFAULT_BUFFER_COUNT: usize = 512; // should be at least 5x batch size; see fastpath_worker.rs for explanation
 const DEFAULT_BATCH_SIZE: usize = 64;
@@ -120,11 +112,14 @@ pub struct Config {
     /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
 
-    pub capture_path: PathBuf,
-
     /// Source address for our UDP substrate socket. For an adapter this should (always?) be `0.0.0.0:0`.
     /// For a node this is the nodes dock listening address.
     pub self_addr: SocketAddr,
+
+    /// Node only, optional - the substrate address this node advertises to the visa
+    /// service (the address peers dial). Needed when it differs from the bind address,
+    /// e.g. behind NAT. Resolved from the config-file string at parse time.
+    pub advertised_substrate_addr: Option<SocketAddr>,
 
     /// Path to a PEM file containing the Certificate Authority certificate.
     /// Optional and if present is used by the link management system to verify passed noise certificates.
@@ -158,9 +153,6 @@ pub struct Config {
     /// Required for node, optional for adapter - the ZPR address (no port) of the adapter.
     pub zpr_addr: Vec<IpAddr>,
 
-    /// Required for adapter - the path to the PEM file containing the nodes noise public key (not a certificate).
-    pub node_public_key_file: Option<PathBuf>,
-
     /// Ignored for node, optional for adapter - Only set if the adapter is configured for bootstrap authentication.
     pub bootstrap: Option<RsaBootstrapAuth>,
 
@@ -178,6 +170,18 @@ pub struct Config {
 
     /// Type of key manager implementation
     pub km_impl: KmId,
+
+    /// Security testing for A2A Pubkeys
+    #[cfg(feature = "enable-security-testing")]
+    pub security_testing_mangle_forwarded_pings: bool,
+
+    /// Security testing: force old-style unkeyed A2A MICVs.
+    #[cfg(feature = "enable-security-testing")]
+    pub security_testing_unkeyed_a2a_micv: bool,
+
+    /// Security testing: recompute the A2A MICV after mangling (vs. reuse it).
+    #[cfg(feature = "enable-security-testing")]
+    pub security_testing_recompute_micvs: bool,
 }
 
 impl Config {
@@ -254,6 +258,7 @@ impl Config {
             let base_dir = config_file.config_path.parent().unwrap();
             config.set_from_globals(&config_file.global, base_dir)?;
             config.set_from_authentication(&config_file.authentication, base_dir)?;
+            config.set_from_node(&config_file.node)?;
         }
         Ok(config)
     }
@@ -314,16 +319,6 @@ impl Config {
                 Err(e) => return Err(e),
             }
         }
-        if self.capture_path.as_os_str().is_empty() {
-            return Err("capture_path".arg_missing());
-        }
-        // For capture path, the parent dir must exist or there will be an error later.
-        if let Some(parent) = self.capture_path.parent() {
-            match check_file_exists("capture socket parent directory", parent) {
-                Ok(_) => {}
-                Err(e) => return Err(e),
-            }
-        }
         if let Some(ca_file) = &self.ca_file {
             check_file_exists("certificate authority file", ca_file)?;
         }
@@ -356,14 +351,6 @@ impl Config {
                 if self.node_addr.is_none() {
                     return Err("node_addr".arg_missing());
                 }
-                if self.node_public_key_file.is_none() {
-                    return Err("node_public_key_file".arg_missing());
-                } else {
-                    check_file_exists(
-                        "node public key file",
-                        &self.node_public_key_file.as_ref().unwrap(),
-                    )?;
-                }
                 if self.certificate_file.is_none() && self.name.is_empty() {
                     return Err("name (required when certificate_file is absent)".arg_missing());
                 }
@@ -392,13 +379,6 @@ impl Config {
                 self.control_path = base_dir.join(control_path);
             } else {
                 self.control_path = control_path.clone();
-            }
-        }
-        if let Some(capture_path) = &config.capture_path {
-            if capture_path.is_relative() {
-                self.capture_path = base_dir.join(capture_path);
-            } else {
-                self.capture_path = capture_path.clone();
             }
         }
         if let Some(self_addr) = &config.self_addr {
@@ -453,13 +433,6 @@ impl Config {
         if let Some(node_addr) = &config.node_addr {
             self.node_addr = Some(*node_addr);
         }
-        if let Some(node_public_key_file) = &config.node_public_key_file {
-            if node_public_key_file.is_relative() {
-                self.node_public_key_file = Some(base_dir.join(node_public_key_file));
-            } else {
-                self.node_public_key_file = Some(node_public_key_file.clone());
-            }
-        }
 
         if let Some(bootstrap_key_file) = &config.bootstrap_key {
             if bootstrap_key_file.is_relative() {
@@ -496,6 +469,24 @@ impl Config {
         Ok(())
     }
 
+    // Overwrite our internal state with the values present in the node section
+    // of TOML config.
+    fn set_from_node(&mut self, config: &Option<NodeConfigSection>) -> Result<(), ArgsError> {
+        if let Some(config) = config {
+            if let Some(advertised) = &config.advertised_substrate_addr {
+                self.advertised_substrate_addr = Some(resolve_advertised_addr(advertised)?);
+            }
+        }
+        Ok(())
+    }
+
+    /// Set the advertised substrate address from a command-line string,
+    /// applying the same resolution/validation as the config-file path.
+    pub fn set_advertised_substrate_addr(&mut self, addr_str: &str) -> Result<(), ArgsError> {
+        self.advertised_substrate_addr = Some(resolve_advertised_addr(addr_str)?);
+        Ok(())
+    }
+
     // Overwrite our internal state with the values present in the CommonArgs (from command line)
     fn set_from_common(&mut self, common: &CommonArgs) -> Result<(), ArgsError> {
         if let Some(control_path) = &common.control_path {
@@ -503,15 +494,6 @@ impl Config {
             self.control_path = path::absolute(cp).or_else(|e| {
                 Err(ArgsError::PathError(format!(
                     "path error for control_path: {:?}",
-                    e
-                )))
-            })?;
-        }
-        if let Some(capture_path) = &common.capture_path {
-            let cp = PathBuf::from(capture_path);
-            self.capture_path = path::absolute(cp).or_else(|e| {
-                Err(ArgsError::PathError(format!(
-                    "path error for capture_path: {:?}",
                     e
                 )))
             })?;
@@ -577,6 +559,14 @@ impl Config {
             }
         };
 
+        #[cfg(feature = "enable-security-testing")]
+        {
+            self.security_testing_mangle_forwarded_pings =
+                common.security_testing_mangle_forwarded_pings;
+            self.security_testing_unkeyed_a2a_micv = common.security_testing_unkeyed_a2a_micv;
+            self.security_testing_recompute_micvs = common.security_testing_recompute_micvs;
+        }
+
         Ok(())
     }
 }
@@ -586,24 +576,29 @@ impl Default for Config {
         Self {
             name: String::new(),
             control_path: get_data_home().join("control.sock"),
-            capture_path: get_data_home().join("capture.sock"),
             self_addr: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0),
             ca_file: None,
             certificate_file: None,
             private_key_file: None,
             private_key_data: None,
+            advertised_substrate_addr: None,
             auth_private_key: None,
             tun_if: None,
             logging: Vec::new(),
             node_addr: None,
             zpr_addr: Vec::new(),
-            node_public_key_file: None,
             bootstrap: None,
             rsaoauth: None,
             bootstrap_key_path: None,
             bas_key_path: None,
             batch_io_engine: batch_io::AUTO_ENGINE_NAME.to_owned(),
             km_impl: KM_ID_NOISE,
+            #[cfg(feature = "enable-security-testing")]
+            security_testing_mangle_forwarded_pings: false,
+            #[cfg(feature = "enable-security-testing")]
+            security_testing_unkeyed_a2a_micv: false,
+            #[cfg(feature = "enable-security-testing")]
+            security_testing_recompute_micvs: true,
         }
     }
 }
@@ -626,14 +621,22 @@ pub struct NodeConfig {
     pub config_path: PathBuf,
 
     pub global: GlobalConfigSection,
+    pub node: Option<NodeConfigSection>,
     pub authentication: Option<AuthenticationConfigSection>,
+}
+
+// Node only bits.
+#[derive(Deserialize, Debug, Clone)]
+pub struct NodeConfigSection {
+    /// The substrate address this node advertises to the visa service, as a
+    /// literal `"IP:port"` string (IPv6 in square-bracket notation).
+    pub advertised_substrate_addr: Option<String>,
 }
 
 // Global section is shared by nodes and adapters.
 #[derive(Deserialize, Debug, Clone)]
 pub struct GlobalConfigSection {
     pub control_path: Option<PathBuf>,
-    pub capture_path: Option<PathBuf>,
     pub self_addr: Option<SocketAddr>,
     pub ca_file: Option<PathBuf>,
     pub certificate_file: Option<PathBuf>,
@@ -649,7 +652,6 @@ pub struct GlobalConfigSection {
 pub struct AdapterConfigSection {
     pub name: Option<String>,
     pub node_addr: Option<SocketAddr>,
-    pub node_public_key_file: Option<PathBuf>,
     pub bootstrap_key: Option<PathBuf>,
 }
 
@@ -720,6 +722,32 @@ fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
     }
 }
 
+/// Parse an `advertised_substrate_addr` config string to a concrete [SocketAddr].
+/// The value must be a literal `IP:port` — IPv6 in square-bracket notation, e.g.
+/// `"[2001:db8::1]:5000"`. Hostnames are deliberately not accepted: substrate
+/// claims are always for a specific IP address and adapters dial nodes by IP, so
+/// the advertised value must be the concrete address itself. Unspecified IPs
+/// (e.g. `0.0.0.0`) and port 0 are rejected: the value is what peers dial.
+fn resolve_advertised_addr(addr_str: &str) -> Result<SocketAddr, ArgsError> {
+    let resolved: SocketAddr = addr_str.parse().map_err(|e| {
+        ArgsError::ParseError(format!(
+            "advertised_substrate_addr {addr_str:?} is not a literal IP:port \
+             (IPv6 in square brackets, e.g. \"[2001:db8::1]:5000\"): {e}"
+        ))
+    })?;
+    if resolved.ip().is_unspecified() {
+        return Err(ArgsError::ParseError(format!(
+            "advertised_substrate_addr {addr_str:?} is an unspecified address; peers cannot dial it"
+        )));
+    }
+    if resolved.port() == 0 {
+        return Err(ArgsError::ParseError(format!(
+            "advertised_substrate_addr {addr_str:?} has port 0; peers cannot dial it"
+        )));
+    }
+    Ok(resolved)
+}
+
 /// Parse the `certificate_file` (a noise certificate) and return the CN value found within.
 ///
 /// TODO: This has nothing to do with noise.  And nothing to do with km_cert_exchange.  Move to a pki util file.
@@ -739,9 +767,81 @@ mod test {
     fn test_deserialize_adapter_config() {
         let toml_str = r#"
             node_addr = "10.0.0.1:5000"
-            node_public_key_file = "node_pubkey.pem"
             bootstrap_key = "rsa_key.pem"
             "#;
         let _config: AdapterConfigSection = toml::from_str(toml_str).unwrap();
+    }
+
+    #[test]
+    fn test_deserialize_node_config_section() {
+        let toml_str = r#"
+            advertised_substrate_addr = "203.0.113.7:5000"
+            "#;
+        let config: NodeConfigSection = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.advertised_substrate_addr.as_deref(),
+            Some("203.0.113.7:5000")
+        );
+    }
+
+    #[test]
+    fn test_node_config_advertised_substrate_addr() {
+        let toml_str = r#"
+            [global]
+            self_addr = "10.0.0.1:5000"
+
+            [node]
+            advertised_substrate_addr = "203.0.113.7:6000"
+            "#;
+        let file_config: NodeConfig = toml::from_str(toml_str).unwrap();
+        let mut config = Config::default();
+        config.set_from_node(&file_config.node).unwrap();
+        assert_eq!(
+            config.advertised_substrate_addr,
+            Some("203.0.113.7:6000".parse().unwrap())
+        );
+
+        // Without a [node] section the option stays unset.
+        let toml_str = r#"
+            [global]
+            self_addr = "10.0.0.1:5000"
+            "#;
+        let file_config: NodeConfig = toml::from_str(toml_str).unwrap();
+        let mut config = Config::default();
+        config.set_from_node(&file_config.node).unwrap();
+        assert_eq!(config.advertised_substrate_addr, None);
+    }
+
+    #[test]
+    fn test_resolve_advertised_addr() {
+        // Plain IP:port passes through.
+        assert_eq!(
+            resolve_advertised_addr("203.0.113.7:5000").unwrap(),
+            "203.0.113.7:5000".parse::<SocketAddr>().unwrap()
+        );
+        // V6 in square-bracket notation passes through.
+        assert_eq!(
+            resolve_advertised_addr("[2001:db8::7]:5000").unwrap(),
+            "[2001:db8::7]:5000".parse::<SocketAddr>().unwrap()
+        );
+        // V6 with a scope-free full form.
+        assert_eq!(
+            resolve_advertised_addr("[2001:db8:0:0:0:0:0:9]:6000").unwrap(),
+            "[2001:db8::9]:6000".parse::<SocketAddr>().unwrap()
+        );
+        // V6 without brackets rejected.
+        assert!(resolve_advertised_addr("2001:db8::7:5000").is_err());
+        // Hostnames rejected: the claim is always for a specific IP address.
+        assert!(resolve_advertised_addr("localhost:5000").is_err());
+        assert!(resolve_advertised_addr("node1.example.com:5000").is_err());
+        // Unspecified IP rejected.
+        assert!(resolve_advertised_addr("0.0.0.0:5000").is_err());
+        assert!(resolve_advertised_addr("[::]:5000").is_err());
+        // Port 0 rejected (V4 and V6).
+        assert!(resolve_advertised_addr("203.0.113.7:0").is_err());
+        assert!(resolve_advertised_addr("[2001:db8::7]:0").is_err());
+        // Garbage rejected.
+        assert!(resolve_advertised_addr("not an address").is_err());
+        assert!(resolve_advertised_addr("203.0.113.7").is_err());
     }
 }

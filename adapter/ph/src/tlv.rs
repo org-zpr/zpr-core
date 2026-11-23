@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use thiserror::Error;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+use zpr::write_to::WriteTo as _;
 use zpr_utils::net_defs::IpAddress;
 
 const SOCKADDR_LEN_V4: u8 = 6; // 4 bytes for IPv4 + 2 bytes for port
@@ -30,7 +31,12 @@ impl DataType {
     pub const STATIC_ADDR: TlvType = 5; // Static Address - used for static address requests from an adapter
     pub const WINDOW_SIZE: TlvType = 6;
     pub const A2A_DH_PUBKEY: TlvType = 7; // Actor to Actor Diffie-Hellman Public Key
+    pub const BOOTSTRAP_VISA: TlvType = 8;
+    pub const ACTOR_AUTH_PROTOCOL: TlvType = 9;
+    pub const VS_BOOTSTRAP_LINK: TlvType = 10;
 }
+
+pub const ACTOR_AUTH_PROTOCOL_VERSION: u16 = 1;
 
 /// TlvEncoding is a designed to be an easy way to create and write TLV data
 /// into a buffer.
@@ -40,6 +46,20 @@ pub struct TlvEncoding {
 }
 
 impl TlvEncoding {
+    pub fn new_actor_auth_protocol() -> Self {
+        Self {
+            tlv_type: DataType::ACTOR_AUTH_PROTOCOL,
+            value: TlvValue::U16(ACTOR_AUTH_PROTOCOL_VERSION),
+        }
+    }
+
+    pub fn new_vs_bootstrap_link() -> Self {
+        Self {
+            tlv_type: DataType::VS_BOOTSTRAP_LINK,
+            value: TlvValue::U16(1),
+        }
+    }
+
     pub fn new_policy_id(policy_id: i64) -> TlvEncoding {
         TlvEncoding {
             tlv_type: DataType::POLICY_ID,
@@ -105,10 +125,18 @@ impl TlvEncoding {
     }
 
     /// Actor to Actor Diffie-Hellman Public Key
-    pub fn new_a2a_dh_pubkey(pub_key: x25519_dalek::PublicKey) -> TlvEncoding {
+    pub fn new_a2a_dh_pubkey(pubkey: x25519_dalek::PublicKey) -> TlvEncoding {
         TlvEncoding {
             tlv_type: DataType::A2A_DH_PUBKEY,
-            value: TlvValue::X25519PubKey(pub_key),
+            value: TlvValue::X25519PubKey(pubkey),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn new_bootstrap_visa(visa: zpr::vsapi_types::Visa) -> TlvEncoding {
+        TlvEncoding {
+            tlv_type: DataType::BOOTSTRAP_VISA,
+            value: TlvValue::Visa(visa),
         }
     }
 
@@ -121,7 +149,8 @@ impl TlvEncoding {
             TlvValue::Ipv6Addr(v) => put_ipv6addr(buf, self.tlv_type, v),
             TlvValue::Ipv4Addr(v) => put_ipv4addr(buf, self.tlv_type, v),
             TlvValue::SocketAddr(v) => put_socketaddr(buf, self.tlv_type, v),
-            TlvValue::X25519PubKey(v) => put_x25519_pub_key(buf, self.tlv_type, v),
+            TlvValue::X25519PubKey(v) => put_x25519_pubkey(buf, self.tlv_type, v),
+            TlvValue::Visa(v) => put_visa(buf, self.tlv_type, v),
         }
     }
 }
@@ -135,6 +164,7 @@ pub enum TlvValue {
     Ipv4Addr(Ipv4Addr),
     SocketAddr(SocketAddr),
     X25519PubKey(x25519_dalek::PublicKey),
+    Visa(zpr::vsapi_types::Visa),
 }
 
 impl std::fmt::Display for TlvValue {
@@ -147,6 +177,7 @@ impl std::fmt::Display for TlvValue {
             TlvValue::Ipv4Addr(v) => write!(f, "{v}"),
             TlvValue::SocketAddr(v) => write!(f, "{v}"),
             TlvValue::X25519PubKey(v) => write!(f, "{v:?}"),
+            TlvValue::Visa(v) => write!(f, "{v:?}"),
         }
     }
 }
@@ -211,7 +242,8 @@ fn put_ipv4addr(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: &Ipv4Addr
     buf.put_slice(&value.octets());
 }
 
-fn put_x25519_pub_key(
+/// Serialize the x25519 public key into the buffer
+fn put_x25519_pubkey(
     buf: &mut dyn bytes::BufMut,
     tlv_type: TlvType,
     value: &x25519_dalek::PublicKey,
@@ -249,6 +281,23 @@ fn put_socketaddr(
             buf.put_u16(v6.port());
         }
     }
+}
+
+fn put_visa(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, visa: &zpr::vsapi_types::Visa) {
+    let mut builder = capnp::message::TypedBuilder::<zpr::vsapi::v1::visa::Owned>::new_default();
+    let mut builder_root = builder.init_root();
+    visa.write_to(&mut builder_root);
+
+    let mut msg_buf = Vec::new();
+    capnp::serialize_packed::write_message(&mut msg_buf, builder.borrow_inner()).unwrap();
+    assert!(msg_buf.len() <= u8::MAX as usize);
+
+    let hdr = TLVHdr {
+        tlv_type,
+        tlv_length: msg_buf.len() as u8,
+    };
+    buf.put_slice(&hdr.as_bytes());
+    buf.put_slice(&msg_buf);
 }
 
 /// Parse TLV data out of a buffer, advancing the internal position.  Only known
@@ -330,6 +379,7 @@ pub fn parse_from_buf(
                 }
             }
             DataType::A2A_DH_PUBKEY => {
+                // Parse an x25519 public key. It should be 32 bytes.
                 if tlv_length != X25519_KEY_LEN {
                     return Err(TlvError::BadStructure);
                 }
@@ -339,10 +389,11 @@ pub fn parse_from_buf(
                     .entry(tlv_type)
                     .or_insert_with(Vec::new)
                     .push(TlvValue::X25519PubKey(x25519_dalek::PublicKey::from(
+                        // Deserialize the public key from bytes
                         key_bytes,
                     )));
             }
-            DataType::WINDOW_SIZE => {
+            DataType::WINDOW_SIZE | DataType::ACTOR_AUTH_PROTOCOL | DataType::VS_BOOTSTRAP_LINK => {
                 if tlv_length != 2 {
                     return Err(TlvError::BadStructure);
                 }
@@ -351,6 +402,29 @@ pub fn parse_from_buf(
                     .entry(tlv_type)
                     .or_insert_with(Vec::new)
                     .push(TlvValue::U16(value));
+            }
+            DataType::BOOTSTRAP_VISA => {
+                let mut msg_buf = Vec::new();
+                msg_buf.resize(tlv_length as usize, 0);
+                buf.copy_to_slice(&mut msg_buf);
+                let Ok(reader) = capnp::serialize_packed::read_message(
+                    msg_buf.as_slice(),
+                    capnp::message::ReaderOptions::new(),
+                ) else {
+                    return Err(TlvError::BadStructure);
+                };
+                let typed_reader =
+                    capnp::message::TypedReader::<_, zpr::vsapi::v1::visa::Owned>::new(reader);
+                let Ok(reader_root) = typed_reader.get() else {
+                    return Err(TlvError::BadStructure);
+                };
+                let Ok(visa) = reader_root.try_into() else {
+                    return Err(TlvError::BadStructure);
+                };
+                tlv_map
+                    .entry(tlv_type)
+                    .or_insert_with(Vec::new)
+                    .push(TlvValue::Visa(visa));
             }
             _ => {
                 // For unknown types, just skip the value.
@@ -709,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bad_x25519_pub_key_length() {
+    fn test_parse_bad_x25519_pubkey_length() {
         let mut buf = BytesMut::new();
 
         // Claim 16 bytes for a key that must be 32
@@ -836,13 +910,13 @@ mod tests {
     }
 
     #[test]
-    fn test_put_and_parse_x25519_pub_key() {
+    fn test_put_and_parse_x25519_pubkey() {
         let mut buf = BytesMut::new();
         let secret = x25519_dalek::ReusableSecret::random();
         let test_key = x25519_dalek::PublicKey::from(&secret);
 
         // Write the TLV
-        put_x25519_pub_key(&mut buf, DataType::A2A_DH_PUBKEY, &test_key);
+        put_x25519_pubkey(&mut buf, DataType::A2A_DH_PUBKEY, &test_key);
 
         // Check the wire structure before parsing it back
         assert_eq!(buf.as_ref()[0], DataType::A2A_DH_PUBKEY);

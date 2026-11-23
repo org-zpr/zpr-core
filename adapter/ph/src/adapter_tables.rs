@@ -10,6 +10,7 @@ use crate::defs::FiveTuple;
 use crate::mgmt::txn_mgr::TxnHandle;
 use crate::packet::Packet;
 use crate::tc;
+use crate::zdp;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DashMapEntry;
@@ -20,10 +21,30 @@ use zpr::packet_info::{CompressionMode, StreamId};
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 
-#[derive(Clone, Copy)]
 pub struct EltPep {
     pub compression_mode: CompressionMode,
     pub tether_id: StreamId,
+    pub a2a_shared_secret: Option<x25519_dalek::SharedSecret>,
+    pub a2a_micv_key: Option<[u8; blake3::KEY_LEN]>,
+}
+
+impl EltPep {
+    /// Constructor for an EltPep. The a2a_micv_key is derived from the a2a_shared_secret, if present.
+    pub fn new(
+        compression_mode: CompressionMode,
+        tether_id: StreamId,
+        a2a_shared_secret: Option<x25519_dalek::SharedSecret>,
+    ) -> Self {
+        let a2a_micv_key = a2a_shared_secret
+            .as_ref()
+            .map(|secret| blake3::derive_key(zdp::ZDP_A2A_MICV_KEY_CONTEXT, secret.as_bytes()));
+        Self {
+            compression_mode,
+            tether_id,
+            a2a_shared_secret,
+            a2a_micv_key,
+        }
+    }
 }
 
 pub enum EltEntry {
@@ -92,6 +113,11 @@ impl std::fmt::Debug for SetActiveError {
 }
 
 impl EndpointLookupTable {
+    pub fn clear(&self) {
+        self.table.clear();
+        self.pending.clear();
+    }
+
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),
@@ -179,6 +205,22 @@ impl EndpointLookupTable {
 
 pub struct DltPep {
     pub tc: tc::Ip5TupleTc,
+    pub a2a_shared_secret: Option<x25519_dalek::SharedSecret>,
+    pub a2a_micv_key: Option<[u8; blake3::KEY_LEN]>,
+}
+
+impl DltPep {
+    /// Constructor for a DltPep. The a2a_micv_key is derived from the a2a_shared_secret, if present.
+    pub fn new(tc: tc::Ip5TupleTc, a2a_shared_secret: Option<x25519_dalek::SharedSecret>) -> Self {
+        let a2a_micv_key = a2a_shared_secret
+            .as_ref()
+            .map(|secret| blake3::derive_key(zdp::ZDP_A2A_MICV_KEY_CONTEXT, secret.as_bytes()));
+        Self {
+            tc,
+            a2a_shared_secret,
+            a2a_micv_key,
+        }
+    }
 }
 
 /// The Dock Lookup Table (DLT) holds all state of inbound tethers.
@@ -193,6 +235,12 @@ pub struct DockLookupTable {
 pub type DltPepGuard<'a> = RcuCslabEntryGuard<'a, DltPep>;
 
 impl DockLookupTable {
+    pub fn clear(&self) {
+        let mut table = self.table.lock().unwrap();
+        let reader = table.clear();
+        self.reader.write(reader);
+    }
+
     pub fn new() -> Self {
         let table = RcuCslab::with_fixed_capacity(DOCK_LOOKUP_TABLE_SIZE);
         let reader = table.reader();
@@ -229,5 +277,30 @@ impl DockLookupTable {
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
         std::mem::drop(table);
         self.reader.write(new_reader);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::defs::FiveTuple;
+
+    #[test]
+    fn dlt_clear_publishes_empty_reader_and_keeps_old_guards_valid() {
+        let dlt = DockLookupTable::new();
+        let id = dlt
+            .insert(DltPep::new(tc::Ip5TupleTc::new(FiveTuple::default()), None))
+            .unwrap();
+        let old_guard = dlt.get(id).unwrap();
+
+        dlt.clear();
+
+        assert!(dlt.get(id).is_none());
+        assert_eq!(old_guard.tc.five_tuple(), &FiveTuple::default());
+        drop(old_guard);
+        assert!(
+            dlt.insert(DltPep::new(tc::Ip5TupleTc::new(FiveTuple::default()), None))
+                .is_ok()
+        );
     }
 }
