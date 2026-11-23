@@ -226,7 +226,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
   ACTOR3_ADDRESS_ARGS=(--zpr-addr "$C_ZPR_ADDR")
   if [[ "$ACTOR_PROTOCOL" == ipv6 ]]; then
     # Cover VS allocation as well as the requested addresses on actors A and B.
-    in_ns zpr-c ip -6 addr del "$C_ZPR_ADDR" peer "$ZPR_SUBNET" dev tun0
+    in_ns zpr-c ip -6 addr del "$C_ZPR_ADDR/$ZPR_PREFIXLEN" dev tun0
     in_ns zpr-c ip -6 route replace "$ZPR_SUBNET" dev tun0
     ACTOR3_ADDRESS_ARGS=()
   fi
