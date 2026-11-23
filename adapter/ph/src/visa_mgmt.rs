@@ -1,6 +1,6 @@
 use crate::auth::AuthBlob;
 use crate::counters::ManagementCounterType;
-use crate::link_state::{LinkEvent, LinkStateError};
+use crate::link_state::LinkStateError;
 use crate::prelude::*;
 use crate::visa_table;
 
@@ -8,7 +8,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use libnode::claims;
 use libnode::error::VSApiError;
-use std::net::IpAddr;
 use std::num::NonZero;
 use zpr::vsapi_types::{self, DisconnectNotice, DisconnectReason};
 use zpr_utils::net_defs::IpAddress;
@@ -39,46 +38,37 @@ pub async fn send_deferred_vs_connect(
     Ok(())
 }
 
-pub fn authorize_connect(
+pub async fn authorize_connect(
     asm: &Arc<Assembly>,
-    link_id: LinkId,
     connect_req: vsapi_types::ConnectRequest,
-) {
-    let task_asm = asm.clone();
-    tokio::task::spawn_local(async move {
-        match task_asm
-            .vsconn
-            .as_ref()
-            .unwrap()
-            .authorize_connect(connect_req)
-            .await
-        {
-            Ok(cr) => {
-                info!(target: VISA_MGMT, "{}: VS authorize_connect returned successfully", task_asm.formatted_link_id(link_id));
-                match cr.zpr_addr {
-                    IpAddr::V4(_) => {
-                        // Our ZPR addresses should be IPv6 -- at least for now.
-                        error!(target: VISA_MGMT, "{} authorized, but zpr address is not IPv6", task_asm.formatted_link_id(link_id));
-                        let _ignore_error =
-                            task_asm.process_link_state_event(link_id, LinkEvent::Error);
-                        return;
-                    }
-                    IpAddr::V6(_) => {
-                        let zpr_addr = IpAddress::new_from_std(&cr.zpr_addr);
-                        let _ignore_error = task_asm.process_link_state_event(
-                            link_id,
-                            LinkEvent::ReceivedAuthorizeResponse(zpr_addr),
-                        );
-                    }
-                }
-            }
+) -> Result<vsapi_types::Connection, VSApiError> {
+    asm.vsconn
+        .as_ref()
+        .ok_or(VSApiError::ConnClosed)?
+        .authorize_connect(connect_req)
+        .await
+}
 
-            Err(err) => {
-                warn!(target: VISA_MGMT, "{}: VS authorize_connect failed with error: {err}", task_asm.formatted_link_id(link_id));
-                let _ignore_error = task_asm.process_link_state_event(link_id, LinkEvent::Error);
-            }
+pub fn authorization_error_status(err: &VSApiError) -> crate::zdp::AuthenticationStatus {
+    use crate::zdp::AuthenticationStatus;
+    use vsapi_types::ErrorCode;
+    match err {
+        VSApiError::AuthFailed(_) => AuthenticationStatus::Rejected,
+        VSApiError::CodedError(e)
+            if matches!(
+                e.code,
+                ErrorCode::AuthRequired
+                    | ErrorCode::InvalidSignature
+                    | ErrorCode::AuthError
+                    | ErrorCode::ParamError
+                    | ErrorCode::InvalidOperation
+                    | ErrorCode::NotFound
+            ) =>
+        {
+            AuthenticationStatus::Rejected
         }
-    });
+        _ => AuthenticationStatus::Retryable,
+    }
 }
 
 /// Creates a ConnectRequest, unless none is necessary because the link is
@@ -96,16 +86,26 @@ pub fn build_connect_request(
     let vsapi_blob = match blob {
         AuthBlob::SelfSigned(ss) => vsapi_types::AuthBlob::SS(vsapi_types::SelfSignedBlob {
             alg: vsapi_types::ChallengeAlg::RsaSha256Pkcs1v15,
-            challenge: BASE64_STANDARD.decode(&ss.challenge).unwrap_or_default(),
+            challenge: BASE64_STANDARD.decode(&ss.challenge).map_err(|err| {
+                LinkStateError::InvalidOperation(format!("invalid actor challenge: {err}"))
+            })?,
             cn: ss.cn.clone(),
             timestamp: ss.ts,
-            signature: BASE64_STANDARD.decode(&ss.sig).unwrap_or_default(),
+            signature: BASE64_STANDARD.decode(&ss.sig).map_err(|err| {
+                LinkStateError::InvalidOperation(format!("invalid actor signature: {err}"))
+            })?,
         }),
         AuthBlob::AuthCode(ac) => vsapi_types::AuthBlob::AC(vsapi_types::AuthCodeBlob {
             asa_addr: ac
                 .asa
-                .parse()
-                .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)),
+                .parse::<std::net::SocketAddr>()
+                .map(|addr| addr.ip())
+                .or_else(|_| ac.asa.parse::<std::net::IpAddr>())
+                .map_err(|err| {
+                    LinkStateError::InvalidOperation(format!(
+                        "invalid authentication service address: {err}"
+                    ))
+                })?,
             code: ac.code.clone(),
             pkce: ac.pkce.clone(),
             client_id: ac.client_id.clone(),
@@ -207,4 +207,79 @@ pub fn handle_revocation(
         .write()
         .unwrap()
         .revoke(&asm.peer_table, visa_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
+    use crate::auth::{BLOB_TYPE_AC, ZdpAuthCodeBlob};
+    use crate::zdp::AuthenticationStatus;
+    use vsapi_types::{ApiResponseError, ErrorCode};
+
+    #[test]
+    fn auth_code_preserves_evidence_and_accepts_ip_or_socket_service_addresses() {
+        let asm = Arc::new(create_assembly(TestAssemblyBuilder::new()));
+        for (asa, ip) in [
+            ("192.0.2.1:443", "192.0.2.1"),
+            ("[fd5a:5052::3]:443", "fd5a:5052::3"),
+            ("192.0.2.1", "192.0.2.1"),
+            ("fd5a:5052::3", "fd5a:5052::3"),
+            ("invalid", ""),
+        ] {
+            let blob = AuthBlob::AuthCode(ZdpAuthCodeBlob {
+                blob_type: BLOB_TYPE_AC.into(),
+                code: "auth-code".into(),
+                pkce: "pkce".into(),
+                client_id: "actor.identity".into(),
+                asa: asa.into(),
+            });
+            let result = build_connect_request(&asm, IpAddress::UNSPECIFIED, &blob, None);
+            if ip.is_empty() {
+                assert!(result.is_err());
+                continue;
+            }
+            let req = result.unwrap();
+            assert!(req.claims.is_empty());
+            let [vsapi_types::AuthBlob::AC(evidence)] = req.blobs.as_slice() else {
+                panic!("expected auth-code evidence");
+            };
+            assert_eq!(evidence.asa_addr, ip.parse::<std::net::IpAddr>().unwrap());
+            assert_eq!(evidence.code, "auth-code");
+            assert_eq!(evidence.pkce, "pkce");
+            assert_eq!(evidence.client_id, "actor.identity");
+        }
+    }
+
+    #[test]
+    fn explicit_vs_denials_are_distinct_from_service_failures() {
+        for code in [
+            ErrorCode::AuthRequired,
+            ErrorCode::InvalidSignature,
+            ErrorCode::AuthError,
+            ErrorCode::ParamError,
+            ErrorCode::InvalidOperation,
+            ErrorCode::NotFound,
+        ] {
+            let err = VSApiError::CodedError(ApiResponseError::new_code_msg(code, "denied"));
+            assert_eq!(
+                authorization_error_status(&err),
+                AuthenticationStatus::Rejected
+            );
+        }
+        assert_eq!(
+            authorization_error_status(&VSApiError::AuthFailed("denied".into())),
+            AuthenticationStatus::Rejected
+        );
+        for err in [
+            VSApiError::ConnClosed,
+            VSApiError::Timeout("service".into()),
+            VSApiError::CodedError(ApiResponseError::new_code_msg(ErrorCode::Internal, "retry")),
+        ] {
+            assert_eq!(
+                authorization_error_status(&err),
+                AuthenticationStatus::Retryable
+            );
+        }
+    }
 }

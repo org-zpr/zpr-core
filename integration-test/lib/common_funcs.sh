@@ -250,17 +250,22 @@ function check_vs_valkey_port() {
 
 function ping_test() {
   RESULT=0
+  local deadline=(-w 5)
+  if [[ -n "${NETEM_PARAMS:-}" ]]; then
+    # With injected loss, require connectivity, not all five replies by a deadline.
+    deadline=(-W 1)
+  fi
 
-  in_ns zpr-node ping -q -c 5 -w 5 "$VS_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
-  in_ns zpr-vs ping -q -c 5 -w 5 "$NODE_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
-  in_ns zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
-  in_ns zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+  in_ns zpr-node ping -q -c 5 "${deadline[@]}" "$VS_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+  in_ns zpr-vs ping -q -c 5 "${deadline[@]}" "$NODE_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+  in_ns zpr-a ping -q -c 5 "${deadline[@]}" "$B_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+  in_ns zpr-b ping -q -c 5 "${deadline[@]}" "$A_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
 
   if [[ "$NUM_ACTORS" -ge 3 ]]; then
-    in_ns zpr-a ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
-    in_ns zpr-b ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
-    in_ns zpr-c ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
-    in_ns zpr-c ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+    in_ns zpr-a ping -q -c 5 "${deadline[@]}" "$C_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+    in_ns zpr-b ping -q -c 5 "${deadline[@]}" "$C_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+    in_ns zpr-c ping -q -c 5 "${deadline[@]}" "$A_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
+    in_ns zpr-c ping -q -c 5 "${deadline[@]}" "$B_ZPR_ADDR" & wait -f $!; let RESULT="RESULT||$?"
   fi
 
   return "$RESULT"
@@ -273,6 +278,10 @@ function check_carrier() {
   # `nsenter -n` does not remount /sys (unlike `ip netns exec`), so
   # /sys/class/net would show the wrong namespace; ask ip(8) instead.
   in_ns "$NETNS" ip link show dev "$IF" | grep -q LOWER_UP
+}
+
+function check_actor_authorized() {
+  "$PH_DEBUG_BIN" -p "$1" link show 2 | grep -q 'Actor state: Authorized'
 }
 
 # Visible sleep for n seconds.  Takes one arg: number of seconds.

@@ -292,6 +292,13 @@ if [[ "$PASS" == 0 ]]; then wait_for 15 check_carrier zpr-a tun0 || { PASS=1; };
 if [[ "$PASS" == 0 ]]; then wait_for 15 check_carrier zpr-b tun0 || { PASS=1; }; fi
 
 if [[ "$PASS" == 0 ]]; then
+  echo "Wait for actor authorization..."
+  for socket in "$VS_SOCK" "$ADAPTER1_SOCK" "$ADAPTER2_SOCK"; do
+    wait_for 15 check_actor_authorized "$socket" || { PASS=1; }
+  done
+fi
+
+if [[ "$PASS" == 0 ]]; then
   echo "Carrier has arrived."
   sleep 1
 

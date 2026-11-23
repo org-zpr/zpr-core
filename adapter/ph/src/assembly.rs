@@ -57,6 +57,7 @@ pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 /// visible queue becoming full.
 
 pub struct Assembly {
+    pub actor_rejected: std::sync::atomic::AtomicBool,
     pub ph_mode: PhMode,
     pub topology_config: config::TopologyConfig,
 
@@ -207,28 +208,31 @@ impl Assembly {
         }
     }
 
-    /// Update the local ZPR addresses of this node or adapter. Though presumably
-    /// this is called only on an adapter as a nodes addresses are currently set
-    /// through configuration or command line args.
-    pub fn set_local_zpr_addrs<T>(&self, addrs: impl IntoIterator<Item = T>)
-    where
-        T: Into<IpAddr>,
-    {
-        let addrs: Vec<IpAddr> = addrs.into_iter().map(|a| a.into()).collect();
-        self.config
-            .update(move |cfg| {
-                Some(config::Config {
-                    zpr_addr: addrs.clone(),
-                    ..cfg.clone()
-                })
-            })
-            .unwrap();
+    pub fn adapter_owns_address(&self, addr: IpAddress) -> bool {
+        self.peer_table.get(DOCK_LINK_ID).is_some_and(|peer| {
+            peer.link_state_machine.is_ready()
+                && (peer.actor_auth.owns_address(&addr)
+                    || peer.link_state_machine.aaa_address() == Some(addr))
+        })
     }
 
     /// Get a copy of the local ZPR addresses. May be empty on an adapter until we
     /// have been granted a ZPR address.
     pub fn get_local_zpr_addrs_std(&self) -> Vec<IpAddr> {
-        self.config.get().zpr_addr.clone()
+        if self.ph_mode == PhMode::Adapter {
+            self.peer_table
+                .get(DOCK_LINK_ID)
+                .map(|p| {
+                    p.actor_auth
+                        .addresses()
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            self.config.get().zpr_addr.clone()
+        }
     }
 
     /// Node only: the "dock address" is the first local ZPR address.
@@ -368,9 +372,7 @@ impl Assembly {
     pub fn find_egress_link(&self, actor_addr: IpAddress) -> Option<NonZero<LinkId>> {
         // First check the local actor addresses to see if it's a locally-destined packet
         if self
-            .config
-            .get()
-            .zpr_addr
+            .get_local_zpr_addrs_std()
             .iter()
             .any(|addr| IpAddress::new_from_std(addr) == actor_addr)
         {
@@ -380,10 +382,8 @@ impl Assembly {
         // Check peer actor addresses to see if one of them matches
         self.peer_table
             .find(|(_id, peer)| {
-                peer.link_state_machine
-                    .get_actor_addresses()
-                    .iter()
-                    .any(|addr| *addr == actor_addr)
+                peer.actor_auth.owns_address(&actor_addr)
+                    || peer.link_state_machine.aaa_address() == Some(actor_addr)
             })
             .map(|(id, _peer)| id)
     }
@@ -447,10 +447,20 @@ pub mod test {
     #[allow(dead_code)]
     struct DummyTunCtlImpl;
     impl TunCtl for DummyTunCtlImpl {
+        fn has_address(&self, _addr: IpAddr) -> std::io::Result<bool> {
+            Ok(false)
+        }
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
             Ok(())
         }
         fn add_address(&self, _addr: IpAddr, _prefix_len: u8) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn add_authentication_address(
+            &self,
+            _addr: IpAddr,
+            _prefix_len: u8,
+        ) -> std::io::Result<()> {
             Ok(())
         }
         fn clear_address(&self, _addr: IpAddr, _prefix_len: u8) -> std::io::Result<()> {
@@ -529,6 +539,7 @@ pub mod test {
         });
 
         Assembly {
+            actor_rejected: std::sync::atomic::AtomicBool::new(false),
             ph_mode,
             topology_config,
             mgmt_substrate_egress,

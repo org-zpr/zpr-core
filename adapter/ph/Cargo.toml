@@ -21,10 +21,9 @@ cbpf-rs = { workspace = true }
 chrono = "0.4.39"
 clap = { workspace = true, features = ["env"] }
 clap_complete = { workspace = true, optional = true }
-cslab = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "cslab-v0.1.2" }
+cslab = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "cslab-v0.1.3" }
 curve25519-dalek = "4.1.3"
 dashmap = { version = "6.0.1" }
-ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "alloc"] }
 enum-map = { version = "2.7.3" }
 enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
@@ -36,7 +35,7 @@ libnode = { package = "libnode2", path = "../../libnode2" }
 nix = { version = "0.31", features = ["fs", "ioctl", "net", "poll", "uio"] }
 open-enum = { version = "0.5.1" }
 pkcs8 = "0.11"
-rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.1", default-features = false }
+rcu = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "rcu-v0.1.2", default-features = false }
 replace_with = "0.1.8"
 reqwest = { version = "0.13.1", features = ["json", "query"] }
 serde = { version = "1.0.214", features = ["derive"] }
@@ -68,9 +67,11 @@ io-uring = { version = "0.7.4", optional = true }
 tokio-tun = { version = "0.15" }
 
 [dev-dependencies]
+ed25519-dalek = { version = "3.0.0", features = ["pkcs8", "alloc"] }
 futures = "0.3.31"
 serial_test = "4.0"
 tokio = { workspace = true, features = ["test-util"] }
+tokio-rustls = "0.26"
 
 [features]
 default = ["io-uring", "rcu-crossbeam-epoch", "capnp-ancillary"]

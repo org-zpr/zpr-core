@@ -46,6 +46,13 @@ fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
         mgmt::core::count_event(asm, ManagementCounterType::DroppedNoSA);
         return;
     }
+    if asm.ph_mode == crate::assembly::PhMode::Adapter
+        && !asm.adapter_owns_address(five_tuple.src_address)
+    {
+        warn!(target: FLOW_MGMT, "dropping bind from ungranted actor address");
+        mgmt::core::count_event(asm, ManagementCounterType::DroppedNoSA);
+        return;
+    }
 
     // try open a transaction on the link; if we can't due to backpressure, don't wait, just give up
     let Some(txn) = peer_state.txn_mgr.try_open() else {

@@ -34,6 +34,8 @@ pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
     pub interface_addr: ScopedIpAddr,
     pub link_state_machine: LinkStateWrapper,
+    // Shared with the actor worker and detached VS completion tasks, which outlive peer-table guards.
+    pub actor_auth: Arc<crate::actor_auth::ActorAuthorization>,
     pub pft: PeerForwardingTable,
     pub node_state: mgmt::node::NodePeerState,
     pub mgmt_processor: queues::MgmtProcessor,
@@ -110,6 +112,10 @@ impl PeerState {
             substrate_addr,
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
+            actor_auth: Arc::new(crate::actor_auth::ActorAuthorization::new(
+                link_id.get(),
+                link_type,
+            )),
             pft: PeerForwardingTable::new(),
             node_state: mgmt::node::NodePeerState::new(),
             mgmt_processor,
@@ -287,8 +293,9 @@ impl PeerTable {
             .unwrap();
 
         let new_reader = peer_slab.remove((link_id as usize).wrapping_sub(1));
-        std::mem::drop(peer_slab);
+        // Keep writers serialized through publication so an older reader cannot win.
         self.peer_slab_reader.write(new_reader);
+        std::mem::drop(peer_slab);
     }
 
     pub fn inspect_sync<T>(
@@ -527,6 +534,36 @@ pub mod test {
     use super::*;
     use std::sync::Mutex;
 
+    #[tokio::test]
+    async fn remove_then_insert_is_visible() {
+        let table = PeerTable::new();
+        let insert = || {
+            let entry = table.vacant_entry().unwrap();
+            let peer = create_dummy_peer_state(
+                entry.key(),
+                LinkType::Internal,
+                "[::]:0".parse().unwrap(),
+                ScopedIpv6Addr::new(std::net::Ipv6Addr::UNSPECIFIED, 0).into(),
+            );
+            entry.insert(peer).get()
+        };
+        let removed = insert();
+        let retained = insert();
+
+        assert!(table.get(removed).is_some());
+        table.remove(removed);
+        assert!(table.get(removed).is_none());
+        assert!(table.inspect(removed, |_| ()).is_none());
+
+        let inserted = insert();
+        assert_eq!(table.len(), 2);
+        for id in [retained, inserted] {
+            assert!(table.get(id).is_some());
+            assert!(table.inspect(id, |_| ()).is_some());
+            assert!(table.inspect_sync(id, |_| ()).is_some());
+        }
+    }
+
     #[allow(dead_code)]
     pub fn create_dummy_peer_state(
         link_id: NonZero<LinkId>,
@@ -541,6 +578,10 @@ pub mod test {
             substrate_addr,
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
+            actor_auth: Arc::new(crate::actor_auth::ActorAuthorization::new(
+                link_id.get(),
+                link_type,
+            )),
             pft: PeerForwardingTable::new(),
             node_state: mgmt::node::NodePeerState::new(),
             mgmt_processor,

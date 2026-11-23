@@ -39,6 +39,8 @@ pub enum ZdpPacketType {
     GrantZprAddress = 139,   // TODO: add to RFC 6
     RevokeZprAddress = 140,
     InitAuthenticationRequest = 141, // TODO: add to RFC 6
+    StartAuthentication = 142,       // Experimental; see diagrams/actor_authorization.md
+    AbandonAuthenticationAttempt = 143,
 
     Canceled = 252, // TODO: add to RFC 17
     Cancel = 253,   // TODO: add to RFC 17
@@ -70,6 +72,17 @@ impl ZdpPacketType {
 pub enum ResponseCode {
     Success = 0,
     Other = 1,
+    UnsupportedProtocol = 2,
+    TemporarilyUnavailable = 3,
+}
+
+#[open_enum]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(u8)]
+pub enum AuthenticationStatus {
+    Success = 0,
+    Rejected = 1,
+    Retryable = 2,
 }
 
 #[derive(Copy, Clone, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -152,6 +165,7 @@ pub mod init_authentication_flags {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpInitAuthenticationRequestHeader {
+    pub status: AuthenticationStatus,
     pub flags: u8,
     pub data_len: U16,
     // Followed by challenge payload, eg ZdpInitAuthenticationPayload in auth.rs.
@@ -171,7 +185,7 @@ pub struct ZdpAcquireZprAddressHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpGrantZprAddressHeader {
-    pub status_code: ResponseCode,
+    pub status_code: AuthenticationStatus,
     pub ip_version: L3Type, // Length of address determined by IP type
     pub addr_count: u8,
     // Followed in memory by:
