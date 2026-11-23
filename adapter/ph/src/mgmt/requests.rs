@@ -53,12 +53,13 @@ pub fn send_echo_request(asm: &Assembly, link_id: LinkId) -> Sent<'_> {
 pub fn send_hello_request(
     asm: &Assembly,
     link_id: LinkId,
-    pub_key: x25519_dalek::PublicKey,
+    a2a_dh_pubkey: x25519_dalek::PublicKey,
 ) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.alloc_zeroed_header::<zdp::ZdpHelloRequestHeader>();
     super::helpers::put_window_size_tlv(asm, link_id, &mut pkt);
-    tlv::TlvEncoding::new_a2a_dh_pubkey(pub_key).put(&mut pkt);
+    tlv::TlvEncoding::new_actor_auth_protocol().put(&mut pkt);
+    tlv::TlvEncoding::new_a2a_dh_pubkey(a2a_dh_pubkey).put(&mut pkt); //add public key to the packet
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, pkt)
 }
 
@@ -70,6 +71,7 @@ pub fn send_hello_success_response<'a>(
     policy_id: i64,
     asa_addresses: &[SocketAddr],
     aaa_address: Option<IpAddress>,
+    vs_bootstrap: bool,
 ) -> Sent<'a> {
     let mut pkt = core::new_heap_packet();
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
@@ -78,6 +80,10 @@ pub fn send_hello_success_response<'a>(
     // Policy ID and version are always included, even if not SUCCESS.
     tlv::TlvEncoding::new_policy_id(policy_id).put(&mut pkt);
     tlv::TlvEncoding::new_version(assembly::VERSION).put(&mut pkt);
+    tlv::TlvEncoding::new_actor_auth_protocol().put(&mut pkt);
+    if vs_bootstrap {
+        tlv::TlvEncoding::new_vs_bootstrap_link().put(&mut pkt);
+    }
 
     super::helpers::put_window_size_tlv(&asm, link_id, &mut pkt);
 
@@ -92,38 +98,78 @@ pub fn send_hello_success_response<'a>(
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloResponse, pkt)
 }
 
+pub fn send_hello_error_response(
+    asm: &Assembly,
+    link_id: LinkId,
+    status: zdp::ResponseCode,
+) -> Sent<'_> {
+    let mut pkt = core::new_heap_packet();
+    pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>()
+        .status = status;
+    tlv::TlvEncoding::new_actor_auth_protocol().put(&mut pkt);
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloResponse, pkt)
+}
+
+pub fn send_start_authentication(asm: &Assembly, link_id: LinkId, txn: TxnId) -> Sent<'_> {
+    core::send_non_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::StartAuthentication,
+        txn,
+        core::new_heap_packet(),
+    )
+}
+
+pub fn send_abandon_authentication(asm: &Assembly, link_id: LinkId, txn: TxnId) -> Sent<'_> {
+    core::send_non_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::AbandonAuthenticationAttempt,
+        txn,
+        core::new_heap_packet(),
+    )
+}
+
 /// Send Init Authentication (NOT YET IN RFC 6)
 ///
-/// A side effect in the Hello Request handler ([handlers::handle_hello_request]).
+/// Responds to the adapter's StartAuthentication transaction, not to Hello.
 ///
-/// Message payload is ([zdp::ZdpInitAuthenticationPayload]):
+/// Message payload is ([auth::ZdpInitAuthenticationPayload]):
 ///
 /// Blake 3 hash is used in keyed-hash mode. The peer_table keeps track of a 256-bit
 /// key on each link.  It in the future it may even change it from time to time.
 /// The nonce and hash are returned in the bootstrap authentication BLOB and
 /// are checked by the node before processing.
 ///
-pub fn send_init_authentication_request(
-    asm: &Assembly,
+pub fn send_init_authentication_request<'a>(
+    asm: &'a Assembly,
     link_id: LinkId,
+    txn: TxnId,
+    status: zdp::AuthenticationStatus,
     flags: u8,
     payload: auth::ZdpInitAuthenticationPayload,
-) -> Sent<'_> {
+    asa_addresses: &[SocketAddr],
+) -> Sent<'a> {
     debug!(target: ZDP, "{}: sending InitAuthenticationRequest, flags: {flags:x?}", asm.formatted_link_id(link_id));
 
     let mut req = core::new_heap_packet();
 
     let hdr = zdp::ZdpInitAuthenticationRequestHeader {
+        status,
         flags,
         data_len: (size_of::<auth::ZdpInitAuthenticationPayload>() as u16).into(),
     };
     hdr.write_to_buf(&mut req).unwrap();
     payload.write_to_buf(&mut req).unwrap();
+    for asa in asa_addresses {
+        tlv::TlvEncoding::new_asa(*asa).put(&mut req);
+    }
 
-    core::send_non_flow_mgmt(
+    core::send_non_flow_txn_mgmt(
         asm,
         link_id,
         zdp::ZdpPacketType::InitAuthenticationRequest,
+        txn,
         req,
     )
 }
@@ -134,16 +180,15 @@ pub fn send_init_authentication_request(
 /// requesting.  It will be up to the visa service to determine
 /// the correct address(es) to grant.
 ///
-/// The `blob` is for bootstrap authentcation and can be empty.
-///
-/// Once this returns the link_state should transition to RegisterAA
-/// as we wait for a grant.
+/// The blob is actor authentication evidence. The actor controller enters
+/// AcquiringAddress before sending and awaits the matching transaction's grant.
 ///
 /// ## Panics
 /// - Panics if all requested addresses are not the same IP version.
 pub fn send_acquire_zpr_address_request<'a>(
     asm: &'a Assembly,
     link_id: LinkId,
+    txn: TxnId,
     actor_addrs: &'_ [IpAddr],
     blob: Option<&'_ [u8]>,
 ) -> Sent<'a> {
@@ -184,22 +229,53 @@ pub fn send_acquire_zpr_address_request<'a>(
         }
     }
 
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::AcquireZprAddress, req)
+    core::send_non_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::AcquireZprAddress,
+        txn,
+        req,
+    )
+}
+
+pub fn validate_acquire_zpr_address_request(
+    addresses: &[IpAddr],
+    blob: &[u8],
+) -> Result<(), auth::AuthError> {
+    if addresses.len() > 1 {
+        return Err(auth::AuthError::Rejected(
+            "only one actor address can be requested".into(),
+        ));
+    }
+    let address_len = match addresses.first() {
+        Some(IpAddr::V4(_)) => 4,
+        Some(IpAddr::V6(_)) => 16,
+        None => 0,
+    };
+    let capacity = crate::packet::Packet::max_body_size_for(config::SMALL_PACKET_BUFFER_SIZE)
+        - config::DEFAULT_MESSAGE_HEADROOM;
+    let max_blob = capacity - size_of::<zdp::ZdpAcquireZprAddressHeader>() - address_len;
+    if blob.is_empty() || blob.len() > max_blob || blob.len() > u16::MAX as usize {
+        return Err(auth::AuthError::FormatError(
+            "actor authentication evidence does not fit an Acquire request".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Send an GrantZprAddressRequest (TODO: not yet in RFC 6)
 ///
 /// All granted addresses must be same IP version.
 ///
-/// Once this returns the link_state should transition from RegisterAA
-/// to (I think) Active.
+/// Completes an actor transaction without changing the already-Active link.
 ///
 /// ## Panics
 /// - Panics if all granted addresses are not the same IP version.
 pub fn send_grant_zpr_address_request<'a>(
     asm: &'a Assembly,
     link_id: LinkId,
-    status_code: zdp::ResponseCode,
+    txn: TxnId,
+    status_code: zdp::AuthenticationStatus,
     actor_addrs: &'_ [IpAddr],
 ) -> Sent<'a> {
     debug!(target: ZDP, "{} - sending GrantZprAddressRequest, status: {status_code:?}", asm.formatted_link_id(link_id));
@@ -238,7 +314,7 @@ pub fn send_grant_zpr_address_request<'a>(
         }
     }
 
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::GrantZprAddress, req)
+    core::send_non_flow_txn_mgmt(asm, link_id, zdp::ZdpPacketType::GrantZprAddress, txn, req)
 }
 
 /// send a Terminate Link or Docking Session message (TODO: document)
@@ -296,6 +372,7 @@ pub fn send_bind_actor_address_success_response<'a>(
     txn_id: TxnId,
     tether_id: StreamId,
     tc: tc::Ip5TupleTc,
+    peer_a2a_dh_pubkey: Option<&x25519_dalek::PublicKey>,
 ) -> Sent<'a> {
     debug!(target: ZDP, "{}: sending BindActorAddressResponse [success] for {txn_id}", asm.formatted_link_id(link_id));
 
@@ -311,6 +388,14 @@ pub fn send_bind_actor_address_success_response<'a>(
     Tcst::Ip5Tuple.write_to_buf(&mut rsp_pkt).unwrap();
     tc.serialize(&mut rsp_pkt);
 
+    // Write the peer's public key, if present, to end of the packet.
+    match peer_a2a_dh_pubkey {
+        Some(key) => {
+            rsp_pkt.put_u16(key.as_bytes().len() as u16); // first write the length of the key as a u16
+            rsp_pkt.put_slice(key.as_bytes()); // then write the key itself as a slice of bytes
+        }
+        None => rsp_pkt.put_u16(0),
+    }
     super::core::send_per_flow_txn_mgmt(
         asm,
         link_id,
@@ -352,11 +437,91 @@ pub fn send_bind_actor_address_error_response<'a>(
     )
 }
 
+pub fn send_stream_id_request<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    txn_id: TxnId,
+    visa_id: VisaId,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending StreamIdRequest for {visa_id}");
+
+    let mut req = core::new_heap_packet();
+    let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpStreamIdRequest>();
+    bind_req_hdr.visa_id = visa_id.into();
+
+    core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::StreamIdRequest,
+        0,
+        txn_id,
+        req,
+    )
+}
+
+pub fn send_stream_id_success_response<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    txn_id: TxnId,
+    tether_id: StreamId,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending StreamIdResponse [success] for {txn_id}");
+
+    let mut rsp_pkt = core::new_heap_packet();
+
+    zdp::ZdpStreamIdResponseHeader {
+        status_code: zdp::ResponseCode::Success,
+        info_len: 0,
+    }
+    .write_to_buf(&mut rsp_pkt)
+    .unwrap();
+
+    super::core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::StreamIdResponse,
+        tether_id,
+        txn_id,
+        rsp_pkt,
+    )
+}
+
+pub fn send_stream_id_error_response<'a>(
+    asm: &'a Assembly,
+    link_id: LinkId,
+    txn_id: TxnId,
+    reason: &str,
+) -> Sent<'a> {
+    debug!(target: ZDP, "Link {link_id}: sending StreamIdResponse [error] for {txn_id}");
+
+    let mut rsp_pkt = core::new_heap_packet();
+    let max_sz = u8::MAX as usize;
+    let reason = &reason[..reason.len().min(max_sz)];
+    zdp::ZdpStreamIdResponseHeader {
+        status_code: zdp::ResponseCode::Other,
+        info_len: reason.len() as u8,
+    }
+    .write_to_buf(&mut rsp_pkt)
+    .unwrap();
+
+    rsp_pkt.put(reason.as_bytes());
+
+    super::core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::StreamIdResponse,
+        0,
+        txn_id,
+        rsp_pkt,
+    )
+}
+
 pub fn send_bind_egress_stream_request<'a>(
     asm: &'a Assembly,
     link_id: LinkId,
     txn_id: TxnId,
     tc: tc::Ip5TupleTc,
+    peer_a2a_dh_pubkey: Option<&x25519_dalek::PublicKey>,
 ) -> Sent<'a> {
     debug!(target: ZDP, "{}: sending BindEgressStreamRequest for {tc}", asm.formatted_link_id(link_id));
 
@@ -364,6 +529,15 @@ pub fn send_bind_egress_stream_request<'a>(
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
     bind_req_hdr.tcst = Tcst::Ip5Tuple;
     tc.serialize(&mut req);
+
+    // Write the peer's public key, if present, to end of the packet.
+    match peer_a2a_dh_pubkey {
+        Some(key) => {
+            req.put_u16(key.as_bytes().len() as u16); // first write the length of the key as a u16
+            req.put_slice(key.as_bytes()); // then write the key itself as a slice of bytes
+        }
+        None => req.put_u16(0),
+    }
 
     core::send_per_flow_txn_mgmt(
         asm,

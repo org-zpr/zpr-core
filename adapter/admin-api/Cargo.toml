@@ -3,10 +3,20 @@ name = "admin-api"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 capnp = { workspace = true }
 strum = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+capnp-patched = { package = "capnp", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+
 [build-dependencies]
 capnpc = "0.25"
+
+[target.'cfg(unix)'.build-dependencies]
+capnpc-patched = { package = "capnpc", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+
+[features]
+capnp-ancillary = ["dep:capnp-patched", "dep:capnpc-patched"]

@@ -1,22 +1,22 @@
 # zpr-core
 [workspace]
 resolver = "3"
-members = ["adapter/admin-api", "adapter/ph", "adapter/cli", "libnode2"]
+members = ["adapter/admin-api", "adapter/ph", "adapter/cli", "libnode2", "fuzz"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "Apache-2.0"
+rust-version = "1.98.1"
 
 [workspace.dependencies]
 aws-lc-rs = "1.17"
-capnp = { version = "0.25.0", features = ["sync_reader"] }
-capnp-futures = "0.25"
-capnp-rpc = "0.25.0"
+capnp = { version = "0.26.2", features = ["sync_reader"] }
+capnp-rpc = "0.26.1"
 cbpf-rs = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "cbpf-rs-v0.2.0"}
 clap = { version = "4.5.23", features = ["derive"] }
 clap_complete = "4.5.57"
-internet-checksum = "0.2.1"
+ip4sum = "0.1.0"
 ipnet = "2.11.0"
 pcap = "2.0.0"
 strum = { version = "0.27.1", features = ["derive"] }
@@ -26,15 +26,9 @@ tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.20"
 x509-cert = "0.3.0"
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.20.0", features = ["vsapi", "policy"] }
-zpr-ext = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-ext-v0.5.3" }
-zpr-utils = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-utils-v0.2.1" }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.26.0", features = ["vsapi", "policy"] }
+zpr-ext = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-ext-v0.5.4" }
+zpr-utils = { git = "https://github.com/org-zpr/zpr-utils.git", tag = "zpr-utils-v0.2.2" }
 
 [profile.release]
 panic = "abort"
-
-[patch.crates-io]
-capnp = { git = "https://github.com/emilazy/capnproto-rust.git", rev = "cfbcb9b" }
-capnp-futures = { git = "https://github.com/emilazy/capnproto-rust.git", rev = "cfbcb9b" }
-capnp-rpc = { git = "https://github.com/emilazy/capnproto-rust.git", rev = "cfbcb9b" }
-capnpc = { git = "https://github.com/emilazy/capnproto-rust.git", rev = "cfbcb9b" }

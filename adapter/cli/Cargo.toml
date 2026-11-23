@@ -3,13 +3,13 @@ name = "ph-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 admin-api = { path = "../admin-api" }
 capnp = { workspace = true }
-capnp-futures = { workspace = true, optional = true } 
 capnp-rpc = { workspace = true }
 cbpf-rs = { workspace = true }
 clap = { workspace = true }
@@ -24,11 +24,22 @@ zpr-ext = { workspace = true, features = ["bytes", "tokio", "zerocopy"] }
 rustyline = { version = "17.0.2", features = ["derive"] }
 dirs = "6.0.0"
 
+[target.'cfg(unix)'.dependencies]
+capnp-patched = { package = "capnp", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+capnp-rpc-patched = { package = "capnp-rpc", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+capnp-futures-patched = { package = "capnp-futures", git = "https://github.com/emilazy/capnproto-rust.git", rev = "cb619b2", optional = true }
+
 [features]
-default = ["pcap"]
+default = ["pcap", "capnp-ancillary"]
 pcap = ["dep:pcap", "cbpf-rs/pcap"]
 complete = ["clap_complete"]
-capnp-ancillary = ["dep:capnp-futures", "capnp-futures/tokio-unix-fd-stream"]
+capnp-ancillary = [
+    "dep:capnp-patched",
+    "dep:capnp-rpc-patched",
+    "dep:capnp-futures-patched",
+    "admin-api/capnp-ancillary",
+    "capnp-futures-patched/tokio-unix-fd-stream",
+]
 
 [[bin]]
 name = "ph-cli"

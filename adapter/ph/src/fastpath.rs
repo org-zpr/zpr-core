@@ -18,7 +18,7 @@ use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use classifier::{IPv4Header, IPv6Header};
-use internet_checksum;
+use ip4sum;
 use std::net::SocketAddr;
 use std::time::SystemTime;
 use zpr_ext::std::num::NonZeroExt;
@@ -47,6 +47,18 @@ pub struct FastpathWorkerConfig {
     pub batch_io_engine: &'static BatchIoEngine,
     pub buffer_count: usize,
     pub batch_size: usize,
+
+    /// Security Testing: node corrupts forwarded ICMP echo requests.
+    #[cfg(feature = "enable-security-testing")]
+    pub mangle_forwarded_pings: bool,
+
+    /// Security Testing: force old-style unkeyed A2A MICVs.
+    #[cfg(feature = "enable-security-testing")]
+    pub unkeyed_a2a_micv: bool,
+
+    /// Security Testing: recompute the A2A MICV after mangling (vs. reuse it).
+    #[cfg(feature = "enable-security-testing")]
+    pub recompute_micvs: bool,
 }
 
 pub struct QueuedEgressPacket {
@@ -288,6 +300,12 @@ impl FastpathWorker {
     pub fn actor_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
         // lookup five tuple in ELT
         let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
+        if self.asm.ph_mode == crate::assembly::PhMode::Adapter
+            && !self.asm.adapter_owns_address(five_tuple.src_address)
+        {
+            self.drop_and_count(pkt, FastpathCounterType::OtherError);
+            return;
+        }
         let Some(entry) = self.asm.elt.get(&five_tuple) else {
             if !allow_bind_request {
                 // avoid the (all-but purely theoretical) chance of a packet loop,
@@ -310,14 +328,22 @@ impl FastpathWorker {
         match &*entry {
             EltEntry::Active(pep) => {
                 // compute A2A MAC
-                // TODO: use actual A2A SAID & keyed hash
-                // See https://github.com/org-zpr/zpr-core/issues/1349
+                // TODO: use actual A2A SAID
                 let a2a_said: A2aSaid = 0;
                 let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
                 let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+
+                // Compute a2a_micv
+                // If the a2a_micv_key is present, use it to compute the keyed hash of the packet body
+                // If not present, use the unkeyed hash of the packet body
+                let a2a_micv = match pep.a2a_micv_key {
+                    #[cfg(feature = "enable-security-testing")]
+                    Some(_) if self.config.unkeyed_a2a_micv => blake3::hash(pkt.body()),
+                    Some(micv_key) => blake3::keyed_hash(&micv_key, pkt.body()),
+                    None => blake3::hash(pkt.body()),
+                };
                 // SECURITY: truncating BLAKE3 is safe
-                a2a_mac[..a2a_mac_size]
-                    .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
+                a2a_mac[..a2a_mac_size].copy_from_slice(&a2a_micv.as_bytes()[..a2a_mac_size]);
 
                 // compress packet
                 compress::compress(
@@ -377,6 +403,22 @@ impl FastpathWorker {
 
                 egress_link_id = pep.next_hop.0;
                 egress_stream_id = pep.next_hop.1;
+
+                // Security Testing: if this is an adapter-to-adapter transit
+                // stream, corrupt forwarded ICMP echo requests to prove the A2A
+                // MICV catches a malicious node.
+                #[cfg(feature = "enable-security-testing")]
+                if self.config.mangle_forwarded_pings
+                    && matches!(
+                        ingress_peer_state.peer_type(),
+                        crate::peer_table::PeerType::Adapter
+                    )
+                    && self.asm.peer_table.get(egress_link_id).is_some_and(|p| {
+                        matches!(p.peer_type(), crate::peer_table::PeerType::Adapter)
+                    })
+                {
+                    self.security_testing_mangle_ping(&mut pkt, pep.visa_id);
+                }
             }
         }
 
@@ -393,6 +435,117 @@ impl FastpathWorker {
 
             self.substrate_egress(pkt);
         }
+    }
+
+    /// Security Testing: acting as a malicious node, corrupt the payload of
+    /// a forwarded ICMP echo request and recompute its A2A MICV using a key we
+    /// (the node) are not supposed to possess. If the receiving adapter enforces
+    /// a real keyed MICV, our forged key will not match and it will drop the
+    /// packet; with an unkeyed MICV the forgery succeeds.
+    #[cfg(feature = "enable-security-testing")]
+    fn security_testing_mangle_ping(&self, pkt: &mut Packet, visa_id: VisaId) {
+        const PWNED: &[u8] = b"YOU HAVE BEEN PWNED";
+
+        let a2a_hdr_len = std::mem::size_of::<zdp::ZdpA2aHeader>();
+        let mac_len = zdp::ZDP_A2A_MAC_SIZE;
+
+        // Pull the five-tuple, compression mode, and the egress adapter's A2A
+        // public key out of the visa. (Either adapter's key would do.)
+        let (five_tuple, compression_mode, peer_a2a_pubkey) = {
+            let visa_table = self.asm.visa_table.read().unwrap();
+            let Some(visa) = visa_table.table.get(&visa_id) else {
+                return;
+            };
+            let tc = visa.get_tc();
+            (
+                *tc.five_tuple(),
+                tc.compression_mode(),
+                visa.get_egress_a2a_dh_pubkey(),
+            )
+        };
+
+        // We only handle ICMP echo requests (IPv4 or IPv6).
+        let is_v4_icmp = five_tuple.l3_type == L3Type::Ipv4
+            && five_tuple.l4_protocol == net_defs::ip_number::ICMP;
+        let is_v6_icmp = five_tuple.l3_type == L3Type::Ipv6
+            && five_tuple.l4_protocol == net_defs::ip_number::IPV6_ICMP;
+        if !is_v4_icmp && !is_v6_icmp {
+            return;
+        }
+
+        let body_len = pkt.body().len();
+        if body_len < a2a_hdr_len + mac_len {
+            return;
+        }
+        let compressed = &pkt.body()[a2a_hdr_len..body_len - mac_len];
+
+        // Expand a throwaway copy so we can (a) confirm it's an echo request and
+        // (b) compute the MICV over the same bytes the receiver will.
+        let mut temp = Packet::new(
+            Box::new([0u8; config::PACKET_BUFFER_SIZE]) as PacketBuffer,
+            config::DEFAULT_MESSAGE_HEADROOM,
+        );
+        temp.put(compressed);
+        compress::expand(compression_mode, &five_tuple, &mut temp);
+
+        // Locate the ICMP header in the expanded packet and pick the echo-request
+        // type for this family. (IPv4 header length is variable; the IPv6 header
+        // is a fixed 40 bytes, and our ping carries no extension headers.)
+        let (icmp_off, echo_type) = if is_v4_icmp {
+            (((temp.body()[0] & 0x0f) as usize) * 4, 8u8)
+        } else {
+            (40, 128u8)
+        };
+        let echo_data_off = icmp_off + 8; // ICMP echo header: type/code/csum/id/seq
+        if temp.body().len() < echo_data_off {
+            return;
+        }
+        // Echo Request is type 8 (v4) / 128 (v6), code 0.
+        if temp.body()[icmp_off] != echo_type || temp.body()[icmp_off + 1] != 0 {
+            return;
+        }
+        let echo_data_len = temp.body().len() - echo_data_off;
+        if echo_data_len < PWNED.len() {
+            return; // not enough room; leave the packet alone
+        }
+
+        // Overwrite the echo payload in the real packet -- this is the mangle.
+        let mac_start = body_len - mac_len;
+        let echo_start = mac_start - echo_data_len;
+        pkt.body_mut()[echo_start..echo_start + PWNED.len()].copy_from_slice(PWNED);
+
+        if !self.config.recompute_micvs {
+            // Leave the original MICV in place. A receiver whose MICV actually
+            // covers the payload will reject this regardless of keying -- which
+            // is what proves the MICV covers the payload and not just a prefix.
+            warn!(
+                target: DATAPATH,
+                "SECURITY TESTING: mangled forwarded ping (visa {visa_id}, kept original MICV)"
+            );
+            return;
+        }
+
+        // Recompute the MICV over the mangled packet and forge the trailer.
+        // With --security-testing-unkeyed-a2a-micv, forge with the unkeyed hash
+        // (which needs no secret and will pass an unkeyed verifier).
+        temp.body_mut()[echo_data_off..echo_data_off + PWNED.len()].copy_from_slice(PWNED);
+        let keyed = peer_a2a_pubkey.is_some() && !self.config.unkeyed_a2a_micv;
+        let forged_micv = if keyed {
+            let pubkey = peer_a2a_pubkey.unwrap();
+            // DH between our node key and the adapter's public key, which
+            // yields the WRONG shared secret.
+            let shared = self.asm.a2a_dh_keypair.diffie_hellman(&pubkey);
+            let micv_key = blake3::derive_key(zdp::ZDP_A2A_MICV_KEY_CONTEXT, shared.as_bytes());
+            blake3::keyed_hash(&micv_key, temp.body())
+        } else {
+            blake3::hash(temp.body())
+        };
+        pkt.body_mut()[mac_start..].copy_from_slice(&forged_micv.as_bytes()[..mac_len]);
+
+        warn!(
+            target: DATAPATH,
+            "SECURITY TESTING: mangled forwarded ping (visa {visa_id}, recomputed MICV, keyed={keyed})"
+        );
     }
 
     /// Send a compressed actor packet to the actor.
@@ -427,12 +580,30 @@ impl FastpathWorker {
             self.drop_and_count(pkt, FastpathCounterType::UnknownStreamId);
             return;
         };
+        if self.asm.ph_mode == crate::assembly::PhMode::Adapter
+            && !self
+                .asm
+                .adapter_owns_address(pep.tc.five_tuple().dst_address)
+        {
+            drop(pep);
+            self.drop_and_count(pkt, FastpathCounterType::OtherError);
+            return;
+        }
 
         compress::expand(pep.tc.compression_mode(), &pep.tc.five_tuple(), &mut pkt);
 
         // check A2A MAC
-        // TODO: use actual A2A SAID & keyed hash
-        if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
+        // TODO: use actual A2A SAID
+        // Compute a2a_micv
+        // If the a2a_micv_key is present, use it to compute the keyed hash of the packet body
+        // If not present, use the unkeyed hash of the packet body
+        let a2a_micv = match pep.a2a_micv_key {
+            #[cfg(feature = "enable-security-testing")]
+            Some(_) if self.config.unkeyed_a2a_micv => blake3::hash(pkt.body()),
+            Some(micv_key) => blake3::keyed_hash(&micv_key, pkt.body()),
+            None => blake3::hash(pkt.body()),
+        };
+        if a2a_micv.as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
             drop(pep);
             return self.drop_and_count(pkt, FastpathCounterType::MicvFailure);
         }
@@ -572,7 +743,7 @@ pub fn maybe_capture_batch<'a>(
 /// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
 pub fn encrypt_null(pkt: &mut Packet) {
     let mut csum =
-        internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]);
+        ip4sum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).to_be_bytes();
 
     if (pkt.body().len() - std::mem::size_of::<zdp::ZdpZpiHeader>()) % 2 != 0 {
         // TODO: this is hack to allow misaligned checksum to still pass validation...
@@ -592,17 +763,52 @@ pub fn encrypt_hmac(send_hmac_key: [u8; 32], pkt: &mut Packet) {
     pkt.put(&link_mac[..zdp::ZDP_PACKET_MAC_SIZE]);
 }
 
-pub fn encrypt_full(
-    _asm: &Assembly,
-    codec: &dyn Codec,
-    pkt: &mut Packet,
-) -> Result<(), km::EncryptionError> {
+/// Encrypt the body of a ZDP packet in place, leaving the ZPI header intact.
+///
+/// The ciphertext is written into the packet's own tailroom rather than into a
+/// scratch buffer, which avoids both a `PACKET_BUFFER_SIZE` stack zeroing and a
+/// copy of the ciphertext back into the packet:
+///
+/// ```text
+/// before:  [ metadata ][ headroom ][ ZPI ][ plaintext ][ tailroom ........... ]
+/// after:   [ metadata ][ ....... dead .........][ ZPI ][ ciphertext ][ tail.. ]
+/// ```
+///
+/// The ciphertext starts exactly where the old tailroom started, the relocated
+/// ZPI byte overwrites the tail of the old plaintext, and whatever tailroom the
+/// ciphertext (plaintext + AEAD overhead) does not consume remains after it.
+///
+/// Only the one-byte ZPI header is moved.  Packets too large for their own
+/// tailroom to hold the ciphertext fall back to the scratch-buffer path; for
+/// the packet sizes seen in practice the fast path always applies.
+pub fn encrypt_full(codec: &dyn Codec, pkt: &mut Packet) -> Result<(), km::EncryptionError> {
     // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
 
     let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>(); // = 1
 
-    let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
+    if pkt.body().len() < zpi_hdr_len {
+        return Err(km::EncryptionError::ParseError);
+    }
+
     let encr_len = pkt.body().len() - zpi_hdr_len; // Everything except the ZPI byte
+
+    // Can the ciphertext fit in this packet's own tailroom?  If so we can
+    // encrypt straight into the backing buffer.
+    if pkt.tailroom_available() >= encr_len + codec.max_overhead() {
+        let len = {
+            let (body, tailroom) = pkt.body_and_tailroom_mut();
+            codec.encrypt_transport_stateless(&body[zpi_hdr_len..], tailroom)?
+        };
+
+        // The ciphertext sits where the tailroom was; move the ZPI header down
+        // in front of it and make that the new body.
+        pkt.adopt_tailroom_with_header(zpi_hdr_len, len);
+
+        return Ok(());
+    }
+
+    // Fallback: the packet is too big to encrypt into its own tailroom.
+    let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
 
     match codec.encrypt_transport_stateless(
         &pkt.body()[zpi_hdr_len..encr_len + zpi_hdr_len],
@@ -640,9 +846,12 @@ impl From<DecryptError> for FastpathCounterType {
 /// "Decrypt" a packet using NULL encryption.
 fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
-    if internet_checksum::checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
-        != [0u8; 2]
-    {
+    let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>();
+    if pkt.body().len() < zpi_hdr_len + 2 {
+        return Err(DecryptError::BadStructure);
+    }
+
+    if ip4sum::checksum(&pkt.body()[zpi_hdr_len..]) != 0 {
         return Err(DecryptError::BadChecksum);
     }
 
@@ -671,24 +880,60 @@ fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), Decrypt
     Ok(())
 }
 
-/// Decrypt a packet using the given encryption codec.
-fn decrypt_full(
-    _asm: &Assembly,
-    codec: &dyn Codec,
-    padlen: usize,
-    pkt: &mut Packet,
-) -> Result<(), DecryptError> {
-    if pkt.body().len() < 1 {
+/// Decrypt a packet using the given encryption codec, leaving the ZPI header
+/// intact.
+///
+/// Mirrors `encrypt_full()`: the plaintext is written into the packet's own
+/// tailroom rather than into a scratch buffer, which avoids both a
+/// `PACKET_BUFFER_SIZE` stack zeroing and a copy of the plaintext back into
+/// the packet:
+///
+/// ```text
+/// before:  [ metadata ][ headroom ][ ZPI ][ ciphertext ][ tailroom ......... ]
+/// after:   [ metadata ][ ........ dead .........][ ZPI ][ plaintext ][ tail. ]
+/// ```
+///
+/// Decryption never expands (plaintext = ciphertext - overhead), so the
+/// ciphertext length bounds the output and `encr_len` bytes of tailroom are
+/// always sufficient.  Packets without that much tailroom fall back to the
+/// scratch-buffer path; for the packet sizes seen in practice the fast path
+/// always applies.
+fn decrypt_full(codec: &dyn Codec, padlen: usize, pkt: &mut Packet) -> Result<(), DecryptError> {
+    let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>(); // = 1
+
+    if pkt.body().len() < zpi_hdr_len {
         return Err(DecryptError::BadStructure);
     }
-    let encr_len = pkt.body().len() - 1;
+    let encr_len = pkt.body().len() - zpi_hdr_len;
     if encr_len < padlen {
         return Err(DecryptError::BadStructure);
     }
 
+    // Can the plaintext fit in this packet's own tailroom?  If so we can
+    // decrypt straight into the backing buffer.
+    if pkt.tailroom_available() >= encr_len {
+        let res = {
+            let (body, tailroom) = pkt.body_and_tailroom_mut();
+            codec.decrypt_transport_stateless(&body[zpi_hdr_len..], tailroom)
+        };
+        match res {
+            Ok(len) => {
+                // The plaintext sits where the tailroom was; move the ZPI
+                // header down in front of it and make that the new body.
+                pkt.adopt_tailroom_with_header(zpi_hdr_len, len);
+                return Ok(());
+            }
+            Err(e) => {
+                error!(target: DATAPATH, "decryption failed: {}", e);
+                return Err(DecryptError::DecryptionFailure);
+            }
+        }
+    }
+
+    // Fallback: the packet is too big to decrypt into its own tailroom.
     let mut decr_buf = [0u8; config::PACKET_BUFFER_SIZE];
 
-    match codec.decrypt_transport_stateless(&pkt.body()[1..encr_len + 1], &mut decr_buf) {
+    match codec.decrypt_transport_stateless(&pkt.body()[zpi_hdr_len..], &mut decr_buf) {
         Ok(len) => {
             // Copy the decrypted data back into the message -- do not overwrite ZPI.
             pkt.shrink_by(encr_len); // remove ciphertext body, leave ZPI
@@ -714,9 +959,9 @@ fn decrypt_with_sa(
     } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
         // TODO: Put padlen in state somewhere too
         if asm.config.get().km_impl == KM_ID_NOISE {
-            return decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, pkt);
+            return decrypt_full(&*transport_sa.codec, NOISE_PADLEN, pkt);
         } else {
-            return decrypt_full(asm, &*transport_sa.codec, 0, pkt);
+            return decrypt_full(&*transport_sa.codec, 0, pkt);
         }
     } else {
         // We have an SA and ZPI does not match.
@@ -847,7 +1092,7 @@ fn substrate_egress_common(
             if transit {
                 encrypt_hmac(transport_sa.send_hmac_key, pkt);
             } else {
-                match encrypt_full(asm, &*transport_sa.codec, pkt) {
+                match encrypt_full(&*transport_sa.codec, pkt) {
                     Ok(()) => (),
                     Err(err) => return Err(err),
                 }
@@ -936,6 +1181,279 @@ mod test {
         assert!(res.is_ok());
 
         assert!(pkt.body().len() == orig_len); // did remove checksum
+    }
+
+    #[test]
+    fn test_decrypt_null_rejects_short_packet() {
+        for body in [&[][..], &[0u8][..], &[0u8, 0][..]] {
+            let mut pkt = packet_with_body(PACKET_BUFFER_SIZE, 64, body);
+
+            assert!(matches!(
+                decrypt_null(&mut pkt),
+                Err(DecryptError::BadStructure)
+            ));
+        }
+    }
+
+    #[test]
+    fn test_decrypt_null_rejects_bad_checksum_without_overflow() {
+        let body = [0xff; 230];
+        let mut pkt = packet_with_body(PACKET_BUFFER_SIZE, 64, &body);
+
+        assert!(matches!(
+            decrypt_null(&mut pkt),
+            Err(DecryptError::BadChecksum)
+        ));
+    }
+
+    /// A codec that expands its input, like a real AEAD does: an 8-byte
+    /// counter prefix, the (trivially transformed) body, and a 16-byte trailing
+    /// tag.  Enough to catch offset and overlap mistakes that a copy codec
+    /// would hide.
+    struct ExpandingCodec;
+
+    impl ExpandingCodec {
+        const NONCE: usize = 8;
+        const TAG: usize = 16;
+    }
+
+    impl km::Codec for ExpandingCodec {
+        fn max_overhead(&self) -> usize {
+            Self::NONCE + Self::TAG
+        }
+
+        fn encrypt_transport_stateless(
+            &self,
+            payload: &[u8],
+            message: &mut [u8],
+        ) -> Result<usize, km::EncryptionError> {
+            let out_len = payload.len() + self.max_overhead();
+            if message.len() < out_len {
+                return Err(km::EncryptionError::MessageTooLarge);
+            }
+            message[..Self::NONCE].copy_from_slice(&[0x5a_u8; ExpandingCodec::NONCE]);
+            for (i, b) in payload.iter().enumerate() {
+                message[Self::NONCE + i] = b ^ 0xa5;
+            }
+            message[Self::NONCE + payload.len()..out_len].fill(0xee);
+            Ok(out_len)
+        }
+
+        fn decrypt_transport_stateless(
+            &self,
+            payload: &[u8],
+            message: &mut [u8],
+        ) -> Result<usize, km::DecryptionError> {
+            if payload.len() < self.max_overhead() {
+                return Err(km::DecryptionError::MessageTooShort);
+            }
+            let body = &payload[Self::NONCE..payload.len() - Self::TAG];
+            if message.len() < body.len() {
+                return Err(km::DecryptionError::ParseError);
+            }
+            for (i, b) in body.iter().enumerate() {
+                message[i] = b ^ 0xa5;
+            }
+            Ok(body.len())
+        }
+    }
+
+    /// What `encrypt_full` should produce for a given cleartext body,
+    /// independent of which code path it took.
+    fn expected_ciphertext(body: &[u8]) -> Vec<u8> {
+        let mut out = vec![body[0]]; // ZPI byte, unencrypted
+        out.extend_from_slice(&[0x5a_u8; ExpandingCodec::NONCE]);
+        out.extend(body[1..].iter().map(|b| b ^ 0xa5));
+        out.extend_from_slice(&[0xee_u8; ExpandingCodec::TAG]);
+        out
+    }
+
+    fn packet_with_body(buf_size: usize, headroom: usize, body: &[u8]) -> Packet {
+        let mut pkt = Packet::new(vec![0u8; buf_size].into_boxed_slice(), headroom);
+        pkt.put(body);
+        pkt
+    }
+
+    #[test]
+    fn test_encrypt_full_uses_tailroom_in_place() {
+        let body: Vec<u8> = (0..60u8).collect(); // body[0] is the ZPI byte
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &body);
+
+        let cleartext_end = pkt.body_offset() + pkt.len();
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+
+        assert_eq!(pkt.body(), expected_ciphertext(&body).as_slice());
+
+        // The ciphertext must live in what used to be tailroom -- that is the
+        // whole point -- with only the one-byte ZPI header relocated.
+        assert_eq!(pkt.body_offset(), cleartext_end - 1);
+    }
+
+    #[test]
+    fn test_encrypt_full_falls_back_when_tailroom_too_small() {
+        let body: Vec<u8> = (0..60u8).collect();
+        // Tailroom of 40 bytes cannot hold 59 + 24 bytes of ciphertext.
+        let buf_size = Packet::MIN_BODY_OFFSET + body.len() + 40;
+        let mut pkt = packet_with_body(buf_size, 0, &body);
+
+        let cleartext_offset = pkt.body_offset();
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+
+        // Same bytes as the in-place path, but written back over the original
+        // body rather than into the tailroom.
+        assert_eq!(pkt.body(), expected_ciphertext(&body).as_slice());
+        assert_eq!(pkt.body_offset(), cleartext_offset);
+    }
+
+    #[test]
+    fn test_encrypt_full_decrypt_full_round_trip() {
+        let body: Vec<u8> = (0..60u8).collect();
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &body);
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+        assert_ne!(pkt.body(), body.as_slice());
+
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_ok());
+        assert_eq!(pkt.body(), body.as_slice());
+    }
+
+    #[test]
+    fn test_decrypt_full_uses_tailroom_in_place() {
+        let body: Vec<u8> = (0..60u8).collect(); // body[0] is the ZPI byte
+        let ciphertext = expected_ciphertext(&body);
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &ciphertext);
+
+        let ciphertext_end = pkt.body_offset() + pkt.len();
+
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_ok());
+
+        assert_eq!(pkt.body(), body.as_slice());
+
+        // The plaintext must live in what used to be tailroom -- that is the
+        // whole point -- with only the one-byte ZPI header relocated.
+        assert_eq!(pkt.body_offset(), ciphertext_end - 1);
+    }
+
+    #[test]
+    fn test_decrypt_full_falls_back_when_tailroom_too_small() {
+        let body: Vec<u8> = (0..60u8).collect();
+        // 84 bytes of ciphertext; tailroom of 40 bytes cannot hold the 83
+        // bytes decryption may emit, so this must take the scratch-buffer
+        // path.
+        let ciphertext = expected_ciphertext(&body);
+        let buf_size = Packet::MIN_BODY_OFFSET + ciphertext.len() + 40;
+        let mut pkt = packet_with_body(buf_size, 0, &ciphertext);
+
+        let ciphertext_offset = pkt.body_offset();
+
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_ok());
+
+        // Same bytes as the in-place path, but written back over the original
+        // body rather than into the tailroom.
+        assert_eq!(pkt.body(), body.as_slice());
+        assert_eq!(pkt.body_offset(), ciphertext_offset);
+    }
+
+    #[test]
+    fn test_decrypt_full_rejects_short_packet() {
+        // Body shorter than ZPI + padlen must be rejected on both counts.
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[]);
+        assert!(decrypt_full(&ExpandingCodec, 0, &mut pkt).is_err());
+
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[0x07u8; 5]);
+        assert!(decrypt_full(&ExpandingCodec, ExpandingCodec.max_overhead(), &mut pkt).is_err());
+    }
+
+    #[test]
+    fn test_decrypt_full_codec_failure_is_reported() {
+        // ExpandingCodec rejects ciphertexts shorter than its overhead; long
+        // enough to pass the padlen==0 structure check, short enough to fail
+        // inside the codec on the in-place path.
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[0x07u8; 5]);
+        assert!(decrypt_full(&ExpandingCodec, 0, &mut pkt).is_err());
+    }
+
+    /// The pre-#385 implementation, kept in the test module so the benchmark
+    /// below compares old and new on identical packets.
+    fn encrypt_full_via_scratch_buffer(
+        codec: &dyn Codec,
+        pkt: &mut Packet,
+    ) -> Result<(), km::EncryptionError> {
+        let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>();
+        let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
+        let encr_len = pkt.body().len() - zpi_hdr_len;
+
+        match codec.encrypt_transport_stateless(
+            &pkt.body()[zpi_hdr_len..encr_len + zpi_hdr_len],
+            &mut enc_buf,
+        ) {
+            Ok(len) => {
+                pkt.shrink_by(encr_len);
+                pkt.put(&enc_buf[0..len]);
+                Ok(())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_encrypt_full_paths() {
+        use std::time::Instant;
+
+        const ITERS: u32 = 500_000;
+        let body: Vec<u8> = (0..64u8).collect();
+
+        // One buffer, reused, so buffer allocation is not part of either
+        // measurement.
+        let mut buf = vec![0u8; config::PACKET_BUFFER_SIZE].into_boxed_slice();
+
+        let run = |f: &dyn Fn(&dyn Codec, &mut Packet) -> Result<(), km::EncryptionError>,
+                   buf: &mut Box<[u8]>| {
+            let t = Instant::now();
+            for _ in 0..ITERS {
+                let owned = std::mem::replace(buf, Box::new([]));
+                let mut pkt = Packet::new(owned, 64);
+                pkt.put(body.as_slice());
+                f(&ExpandingCodec, &mut pkt).unwrap();
+                std::hint::black_box(pkt.body()[0]);
+                *buf = pkt.destroy();
+            }
+            t.elapsed()
+        };
+
+        // Warm up, then measure each twice and keep the faster run.
+        run(&encrypt_full, &mut buf);
+        run(&encrypt_full_via_scratch_buffer, &mut buf);
+
+        let new = run(&encrypt_full, &mut buf).min(run(&encrypt_full, &mut buf));
+        let old = run(&encrypt_full_via_scratch_buffer, &mut buf)
+            .min(run(&encrypt_full_via_scratch_buffer, &mut buf));
+
+        println!(
+            "encrypt_full 64B body: in-place {:?}/pkt, scratch-buffer {:?}/pkt",
+            new / ITERS,
+            old / ITERS
+        );
+    }
+
+    #[test]
+    fn test_encrypt_full_rejects_empty_packet() {
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &[]);
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_err());
+    }
+
+    #[test]
+    fn test_encrypt_full_zpi_only_packet() {
+        // Degenerate case: body is nothing but the ZPI byte, so the header
+        // relocation is a self-copy.
+        let body = [0x07u8];
+        let mut pkt = packet_with_body(config::PACKET_BUFFER_SIZE, 64, &body);
+
+        assert!(encrypt_full(&ExpandingCodec, &mut pkt).is_ok());
+        assert_eq!(pkt.body(), expected_ciphertext(&body).as_slice());
     }
 
     #[test]

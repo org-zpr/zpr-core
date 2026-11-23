@@ -39,6 +39,8 @@ pub enum ZdpPacketType {
     GrantZprAddress = 139,   // TODO: add to RFC 6
     RevokeZprAddress = 140,
     InitAuthenticationRequest = 141, // TODO: add to RFC 6
+    StartAuthentication = 142,       // Experimental; see diagrams/actor_authorization.md
+    AbandonAuthenticationAttempt = 143,
 
     Canceled = 252, // TODO: add to RFC 17
     Cancel = 253,   // TODO: add to RFC 17
@@ -70,6 +72,17 @@ impl ZdpPacketType {
 pub enum ResponseCode {
     Success = 0,
     Other = 1,
+    UnsupportedProtocol = 2,
+    TemporarilyUnavailable = 3,
+}
+
+#[open_enum]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(u8)]
+pub enum AuthenticationStatus {
+    Success = 0,
+    Rejected = 1,
+    Retryable = 2,
 }
 
 #[derive(Copy, Clone, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -152,6 +165,7 @@ pub mod init_authentication_flags {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpInitAuthenticationRequestHeader {
+    pub status: AuthenticationStatus,
     pub flags: u8,
     pub data_len: U16,
     // Followed by challenge payload, eg ZdpInitAuthenticationPayload in auth.rs.
@@ -171,7 +185,7 @@ pub struct ZdpAcquireZprAddressHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpGrantZprAddressHeader {
-    pub status_code: ResponseCode,
+    pub status_code: AuthenticationStatus,
     pub ip_version: L3Type, // Length of address determined by IP type
     pub addr_count: u8,
     // Followed in memory by:
@@ -218,6 +232,21 @@ pub struct ZdpBindActorAddressResponseHeader {
     // followed by `info_len` octets of Optional Additional Status Information
     // followed by 8-bit TCST
     // followed by traffic classifier
+    // followed by A2A pubkey as a big-endian u16 indicating length followed by key itself
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpStreamIdRequest {
+    pub visa_id: U64,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpStreamIdResponseHeader {
+    pub status_code: ResponseCode,
+    pub info_len: u8,
+    // followed by `info_len` octets of Optional Additional Status Information
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -225,6 +254,7 @@ pub struct ZdpBindActorAddressResponseHeader {
 pub struct ZdpBindEgressStreamRequestHeader {
     pub tcst: Tcst,
     // followed by traffic classifier
+    // followed by A2A pubkey as a big-endian u16 indicating length followed by key itself
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -232,6 +262,7 @@ pub struct ZdpBindEgressStreamRequestHeader {
 pub struct ZdpBindEgressStreamResponseHeader {
     pub status_code: ResponseCode,
     pub info_len: u8,
+    // followed by `info_len` octets of Optional Additional Status Information
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -284,6 +315,9 @@ pub mod traffic_classifier_flags {
 
 /// Config-specified size of A2A MAC.  Algorithm-specified MAC may be smaller (but not larger).
 pub const ZDP_A2A_MAC_SIZE: usize = 8;
+
+/// BLAKE3 key-derivation context for the A2A MICV key.
+pub const ZDP_A2A_MICV_KEY_CONTEXT: &str = "org-zpr zpr-core 2026-08-21 a2a micv key";
 
 /// Size of the ZDP "link" HMAC which is set link-by-link for transit packets.
 /// This HMAC is tacked on to the end of the packet (following the A2A HMAC).

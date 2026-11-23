@@ -19,6 +19,14 @@ async fn main() {
 
     let vs_sa: SocketAddr = args.vs_addr.parse().expect("failed to parse vs-addr");
     let node_zpr_addr: IpAddr = args.self_addr.parse().expect("failed to parse self_addr");
+    let substrate_addr: SocketAddr = args
+        .substrate_addr
+        .parse()
+        .expect("failed to parse substrate_addr");
+    assert!(
+        !substrate_addr.ip().is_unspecified() && substrate_addr.port() != 0,
+        "substrate_addr must be a concrete address peers could dial"
+    );
     let cfg = Config { node_zpr_addr };
 
     let log_buf = LogBuffer::default();
@@ -27,7 +35,7 @@ async fn main() {
     let private_key = libnode2::cli::crypto::load_private_key(&args.private_key)
         .expect("failed to load private key");
 
-    let mut vsc = VSConn::new(8, vs_sa, args.node_cn, private_key);
+    let mut vsc = VSConn::new(8, vs_sa, args.node_cn, private_key, substrate_addr);
     let life_rx = vsc.subscribe_lifecycle_events();
     let handle = vsc.handle();
 

@@ -29,7 +29,7 @@ use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
 use x25519_dalek::ReusableSecret;
-use zpr::vsapi_types::AuthServicesList;
+use zpr::vsapi_types::{AuthServicesList, ConnectRequest};
 use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -57,6 +57,7 @@ pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 /// visible queue becoming full.
 
 pub struct Assembly {
+    pub actor_rejected: std::sync::atomic::AtomicBool,
     pub ph_mode: PhMode,
     pub topology_config: config::TopologyConfig,
 
@@ -65,6 +66,7 @@ pub struct Assembly {
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
     pub vs_auth_services: std::sync::RwLock<AuthServicesList>, // present only on nodes, may be empty, managed by visa service
+    pub deferred_vs_connect: Mutex<Option<(LinkId, IpAddress, ConnectRequest)>>, // present only on nodes, the VS adapter's connect request and self-granted address, held until the node has VSAPI access
 
     pub visa_table: std::sync::RwLock<visa_table::VisaTable>, // Only for nodes
 
@@ -89,7 +91,6 @@ pub struct Assembly {
     pub km_state: KmState,
 
     pub self_noise_keypair: Option<NoiseKeypair>,
-    pub peer_noise_keypair: Option<NoiseKeypair>,
     pub a2a_dh_keypair: ReusableSecret,
     pub certx: Option<KmCertExchange>,
     pub system_start_time: std::time::Instant,
@@ -207,28 +208,31 @@ impl Assembly {
         }
     }
 
-    /// Update the local ZPR addresses of this node or adapter. Though presumably
-    /// this is called only on an adapter as a nodes addresses are currently set
-    /// through configuration or command line args.
-    pub fn set_local_zpr_addrs<T>(&self, addrs: impl IntoIterator<Item = T>)
-    where
-        T: Into<IpAddr>,
-    {
-        let addrs: Vec<IpAddr> = addrs.into_iter().map(|a| a.into()).collect();
-        self.config
-            .update(move |cfg| {
-                Some(config::Config {
-                    zpr_addr: addrs.clone(),
-                    ..cfg.clone()
-                })
-            })
-            .unwrap();
+    pub fn adapter_owns_address(&self, addr: IpAddress) -> bool {
+        self.peer_table.get(DOCK_LINK_ID).is_some_and(|peer| {
+            peer.link_state_machine.is_ready()
+                && (peer.actor_auth.owns_address(&addr)
+                    || peer.link_state_machine.aaa_address() == Some(addr))
+        })
     }
 
     /// Get a copy of the local ZPR addresses. May be empty on an adapter until we
     /// have been granted a ZPR address.
     pub fn get_local_zpr_addrs_std(&self) -> Vec<IpAddr> {
-        self.config.get().zpr_addr.clone()
+        if self.ph_mode == PhMode::Adapter {
+            self.peer_table
+                .get(DOCK_LINK_ID)
+                .map(|p| {
+                    p.actor_auth
+                        .addresses()
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            self.config.get().zpr_addr.clone()
+        }
     }
 
     /// Node only: the "dock address" is the first local ZPR address.
@@ -368,9 +372,7 @@ impl Assembly {
     pub fn find_egress_link(&self, actor_addr: IpAddress) -> Option<NonZero<LinkId>> {
         // First check the local actor addresses to see if it's a locally-destined packet
         if self
-            .config
-            .get()
-            .zpr_addr
+            .get_local_zpr_addrs_std()
             .iter()
             .any(|addr| IpAddress::new_from_std(addr) == actor_addr)
         {
@@ -380,10 +382,8 @@ impl Assembly {
         // Check peer actor addresses to see if one of them matches
         self.peer_table
             .find(|(_id, peer)| {
-                peer.link_state_machine
-                    .get_actor_addresses()
-                    .iter()
-                    .any(|addr| *addr == actor_addr)
+                peer.actor_auth.owns_address(&actor_addr)
+                    || peer.link_state_machine.aaa_address() == Some(actor_addr)
             })
             .map(|(id, _peer)| id)
     }
@@ -405,7 +405,7 @@ impl Assembly {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "fuzzing"))]
 pub mod test {
 
     use super::*;
@@ -447,10 +447,20 @@ pub mod test {
     #[allow(dead_code)]
     struct DummyTunCtlImpl;
     impl TunCtl for DummyTunCtlImpl {
+        fn has_address(&self, _addr: IpAddr) -> std::io::Result<bool> {
+            Ok(false)
+        }
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
             Ok(())
         }
         fn add_address(&self, _addr: IpAddr, _prefix_len: u8) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn add_authentication_address(
+            &self,
+            _addr: IpAddr,
+            _prefix_len: u8,
+        ) -> std::io::Result<()> {
             Ok(())
         }
         fn clear_address(&self, _addr: IpAddr, _prefix_len: u8) -> std::io::Result<()> {
@@ -529,6 +539,7 @@ pub mod test {
         });
 
         Assembly {
+            actor_rejected: std::sync::atomic::AtomicBool::new(false),
             ph_mode,
             topology_config,
             mgmt_substrate_egress,
@@ -536,6 +547,7 @@ pub mod test {
             vsconn,
             visa_table,
             vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),
+            deferred_vs_connect: Mutex::new(None),
             capture_queue,
             capture_worker,
             flow_control,
@@ -549,7 +561,6 @@ pub mod test {
             adapter_manager_factory,
             km_state,
             self_noise_keypair: None,
-            peer_noise_keypair: None,
             a2a_dh_keypair: ReusableSecret::random(),
             certx: None,
             system_start_time: std::time::Instant::now(),

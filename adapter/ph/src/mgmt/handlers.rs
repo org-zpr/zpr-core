@@ -5,10 +5,11 @@
 //! this module.
 
 use super::txn_mgr::TxnId;
-use super::{adapter, dock};
+use super::{adapter, node};
 use crate::auth;
 use crate::counters;
 use crate::link_state::{LinkEvent, LinkStateError, LinkType};
+use crate::peer_table::PeerType;
 use crate::prelude::*;
 use crate::tc;
 use crate::tlv;
@@ -45,6 +46,8 @@ pub enum HandleMgmtError {
     LinkClosed,
 }
 
+const X25519_KEY_LEN: usize = 32;
+
 impl From<&HandleMgmtError> for counters::ManagementCounterType {
     fn from(err: &HandleMgmtError) -> Self {
         match err {
@@ -74,11 +77,11 @@ impl From<adapter::InstallTetherError> for HandleMgmtError {
     }
 }
 
-impl From<dock::InstallTetherError> for HandleMgmtError {
-    fn from(err: dock::InstallTetherError) -> Self {
+impl From<node::InstallTetherError> for HandleMgmtError {
+    fn from(err: node::InstallTetherError) -> Self {
         match err {
-            dock::InstallTetherError::NoSuchTransaction => HandleMgmtError::UnknownTransaction,
-            dock::InstallTetherError::LinkClosed => HandleMgmtError::LinkClosed,
+            node::InstallTetherError::NoSuchTransaction => HandleMgmtError::UnknownTransaction,
+            node::InstallTetherError::LinkClosed => HandleMgmtError::LinkClosed,
         }
     }
 }
@@ -129,6 +132,7 @@ pub async fn handle_echo_request(_asm: &Arc<Assembly>, _pkt: Packet) -> HandleMg
 ///
 pub async fn handle_init_authentication_request(
     asm: &Arc<Assembly>,
+    txn: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -140,17 +144,15 @@ pub async fn handle_init_authentication_request(
 
     let challenge_opt: Option<auth::ZdpInitAuthenticationPayload>;
 
+    if !valid_auth_status(hdr.status)
+        || hdr.flags & !zdp::init_authentication_flags::BOOTSTRAP_SUPPORT != 0
+        || (hdr.status != zdp::AuthenticationStatus::Success
+            && (hdr.flags != 0 || hdr.data_len.get() != 0))
+    {
+        return Err(HandleMgmtError::BadStructure);
+    }
     if is_bootstrap {
-        if hdr.data_len == 0 {
-            warn!(target: ZDP, "Received Init Authentication with bootstrap support but no payload");
-            return Err(HandleMgmtError::BadStructure);
-        }
-        if hdr.data_len < size_of::<auth::ZdpInitAuthenticationPayload>() as u16 {
-            warn!(target: ZDP, "Received Init Authentication with unexpected payload size {}", hdr.data_len);
-            return Err(HandleMgmtError::BadStructure);
-        }
-        if pkt.remaining() < usize::from(hdr.data_len) {
-            warn!(target: ZDP, "packet too short for payload");
+        if hdr.data_len.get() as usize != size_of::<auth::ZdpInitAuthenticationPayload>() {
             return Err(HandleMgmtError::BadStructure);
         }
         debug!(target: ZDP, "Received Init Authentication +bootstrap for {}", asm.formatted_link_id(ingress_link_id));
@@ -160,16 +162,76 @@ pub async fn handle_init_authentication_request(
         };
         challenge_opt = Some(payload);
     } else {
+        if hdr.data_len.get() != 0 {
+            return Err(HandleMgmtError::BadStructure);
+        }
         debug!(target: ZDP, "Received Init Authentication for {} -- bootstrap not supported", asm.formatted_link_id(ingress_link_id));
         challenge_opt = None;
     }
 
-    asm.process_link_state_event(
-        ingress_link_id,
-        LinkEvent::ReceivedInitAuth((is_bootstrap, challenge_opt)),
-    )?;
+    let tlvs = tlv::parse_from_buf(&mut pkt).map_err(|_| HandleMgmtError::BadStructure)?;
+    let mut asa_addresses = Vec::new();
+    if let Some(values) = tlvs.get(&tlv::DataType::ASA) {
+        for value in values {
+            match value {
+                tlv::TlvValue::SocketAddr(addr) => asa_addresses.push(*addr),
+                _ => return Err(HandleMgmtError::BadStructure),
+            }
+        }
+    }
+    asm.peer_table
+        .get(ingress_link_id)
+        .ok_or(HandleMgmtError::LinkClosed)?
+        .actor_auth
+        .receive_offer(
+            txn,
+            crate::actor_auth::AuthenticationOffer {
+                status: hdr.status,
+                challenge: challenge_opt,
+                asa_addresses,
+            },
+        )?;
 
     Ok(())
+}
+
+fn valid_auth_status(status: zdp::AuthenticationStatus) -> bool {
+    matches!(
+        status,
+        zdp::AuthenticationStatus::Success
+            | zdp::AuthenticationStatus::Rejected
+            | zdp::AuthenticationStatus::Retryable
+    )
+}
+
+pub async fn handle_start_authentication(
+    asm: &Arc<Assembly>,
+    txn: TxnId,
+    pkt: Packet,
+) -> HandleMgmtResult {
+    if pkt.remaining() != 0 {
+        return Err(HandleMgmtError::BadStructure);
+    }
+    asm.peer_table
+        .get(pkt.metadata().ingress_link_id)
+        .ok_or(HandleMgmtError::LinkClosed)?
+        .actor_auth
+        .start_remote(asm, txn)
+}
+
+pub async fn handle_abandon_authentication(
+    asm: &Arc<Assembly>,
+    txn: TxnId,
+    pkt: Packet,
+) -> HandleMgmtResult {
+    if pkt.remaining() != 0 {
+        return Err(HandleMgmtError::BadStructure);
+    }
+    asm.peer_table
+        .get(pkt.metadata().ingress_link_id)
+        .ok_or(HandleMgmtError::LinkClosed)?
+        .actor_auth
+        .abandon_remote(asm, txn)
 }
 
 /// handle a Terminate Link or Docking Session message (TODO: document in RFC 17)
@@ -215,11 +277,25 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         }
     };
 
-    // We just emit the TLV stuff to log but only use window size.
+    if !has_actor_auth_protocol(&tlv_data) {
+        warn!(target: ZDP, "{}: incompatible actor authorization protocol", asm.formatted_link_id(ingress_link_id));
+        super::requests::send_hello_error_response(
+            asm,
+            ingress_link_id,
+            zdp::ResponseCode::UnsupportedProtocol,
+        )
+        .enqueue();
+        return Err(HandleMgmtError::MessageNotPermitted);
+    }
+
+    // We just emit the TLV stuff to log but only use window size and the A2A key.
     for (tlv_type, tlv_value) in &tlv_data {
         match *tlv_type {
             tlv::DataType::WINDOW_SIZE => {
                 process_window_size_tlv(&asm, ingress_link_id, "HelloRequest", tlv_value)?;
+            }
+            tlv::DataType::A2A_DH_PUBKEY => {
+                process_a2a_dh_pubkey_tlv(&asm, ingress_link_id, "HelloRequest", tlv_value)?;
             }
             _ => {
                 info!(
@@ -230,6 +306,10 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         }
     }
 
+    //Warn adapter did not send key. Connection is not rejected in case of future changes
+    if !tlv_data.contains_key(&tlv::DataType::A2A_DH_PUBKEY) {
+        warn!(target: ZDP, "{}: HelloRequest did not include A2A_DH_PUBKEY", asm.formatted_link_id(ingress_link_id));
+    }
     asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)?;
 
     Ok(())
@@ -252,6 +332,16 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
             error!(target: ZDP, "{}: HelloResponse - failed to parse TLVs: {:?}", asm.formatted_link_id(link_id), e);
             return Err(HandleMgmtError::BadStructure);
         }
+    };
+
+    if !has_actor_auth_protocol(&tlv_data) {
+        warn!(target: ZDP, "{}: incompatible actor authorization protocol", asm.formatted_link_id(link_id));
+        return Err(HandleMgmtError::MessageNotPermitted);
+    }
+    let vs_bootstrap = match tlv_data.get(&tlv::DataType::VS_BOOTSTRAP_LINK) {
+        None => false,
+        Some(values) if matches!(values.as_slice(), [tlv::TlvValue::U16(1)]) => true,
+        _ => return Err(HandleMgmtError::BadStructure),
     };
 
     // ASA = Authentication Service Address (will have a port too)
@@ -326,10 +416,23 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 
     asm.process_link_state_event(
         link_id,
-        LinkEvent::ReceivedHelloResponse(status, aaa_address, maybe_asa_addrs),
+        LinkEvent::ReceivedHelloResponse {
+            status,
+            aaa_address,
+            asa_addresses: maybe_asa_addrs,
+            vs_bootstrap,
+        },
     )?;
 
     Ok(())
+}
+
+fn has_actor_auth_protocol(data: &std::collections::HashMap<u8, Vec<tlv::TlvValue>>) -> bool {
+    matches!(
+        data.get(&tlv::DataType::ACTOR_AUTH_PROTOCOL)
+            .map(Vec::as_slice),
+        Some([tlv::TlvValue::U16(tlv::ACTOR_AUTH_PROTOCOL_VERSION)])
+    )
 }
 
 fn process_window_size_tlv(
@@ -362,6 +465,29 @@ fn process_window_size_tlv(
     Ok(())
 }
 
+fn process_a2a_dh_pubkey_tlv(
+    asm: &Assembly,
+    link_id: LinkId,
+    message_name: &str,
+    tlv_value: &[tlv::TlvValue],
+) -> HandleMgmtResult {
+    for entry in tlv_value {
+        match entry {
+            tlv::TlvValue::X25519PubKey(pubkey) => {
+                info!(target: ZDP, "{}: Applying A2A_DH_PUBKEY from {message_name}", asm.formatted_link_id(link_id));
+                asm.peer_table.inspect(link_id, |ps| {
+                    ps.a2a_dh_pubkey.write(Some(*pubkey));
+                });
+            }
+            _ => {
+                warn!(target: ZDP, "{}: {message_name} A2A_DH_PUBKEY value type is wrong: {entry:?}", asm.formatted_link_id(link_id));
+                return Err(HandleMgmtError::BadStructure);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Handle the AcquireZprAddressRequest (TODO: Not yet in RFC 6)
 ///
 /// This message is from an adapter to a node.  Or in the future from
@@ -381,6 +507,7 @@ fn process_window_size_tlv(
 ///
 pub async fn handle_acquire_zpr_address_request(
     asm: &Arc<Assembly>,
+    txn: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -395,10 +522,11 @@ pub async fn handle_acquire_zpr_address_request(
 
     debug!(target: ZDP, "{}: received Acquire ZPR Address Request for link with addresses {:?}", asm.formatted_link_id(ingress_link_id), actor_addresses);
 
-    asm.process_link_state_event(
-        ingress_link_id,
-        LinkEvent::ReceivedAcquireZprAddressRequest(actor_addresses, blob),
-    )?;
+    asm.peer_table
+        .get(ingress_link_id)
+        .ok_or(HandleMgmtError::LinkClosed)?
+        .actor_auth
+        .acquire_remote(asm, txn, actor_addresses, blob)?;
 
     Ok(())
 }
@@ -408,40 +536,23 @@ pub async fn handle_acquire_zpr_address_request(
 /// This message comes from a node post verification of the authentication blob
 /// which we get in an Acquire message.
 ///
-/// This will fire off a link state event that includes the addresses.
-/// If the request indicates a fail, we send the event with empty address list.
+/// Routes the transaction's outcome to the independent actor controller.
 pub async fn handle_grant_zpr_address_request(
     asm: &Arc<Assembly>,
+    txn: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    let grant_event_payload;
-    match parse_grant_zpr_address_request(&mut pkt) {
-        Ok(Ok(actor_addresses)) => {
-            if actor_addresses.is_empty() {
-                error!(target: ZDP, "Received Grant Zpr Address Request with no addresses");
-                return Err(HandleMgmtError::BadStructure);
-            } else {
-                info!(target: ZDP,
-                    "Received Grant Zpr Address Request for {} with addresses {:?}", asm.formatted_link_id(ingress_link_id), actor_addresses);
-                grant_event_payload = Some(actor_addresses);
-            }
-        }
-        Ok(Err(c)) => {
-            info!(target: ZDP, "Grant request indicates non-success; code: {:?}", c);
-            grant_event_payload = None;
-        }
-        Err(_) => {
-            error!(target: ZDP, "Failed to parse Grant Zpr Address Request message, grant fails.");
-            return Err(HandleMgmtError::BadStructure);
-        }
+    let (status, addresses) = match parse_grant_zpr_address_request(&mut pkt)? {
+        Ok(addresses) => (zdp::AuthenticationStatus::Success, addresses),
+        Err(status) => (status, Vec::new()),
     };
-
-    asm.process_link_state_event(
-        ingress_link_id,
-        LinkEvent::ReceivedGrantZprAddressRequest(grant_event_payload),
-    )?;
+    asm.peer_table
+        .get(ingress_link_id)
+        .ok_or(HandleMgmtError::LinkClosed)?
+        .actor_auth
+        .receive_grant(txn, status, addresses)?;
 
     Ok(())
 }
@@ -458,6 +569,9 @@ fn parse_acquire_zpr_address_request(
     let Ok(hdr) = zdp::ZdpAcquireZprAddressHeader::read_from_buf(pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
+    if hdr.addr_count > 1 || !matches!(hdr.ip_version, L3Type::Ipv4 | L3Type::Ipv6) {
+        return Err(HandleMgmtError::BadStructure);
+    }
 
     // In memmory:
     //     header
@@ -527,6 +641,9 @@ fn parse_acquire_zpr_address_request(
     } else {
         actor_addresses = None;
     }
+    if pkt.remaining() != 0 {
+        return Err(HandleMgmtError::BadStructure);
+    }
     Ok((actor_addresses, blob))
 }
 
@@ -534,7 +651,7 @@ fn parse_acquire_zpr_address_request(
 /// In includes the address (or addresses) we have been assigned to use.
 fn parse_grant_zpr_address_request(
     pkt: &mut Packet,
-) -> Result<Result<Vec<IpAddress>, zdp::ResponseCode>, HandleMgmtError> {
+) -> Result<Result<Vec<IpAddress>, zdp::AuthenticationStatus>, HandleMgmtError> {
     let Ok(hdr) = zdp::ZdpGrantZprAddressHeader::read_from_buf(pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
@@ -543,9 +660,18 @@ fn parse_grant_zpr_address_request(
     //     header
     //     actor addresses (optional)
 
-    if hdr.status_code != zdp::ResponseCode::Success {
+    if !valid_auth_status(hdr.status_code) {
+        return Err(HandleMgmtError::BadStructure);
+    }
+    if hdr.status_code != zdp::AuthenticationStatus::Success {
+        if hdr.addr_count != 0 || pkt.remaining() != 0 {
+            return Err(HandleMgmtError::BadStructure);
+        }
         warn!(target: ZDP, "Received Grant Zpr Address Request with non-success status code {:?}", hdr.status_code);
         return Ok(Err(hdr.status_code));
+    }
+    if hdr.addr_count != 1 {
+        return Err(HandleMgmtError::BadStructure);
     }
 
     let mut actor_addresses = Vec::new();
@@ -582,6 +708,9 @@ fn parse_grant_zpr_address_request(
         }
         actor_addresses.push(addr);
     }
+    if pkt.remaining() != 0 {
+        return Err(HandleMgmtError::BadStructure);
+    }
     Ok(Ok(actor_addresses))
 }
 
@@ -591,12 +720,6 @@ pub async fn handle_bind_actor_address_request(
     txn_id: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
-    // must not come from a dock
-    if pkt.metadata().ingress_link_id == DOCK_LINK_ID {
-        error!(target: ZDP, "{}: received BindActorAddress message on dock link", asm.formatted_link_id(pkt.metadata().ingress_link_id));
-        return Err(HandleMgmtError::MessageNotPermitted);
-    }
-
     let Ok(hdr) = zdp::ZdpBindActorAddressRequestHeader::read_from_buf(&mut pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
@@ -617,9 +740,51 @@ pub async fn handle_bind_actor_address_request(
         return Ok(());
     };
 
+    // must come from an adapter
+    let peer_type = peer_type_by_id(&asm, ingress_link_id);
+    if !matches!(peer_type, PeerType::Adapter) {
+        error!(target: ZDP, "{}: received BindActorAddress message on {peer_type} link", ingress_link_id);
+        return Err(HandleMgmtError::MessageNotPermitted);
+    }
+
     debug!(target: ZDP, "{}: handlers.handle_bind_actor_address_request", asm.formatted_link_id(ingress_link_id.get()));
 
-    dock::bind_actor_address(asm, ingress_link_id, txn_id, l3_type, pkt.body());
+    node::bind_actor_address(asm, ingress_link_id, txn_id, l3_type, pkt.body());
+
+    Ok(())
+}
+
+pub async fn handle_stream_id_request(
+    asm: &Arc<Assembly>,
+    txn_id: TxnId,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
+    let Ok(req) = zdp::ZdpStreamIdRequest::read_from_buf(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    let visa_id = req.visa_id.get();
+
+    let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
+        // who sent this??
+        error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
+        return Ok(());
+    };
+
+    // must come from a node
+    let peer_type = peer_type_by_id(&asm, ingress_link_id);
+    if !matches!(peer_type, PeerType::Node) {
+        error!(target: ZDP, "{}: received StreamIdRequest message on {peer_type} link", ingress_link_id);
+        return Err(HandleMgmtError::MessageNotPermitted);
+    }
+
+    debug!(
+        target: ZDP,
+        "Link {}: handlers.handle_stream_id_request -- visa_id {}",
+        ingress_link_id.get(), visa_id
+    );
+
+    node::request_stream(asm, ingress_link_id, txn_id, visa_id);
 
     Ok(())
 }
@@ -629,12 +794,6 @@ pub async fn handle_bind_egress_stream_request(
     txn_id: TxnId,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
-    // must come from an dock
-    if pkt.metadata().ingress_link_id != DOCK_LINK_ID {
-        error!(target: ZDP, "{}: received BindEgressStream message on non-dock link", asm.formatted_link_id(pkt.metadata().ingress_link_id));
-        return Err(HandleMgmtError::MessageNotPermitted);
-    }
-
     let Ok(hdr) = zdp::ZdpBindEgressStreamRequestHeader::read_from_buf(&mut pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
@@ -648,11 +807,39 @@ pub async fn handle_bind_egress_stream_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
+    if pkt.remaining() < size_of::<u16>() {
+        return Err(HandleMgmtError::BadStructure);
+    }
+
+    let key_len = pkt.get_u16() as usize;
+
+    // deserialize the peer's A2A DH public key if present
+    let peer_a2a_dh_pubkey = if key_len == 0 {
+        None
+    } else {
+        if pkt.remaining() < key_len {
+            return Err(HandleMgmtError::BadStructure);
+        }
+
+        let Ok(key_bytes) = <[u8; X25519_KEY_LEN]>::try_from(&pkt.body()[..key_len]) else {
+            return Err(HandleMgmtError::BadStructure);
+        };
+
+        Some(x25519_dalek::PublicKey::from(key_bytes))
+    };
+
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??
         error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
         return Ok(());
     };
+
+    // must come from a dock
+    let peer_type = peer_type_by_id(&asm, ingress_link_id);
+    if !matches!(peer_type, PeerType::Dock) {
+        error!(target: ZDP, "{}: received BindEgressStream message on {peer_type} link", ingress_link_id);
+        return Err(HandleMgmtError::MessageNotPermitted);
+    }
 
     debug!(
         target: ZDP,
@@ -660,7 +847,7 @@ pub async fn handle_bind_egress_stream_request(
         asm.formatted_link_id(ingress_link_id.get()), tc.five_tuple()
     );
 
-    adapter::bind_egress_stream(asm, ingress_link_id, txn_id, tc);
+    adapter::bind_egress_stream(asm, ingress_link_id, txn_id, tc, peer_a2a_dh_pubkey);
 
     Ok(())
 }
@@ -701,7 +888,28 @@ pub async fn handle_bind_actor_address_response(
                 return Err(HandleMgmtError::BadStructure);
             };
 
-            adapter::install_tether(&asm, &txn, stream_id, tc)?;
+            if pkt.remaining() < size_of::<u16>() {
+                return Err(HandleMgmtError::BadStructure);
+            }
+
+            let key_len = pkt.get_u16() as usize;
+
+            // deserialize the peer's A2A DH public key if present
+            let peer_a2a_dh_pubkey = if key_len == 0 {
+                None
+            } else {
+                if pkt.remaining() < key_len {
+                    return Err(HandleMgmtError::BadStructure);
+                }
+
+                let Ok(key_bytes) = <[u8; X25519_KEY_LEN]>::try_from(&pkt.body()[..key_len]) else {
+                    return Err(HandleMgmtError::BadStructure);
+                };
+
+                Some(x25519_dalek::PublicKey::from(key_bytes))
+            };
+
+            adapter::install_tether(&asm, &txn, stream_id, tc, peer_a2a_dh_pubkey)?;
             Ok(())
         }
 
@@ -715,6 +923,50 @@ pub async fn handle_bind_actor_address_response(
             };
 
             adapter::deny_tether(&asm, &txn, msg)?;
+            Ok(())
+        }
+
+        _ => Err(HandleMgmtError::BadStructure),
+    }
+}
+
+pub async fn handle_stream_id_response(
+    asm: &Arc<Assembly>,
+    txn_id: TxnId,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
+    let link_id = pkt.metadata().ingress_link_id;
+
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return Err(HandleMgmtError::LinkClosed);
+    };
+
+    let Some(txn) = peer_state.txn_mgr.get(txn_id) else {
+        return Err(HandleMgmtError::UnknownTransaction);
+    };
+
+    let Ok(hdr) = zdp::ZdpStreamIdResponseHeader::read_from_buf(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    match hdr.status_code {
+        zdp::ResponseCode::Success => {
+            let stream_id = pkt.metadata().ingress_stream_id;
+
+            node::install_tether(&asm, NonZero::new(link_id).unwrap(), &txn, stream_id)?;
+            Ok(())
+        }
+
+        zdp::ResponseCode::Other => {
+            if hdr.info_len as usize > pkt.remaining() {
+                return Err(HandleMgmtError::BadStructure);
+            }
+
+            let Ok(msg) = std::str::from_utf8(&pkt.body()[..hdr.info_len as usize]) else {
+                return Err(HandleMgmtError::BadStructure);
+            };
+
+            node::deny_tether(&asm, NonZero::new(link_id).unwrap(), &txn, msg)?;
             Ok(())
         }
 
@@ -745,7 +997,7 @@ pub async fn handle_bind_egress_stream_response(
         zdp::ResponseCode::Success => {
             let stream_id = pkt.metadata().ingress_stream_id;
 
-            dock::install_tether(&asm, NonZero::new(link_id).unwrap(), &txn, stream_id)?;
+            node::install_tether(&asm, NonZero::new(link_id).unwrap(), &txn, stream_id)?;
             Ok(())
         }
 
@@ -758,7 +1010,7 @@ pub async fn handle_bind_egress_stream_response(
                 return Err(HandleMgmtError::BadStructure);
             };
 
-            dock::deny_tether(&asm, NonZero::new(link_id).unwrap(), &txn, msg)?;
+            node::deny_tether(&asm, NonZero::new(link_id).unwrap(), &txn, msg)?;
             Ok(())
         }
 
@@ -785,7 +1037,7 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
             // We are the node
             debug!(target: ZDP, "{}: unbind actor address, node -> adapter", asm.formatted_link_id(ingress_link_id.get()));
             // Remove from PFT
-            dock::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
+            node::unbind_stream(asm, ingress_link_id, pkt.metadata().ingress_stream_id);
         }
         (LinkType::AdapterToNode, _) | (LinkType::Internal, DOCK_LINK_ID) => {
             // We are the adapter
@@ -816,4 +1068,147 @@ pub async fn handle_unbind_indication(asm: &Arc<Assembly>, pkt: Packet) -> Handl
     }
 
     Ok(())
+}
+
+fn peer_type_by_id(asm: &Assembly, link_id: NonZero<LinkId>) -> PeerType {
+    asm.peer_table
+        .inspect(link_id.get(), |ps| ps.peer_type())
+        .unwrap_or(PeerType::Unknown)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zpr_ext::zerocopy::IntoBytesExt;
+
+    #[test]
+    fn authentication_evidence_is_bounded_by_actual_packet_capacity() {
+        use super::super::{core, requests};
+        use std::net::IpAddr;
+        for addresses in [
+            Vec::new(),
+            vec!["127.0.0.1".parse::<IpAddr>().unwrap()],
+            vec!["::1".parse::<IpAddr>().unwrap()],
+        ] {
+            let address_len = addresses
+                .first()
+                .map_or(0, |address| if address.is_ipv4() { 4 } else { 16 });
+            let max_blob = core::new_heap_packet().remaining_mut()
+                - size_of::<zdp::ZdpAcquireZprAddressHeader>()
+                - address_len;
+            let blob = vec![b'A'; max_blob];
+            assert!(requests::validate_acquire_zpr_address_request(&addresses, &blob).is_ok());
+            assert!(
+                requests::validate_acquire_zpr_address_request(
+                    &addresses,
+                    &vec![b'A'; max_blob + 1]
+                )
+                .is_err()
+            );
+            let asm = crate::assembly::test::create_assembly(
+                crate::assembly::test::TestAssemblyBuilder::new(),
+            );
+            requests::send_acquire_zpr_address_request(&asm, 3, 42, &addresses, Some(&blob))
+                .enqueue();
+        }
+        assert!(requests::validate_acquire_zpr_address_request(&[], &[]).is_err());
+        assert!(
+            requests::validate_acquire_zpr_address_request(
+                &["::1".parse().unwrap(); 2],
+                b"evidence"
+            )
+            .is_err()
+        );
+    }
+
+    fn acquire(count: u8, blob: &[u8], addresses: &[u8]) -> Packet {
+        let mut pkt = super::super::core::new_heap_packet();
+        zdp::ZdpAcquireZprAddressHeader {
+            blob_len: (blob.len() as u16).into(),
+            ip_version: L3Type::Ipv6,
+            addr_count: count,
+        }
+        .write_to_buf(&mut pkt)
+        .unwrap();
+        pkt.put_slice(blob);
+        pkt.put_slice(addresses);
+        pkt
+    }
+
+    fn grant(status: zdp::AuthenticationStatus, count: u8, addresses: &[u8]) -> Packet {
+        let mut pkt = super::super::core::new_heap_packet();
+        zdp::ZdpGrantZprAddressHeader {
+            status_code: status,
+            ip_version: L3Type::Ipv6,
+            addr_count: count,
+        }
+        .write_to_buf(&mut pkt)
+        .unwrap();
+        pkt.put_slice(addresses);
+        pkt
+    }
+
+    #[test]
+    fn acquire_requires_evidence_and_at_most_one_address() {
+        assert!(parse_acquire_zpr_address_request(&mut acquire(0, b"evidence", &[])).is_ok());
+        let address = [1; 16];
+        assert!(parse_acquire_zpr_address_request(&mut acquire(1, b"evidence", &address)).is_ok());
+        for mut invalid in [
+            acquire(0, b"", &[]),
+            acquire(2, b"evidence", &[1; 32]),
+            acquire(1, b"evidence", &[1; 15]),
+            acquire(0, b"evidence", &[1]),
+        ] {
+            assert!(parse_acquire_zpr_address_request(&mut invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn grant_requires_exact_status_and_address_shape() {
+        use zdp::AuthenticationStatus as Status;
+        assert!(
+            parse_grant_zpr_address_request(&mut grant(Status::Success, 1, &[1; 16]))
+                .unwrap()
+                .is_ok()
+        );
+        for status in [Status::Rejected, Status::Retryable] {
+            assert_eq!(
+                parse_grant_zpr_address_request(&mut grant(status, 0, &[]))
+                    .unwrap()
+                    .unwrap_err(),
+                status
+            );
+            assert!(parse_grant_zpr_address_request(&mut grant(status, 1, &[1; 16])).is_err());
+        }
+        for mut invalid in [
+            grant(Status::Success, 0, &[]),
+            grant(Status::Success, 2, &[1; 32]),
+            grant(Status::Success, 1, &[1; 15]),
+            grant(Status::Success, 1, &[1; 17]),
+            grant(Status(255), 0, &[]),
+        ] {
+            assert!(parse_grant_zpr_address_request(&mut invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn hello_capability_requires_one_supported_version() {
+        let mut data = std::collections::HashMap::new();
+        assert!(!has_actor_auth_protocol(&data));
+        data.insert(
+            tlv::DataType::ACTOR_AUTH_PROTOCOL,
+            vec![tlv::TlvValue::U16(1)],
+        );
+        assert!(has_actor_auth_protocol(&data));
+        data.insert(
+            tlv::DataType::ACTOR_AUTH_PROTOCOL,
+            vec![tlv::TlvValue::U16(2)],
+        );
+        assert!(!has_actor_auth_protocol(&data));
+        data.insert(
+            tlv::DataType::ACTOR_AUTH_PROTOCOL,
+            vec![tlv::TlvValue::U16(1); 2],
+        );
+        assert!(!has_actor_auth_protocol(&data));
+    }
 }

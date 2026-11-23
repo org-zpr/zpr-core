@@ -45,6 +45,10 @@ impl ZprTun {
         address: Option<IpAddr>,
     ) -> std::result::Result<Vec<Self>, ZprTunError> {
         let mut bldr = TunBuilder::new();
+        // tokio-tun 0.15 defaults to IFF_NO_PI (0.11 defaulted to packet info
+        // enabled). ph's TUN framing expects the 4-byte PI header on Linux
+        // (see zprtun::TUN_HAS_PI / sys::TunPi), so request it explicitly.
+        bldr = bldr.packet_info();
         if let Some(ifname) = ifname {
             bldr = bldr.name(&ifname);
         }
@@ -59,7 +63,8 @@ impl ZprTun {
             }
         }
         let tok_tun_devs = bldr
-            .try_build_mq(concurrency)
+            .queues(concurrency)
+            .build()
             .or_else(|e| Err(ZprTunError::PlatformError(e.to_string())))?;
 
         //let tun_ifname = String::from(tok_tun_devs[0].name());
@@ -74,6 +79,19 @@ impl ZprTun {
     }
 
     pub fn add_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
+        self.add_address_impl(addr, prefix_len, false)
+    }
+
+    pub fn add_authentication_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
+        self.add_address_impl(addr, prefix_len, true)
+    }
+
+    fn add_address_impl(
+        &self,
+        addr: IpAddr,
+        prefix_len: u8,
+        authentication: bool,
+    ) -> std::io::Result<()> {
         let mtx = self
             .mtx
             .lock()
@@ -87,6 +105,9 @@ impl ZprTun {
             .arg(format!("{}/{}", addr, prefix_len))
             .arg("dev")
             .arg(&self.ifname);
+        if authentication {
+            c.arg("preferred_lft").arg("0");
+        }
         debug!(target: NET_OS, "{:?}", c);
         let output = c.output()?;
         if !output.status.success() {
@@ -154,7 +175,7 @@ impl ZprTun {
     }
 
     // Should be called while holding the mutex.
-    fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
+    pub fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
         if addr.is_ipv4() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,

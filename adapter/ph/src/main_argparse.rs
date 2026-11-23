@@ -39,7 +39,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             config_file,
             common,
             node_addr,
-            node_public_key_file,
             bootstrap_key,
         } => {
             ph_mode = PhMode::Adapter;
@@ -70,14 +69,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             if let Some(node_addr) = node_addr {
                 config.node_addr = Some(node_addr);
             }
-            if let Some(npkf) = node_public_key_file {
-                config.node_public_key_file = Some(path::absolute(npkf).or_else(|e| {
-                    Err(ArgsError::PathError(format!(
-                        "path error for node_public_key_file: {:?}",
-                        e
-                    )))
-                })?);
-            }
             if let Some(bootstrap_key) = bootstrap_key {
                 config.bootstrap_key_path = Some(path::absolute(bootstrap_key).or_else(|e| {
                     Err(ArgsError::PathError(format!(
@@ -91,6 +82,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
         Command::Node {
             config_file,
             auth_private_key,
+            advertised_substrate_addr,
             common,
         } => {
             ph_mode = PhMode::Node;
@@ -112,6 +104,10 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                 None => None,
             };
             config = Config::new_for_node(config_file, auth_private_key, &common)?;
+            // Command line overrides the config file.
+            if let Some(advertised) = advertised_substrate_addr {
+                config.set_advertised_substrate_addr(&advertised)?;
+            }
         }
     }
     config.finalize()?;
@@ -216,7 +212,6 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "tests/node_public_key.pem"
         "#;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -260,10 +255,6 @@ mod test {
             Some(Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(
                 10, 0, 0, 1
             ))]))
-        );
-        assert_eq!(
-            config.adapter.node_public_key_file,
-            Some(PathBuf::from("tests/node_public_key.pem"))
         );
     }
 
@@ -318,7 +309,6 @@ mod test {
         let mut tomltxt = r#"
         [global]
         control_path = "$CONTROLFILE"
-        capture_path = "$CAPTUREFILE"
         self_addr = "192.168.0.1:12345"
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
@@ -330,22 +320,17 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
         let control_file = TempFile::touch();
-        let capture_file = TempFile::touch();
         let cert_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
-            .replace("$CAPTUREFILE", capture_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -385,10 +370,6 @@ mod test {
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(npk_file.get_path().into())
-        );
     }
 
     #[test]
@@ -421,7 +402,6 @@ mod test {
         let mut tomltxt = r#"
         [global]
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         self_addr = "192.168.0.1:12345"
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
@@ -443,9 +423,6 @@ mod test {
 
         let tmpfile = TempFile::new_toml(&tomltxt);
 
-        let node_pk_file = TempFile::touch();
-        let node_pk_fname = String::from(node_pk_file.get_path().to_str().unwrap());
-
         let args = vec![
             "ph",
             "adapter",
@@ -455,8 +432,6 @@ mod test {
             "192.168.0.2:5000",
             "--zpr-addr",
             "10.0.0.1",
-            "--node-public-key-file",
-            &node_pk_fname,
         ];
 
         let (pmode, config) = argparse(Some(args)).unwrap();
@@ -474,10 +449,6 @@ mod test {
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(PathBuf::from(&node_pk_fname))
-        );
     }
 
     // Leave out some stuff in the config file, but specify on command line.
@@ -487,7 +458,6 @@ mod test {
         let mut tomltxt = r#"
         [global]
         control_path = "$CONTROLFILE"
-        capture_path = "$CAPTUREFILE"
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
@@ -495,22 +465,17 @@ mod test {
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
         let cert_file = TempFile::touch();
         let control_file = TempFile::touch();
-        let capture_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
-            .replace("$CAPTUREFILE", capture_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -564,10 +529,6 @@ mod test {
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(npk_file.get_path().into())
-        );
     }
 
     #[test]
@@ -580,23 +541,19 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
         let cert_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -633,10 +590,6 @@ mod test {
             config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
-        assert_eq!(
-            config.node_public_key_file,
-            Some(npk_file.get_path().into())
-        );
     }
 
     #[test]
@@ -649,7 +602,6 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         zpr_addr = [ "10.0.0.1" ]
         "#;
 
@@ -708,8 +660,6 @@ mod test {
             &pk_file_fname,
             "--control-path",
             "/tmp/control.sock",
-            "--capture-path",
-            "/tmp/capture.sock",
             "--zpr-addr",
             "10.0.0.1",
         ];
@@ -736,6 +686,142 @@ mod test {
         assert!(config.logging.is_empty());
     }
 
+    // CLI --advertised-substrate-addr sets the advertised address with no config file.
+    #[test]
+    #[parallel(env)]
+    fn test_main_args_argparse_node_advertised_addr_cli_only() {
+        let ca_file = TempFile::touch();
+        let ca_file_fname = String::from(ca_file.get_path().to_str().unwrap());
+        let cert_file = TempFile::touch();
+        let cert_file_fname = String::from(cert_file.get_path().to_str().unwrap());
+        let pk_file = TempFile::touch();
+        let pk_file_fname = String::from(pk_file.get_path().to_str().unwrap());
+
+        let args = vec![
+            "ph",
+            "node",
+            "--ca-file",
+            &ca_file_fname,
+            "--certificate-file",
+            &cert_file_fname,
+            "--private-key-file",
+            &pk_file_fname,
+            "--control-path",
+            "/tmp/control.sock",
+            "--zpr-addr",
+            "10.0.0.1",
+            "--self-addr",
+            "0.0.0.0:12345",
+            "--advertised-substrate-addr",
+            "203.0.113.7:12345",
+        ];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Node);
+        // The bind address stays wildcard; only the advertised address is concrete.
+        assert_eq!(
+            config.self_addr,
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 12345)
+        );
+        assert_eq!(
+            config.advertised_substrate_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 7)),
+                12345
+            ))
+        );
+    }
+
+    // CLI --advertised-substrate-addr wins over [node] advertised_substrate_addr.
+    #[test]
+    #[parallel(env)]
+    fn test_main_args_argparse_node_advertised_addr_cli_overrides_config() {
+        let mut tomltxt = r#"
+        [global]
+        ca_file = "$CAFILE"
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
+        self_addr = "0.0.0.0:12345"
+        zpr_addr = [ "10.0.0.1" ]
+
+        [node]
+        advertised_substrate_addr = "203.0.113.7:6000"
+        "#;
+
+        let ca_file = TempFile::touch();
+        let cert_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec![
+            "ph",
+            "node",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "--advertised-substrate-addr",
+            "198.51.100.9:7000",
+        ];
+
+        let (_, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(
+            config.advertised_substrate_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(198, 51, 100, 9)),
+                7000
+            ))
+        );
+    }
+
+    // The CLI value goes through the same validation as the config-file value:
+    // an unspecified IP is rejected because peers cannot dial it.
+    #[test]
+    #[parallel(env)]
+    fn test_main_args_argparse_node_advertised_addr_cli_rejects_unspecified() {
+        let ca_file = TempFile::touch();
+        let ca_file_fname = String::from(ca_file.get_path().to_str().unwrap());
+        let cert_file = TempFile::touch();
+        let cert_file_fname = String::from(cert_file.get_path().to_str().unwrap());
+        let pk_file = TempFile::touch();
+        let pk_file_fname = String::from(pk_file.get_path().to_str().unwrap());
+
+        let args = vec![
+            "ph",
+            "node",
+            "--ca-file",
+            &ca_file_fname,
+            "--certificate-file",
+            &cert_file_fname,
+            "--private-key-file",
+            &pk_file_fname,
+            "--control-path",
+            "/tmp/control.sock",
+            "--zpr-addr",
+            "10.0.0.1",
+            "--advertised-substrate-addr",
+            "0.0.0.0:12345",
+        ];
+
+        match argparse(Some(args)) {
+            Err(ArgsError::ParseError(msg)) => {
+                assert!(
+                    msg.contains("unspecified"),
+                    "expected 'unspecified' in error, got: {msg}"
+                );
+            }
+            other => panic!("expected ParseError, got: {:?}", other),
+        }
+    }
+
     #[test]
     #[serial(env)] // serialize with other tests because we modify process environment
     fn test_main_args_argparse_adapter_key_in_env() {
@@ -744,21 +830,17 @@ mod test {
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
         zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let ca_file = TempFile::touch();
         let cert_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
@@ -794,21 +876,17 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let cert_file = TempFile::touch();
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -827,20 +905,15 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         name = "my-adapter"
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
-        let tmp = tomltxt
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        let tmp = tomltxt.replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -860,19 +933,14 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
-        let tmp = tomltxt
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        let tmp = tomltxt.replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -894,20 +962,15 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         name = "config-name"
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
-        let tmp = tomltxt
-            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap());
+        let tmp = tomltxt.replace("$PKFILE", pk_file.get_path().to_str().unwrap());
         tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -935,20 +998,16 @@ mod test {
         [global]
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        capture_path = "/tmp/capture.sock"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        node_public_key_file = "$NPKFILE"
         bootstrap_key = "$BSKEY"
         "#;
 
         let pk_file = TempFile::touch();
-        let npk_file = TempFile::touch();
 
         let tmp = tomltxt
             .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
-            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
             .replace("$BSKEY", bootstrap_key_path.to_str().unwrap());
         tomltxt = &tmp;
 

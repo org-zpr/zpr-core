@@ -6,7 +6,6 @@ use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::path::Path;
 use std::process;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
@@ -15,6 +14,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::*;
 
+mod actor_auth;
 mod adapter_manager_worker;
 mod adapter_tables;
 mod address_pool;
@@ -22,6 +22,7 @@ mod admin_worker;
 mod assembly;
 mod auth;
 mod batch_io;
+#[cfg_attr(not(all(unix, feature = "capnp-ancillary")), allow(dead_code))]
 mod capture_worker;
 mod classifier;
 mod compress;
@@ -47,14 +48,13 @@ mod mgmt_processor_worker;
 mod packet;
 mod packet_queue;
 mod packet_steering;
+#[cfg_attr(not(all(unix, feature = "capnp-ancillary")), allow(dead_code))]
 mod pcap_writer;
 mod peer_table;
 mod pki;
 mod prelude;
 mod queues;
 mod sample_ring;
-#[cfg(not(feature = "capnp-ancillary"))]
-mod set_capture_file_worker;
 mod signal_worker;
 mod special_peers;
 mod sys;
@@ -83,7 +83,7 @@ use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use logging::targets::STARTUP;
-use pki::{generate_self_signed_noise_cert, load_cert, load_noise_public_key};
+use pki::load_cert;
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
@@ -140,12 +140,37 @@ fn main() -> ExitCode {
 
     info!(target: STARTUP, "starting with PID {}", process::id());
 
+    #[cfg(feature = "enable-security-testing")]
+    {
+        error!(
+            target: STARTUP,
+            "\n\
+             ################################################################\n\
+             ##                                                            ##\n\
+             ##   W A R N I N G  SECURITY TESTING BUILD                    ##\n\
+             ##                                                            ##\n\
+             ##   Built with the `enable-security-testing` feature, which  ##\n\
+             ##   compiles in code that DELIBERATELY BREAKS the security   ##\n\
+             ##   guarantees of ZPR in order to test them.                 ##\n\
+             ##                                                            ##\n\
+             ##   NEVER RUN THIS BINARY IN A PRODUCTION ENVIRONMENT!       ##\n\
+             ##                                                            ##\n\
+             ################################################################"
+        );
+        error!(
+            target: STARTUP,
+            "security testing: mangle forwarded pings = {}, unkeyed a2a micv = {}, recompute micvs = {}",
+            config.security_testing_mangle_forwarded_pings,
+            config.security_testing_unkeyed_a2a_micv,
+            config.security_testing_recompute_micvs
+        );
+    }
+
     //
     // read key material
     //
 
     let self_noise_keypair;
-    let peer_noise_keypair;
     let certx;
 
     let maybe_private_key = match config.get_noise_private_key_data() {
@@ -166,22 +191,8 @@ fn main() -> ExitCode {
             error!(target: STARTUP, "nodes require a noise private key to be specified");
             return ExitCode::FAILURE;
         };
-        peer_noise_keypair = None;
         self_noise_keypair = NoiseKeypair::new(private_key);
     } else {
-        let public_key = match load_noise_public_key(&Path::new(
-            &config.node_public_key_file.clone().unwrap(),
-        )) {
-            Ok(key) => key,
-            Err(e) => {
-                error!(target: STARTUP, "failed to load node public key file: {e:?}");
-                return ExitCode::FAILURE;
-            }
-        };
-        peer_noise_keypair = Some(NoiseKeypair {
-            public: public_key,
-            private: [0u8; 32], // unknown
-        });
         self_noise_keypair = match maybe_private_key {
             Some(private_key) => NoiseKeypair::new(private_key),
             None => NoiseKeypair::generate(),
@@ -190,19 +201,15 @@ fn main() -> ExitCode {
 
     // Set up key exchange.
     //
-    // If we have a signed certificate, use that.  Otherwise we create a self-signed cert
-    // and insert our CN (`name` from config) and our self_noise_keypair public key.
+    // If we have a signed certificate, use it during keying. Otherwise none is
+    // sent: nodes do not verify the certificates of non-special adapters, so an
+    // adapter without one simply presents no name (the Noise handshake still
+    // authenticates its static key).
 
     let self_cert = match config.certificate_file.as_ref() {
-        None => match generate_self_signed_noise_cert(&config.name, &self_noise_keypair) {
-            Ok(cert) => cert,
-            Err(e) => {
-                error!(target: STARTUP, "failed to generate self-signed certificate: {e:?}");
-                return ExitCode::FAILURE;
-            }
-        },
+        None => None,
         Some(cert_path) => match load_cert(cert_path) {
-            Ok(cert) => cert,
+            Ok(cert) => Some(cert),
             Err(e) => {
                 error!(target: STARTUP, "failed to load certificate from {:?}: {e:?}", cert_path);
                 return ExitCode::FAILURE;
@@ -273,24 +280,6 @@ fn main() -> ExitCode {
         UnixListener::bind(&config.control_path).expect("failed to bind to control socket");
     info!(target: STARTUP, "control socket bound to {:?}", config.control_path);
 
-    #[cfg(not(feature = "capnp-ancillary"))]
-    let capture_socket = {
-        fs::remove_file(&config.capture_path)
-            .or_else(|e| {
-                if e.kind() == ErrorKind::NotFound {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
-            })
-            .unwrap();
-        let capture_socket = Arc::new(
-            UnixListener::bind(&config.capture_path).expect("failed to bind to capture socket"),
-        );
-        info!(target: STARTUP, "capture socket bound to {:?}", config.capture_path);
-        capture_socket
-    };
-
     //
     // open TUN devices and actor requeue sockets
     //
@@ -301,7 +290,7 @@ fn main() -> ExitCode {
 
     // TODO: Currently on linux we cannot configure a TUN interface with an IPv6 address.
     // So if you set tun_if in the config we assume TUN is there and has a static ZPR address.
-    let tun_addr = if !config.zpr_addr.is_empty() {
+    let tun_addr = if ph_mode == PhMode::Node && !config.zpr_addr.is_empty() {
         if config.tun_if.is_none() {
             Some(config.zpr_addr[0].clone())
         } else {
@@ -520,11 +509,42 @@ fn main() -> ExitCode {
         let auth_private_key = zpr_utils::rsa_sign::load_rsa_key(auth_key_pem.as_bytes())
             .unwrap_or_else(|e| panic!("failed to parse auth_private_key {auth_key_path:?}: {e}"));
 
+        // Advertised substrate address resolution, in order:
+        //   1. advertised_substrate_addr config, if set.
+        //   2. self_addr, if its IP is specified (common LAN/single-host case).
+        // A wildcard self_addr with no configured advertised address is a startup
+        // error: a wildcard binds every local IP (including ones added later), of
+        // which the machine may have several, but we can advertise only one —
+        // there is no sound way to pick it automatically, so the operator must
+        // choose via advertised_substrate_addr.
+        let advertised_substrate = config
+            .advertised_substrate_addr
+            .or_else(|| {
+                if config.self_addr.ip().is_unspecified() {
+                    None
+                } else {
+                    Some(config.self_addr)
+                }
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "cannot determine an advertised substrate address: self_addr {} \
+                     has an unspecified IP; set advertised_substrate_addr in the \
+                     [node] config section",
+                    config.self_addr
+                )
+            });
+        info!(
+            target: STARTUP,
+            "advertising substrate address {advertised_substrate} to the visa service"
+        );
+
         vsconn = Some(libnode::vsconn::VSConn::new(
             topology_config.vs_queue_size,
             SocketAddr::new(VISA_SERVICE_ADDR, VISA_SERVICE_PORT),
             node_name,
             auth_private_key,
+            advertised_substrate,
         ));
     } else {
         vsconn = None;
@@ -535,6 +555,7 @@ fn main() -> ExitCode {
     //
 
     let asm = Arc::new(Assembly {
+        actor_rejected: std::sync::atomic::AtomicBool::new(false),
         ph_mode,
         topology_config,
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
@@ -544,6 +565,7 @@ fn main() -> ExitCode {
             &node_zpr_addr,
         )),
         vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),
+        deferred_vs_connect: Mutex::new(None),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
@@ -557,7 +579,6 @@ fn main() -> ExitCode {
         adapter_manager_factory: AdapterManagerFactory::new(am_inq_factory),
         km_state: KmState::new(km_inq, km_sig_inq),
         self_noise_keypair: Some(self_noise_keypair),
-        peer_noise_keypair,
         a2a_dh_keypair: x25519_dalek::ReusableSecret::random(),
         certx: Some(certx),
         system_start_time,
@@ -624,8 +645,8 @@ fn main() -> ExitCode {
                 asm.peer_table
                     .get(LOCAL_ACTOR_LINK_ID)
                     .unwrap()
-                    .link_state_machine
-                    .add_internal_actor_address(addr.into());
+                    .actor_auth
+                    .add_internal_address(addr.into());
             }
         }
     }
@@ -639,11 +660,6 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq, mhd_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
-    #[cfg(not(feature = "capnp-ancillary"))]
-    js.spawn_local(set_capture_file_worker::launch(
-        asm.clone(),
-        capture_socket.clone(),
-    ));
     js.spawn_local(admin_worker::launch(asm.clone(), control_socket));
     js.spawn_local(km_multiplexor::launch_signal_worker(
         asm.clone(),
@@ -675,6 +691,12 @@ fn main() -> ExitCode {
         batch_io_engine,
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.fastpath_batch_size,
+        #[cfg(feature = "enable-security-testing")]
+        mangle_forwarded_pings: asm.config.get().security_testing_mangle_forwarded_pings,
+        #[cfg(feature = "enable-security-testing")]
+        unkeyed_a2a_micv: asm.config.get().security_testing_unkeyed_a2a_micv,
+        #[cfg(feature = "enable-security-testing")]
+        recompute_micvs: asm.config.get().security_testing_recompute_micvs,
     };
 
     for (worker_index, socket, tun_dev, requeue_outq) in izip!(

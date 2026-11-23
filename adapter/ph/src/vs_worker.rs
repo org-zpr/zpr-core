@@ -2,6 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use tokio::sync::broadcast;
 
 use crate::prelude::*;
+use crate::visa_mgmt;
 use crate::vss_worker;
 
 use libnode::error::VSApiError;
@@ -17,6 +18,10 @@ pub async fn launch(
 ) {
     // When launched, we have no state with the VS.
     let mut state = StateFlag::NoState;
+
+    //derive pubkey from a2a_dh_keypair
+    let a2a_dh_pubkey = x25519_dalek::PublicKey::from(&asm.a2a_dh_keypair);
+
     // TODO: The new visa service supports a "reconnect" signal. That is not yet exposed by libnode2
     loop {
         // This acts as a gate -- waiting for runloop to start.
@@ -27,6 +32,7 @@ pub async fn launch(
             let req = NodeConnect {
                 zpr_addr: node_zpr_addr,
                 state,
+                a2a_dh_pubkey,
             };
 
             // Race the connect call against lifecycle events. We use a bool here because
@@ -82,6 +88,24 @@ pub async fn launch(
             };
 
             if connected {
+                // VSS registration snapshots both actors' A2A keys into its callback
+                // visa. Register the bootstrapped VS adapter before minting that visa.
+                let deferred = asm.deferred_vs_connect.lock().unwrap().take();
+                if let Some((vs_link_id, assigned_addr, conn_req)) = deferred {
+                    if let Err(e) = visa_mgmt::send_deferred_vs_connect(
+                        &asm,
+                        vs_link_id,
+                        assigned_addr,
+                        conn_req,
+                    )
+                    .await
+                    {
+                        panic!(
+                            "{}: deferred visa service adapter connect failed: {e}",
+                            asm.formatted_link_id(vs_link_id)
+                        );
+                    }
+                }
                 match vs_handle.register_vss(vss_addr).await {
                     Ok(ops) => {
                         info!(target: STARTUP, "registered VSS, received {} pending visa ops", ops.len());
@@ -90,6 +114,7 @@ pub async fn launch(
                                 error!(target: STARTUP, "failed to process initial visa op from VS: {e:?}");
                             }
                         }
+
                         // Next time we connect, we have state.
                         state = StateFlag::HasState;
                         break; // Exit inner loop; go back to waiting for a state change.

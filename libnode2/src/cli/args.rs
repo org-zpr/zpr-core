@@ -27,6 +27,12 @@ pub struct Args {
     /// Nodes ZPR address to present to the visa service.
     #[arg(long, default_value = "fd5a:5052:90de::1")]
     pub self_addr: String,
+
+    /// Substrate address ('HOST:PORT') to advertise to the visa service — the
+    /// endpoint peers would dial. lntest carries no substrate traffic, so any
+    /// concrete, policy-acceptable address works; it must not be unspecified.
+    #[arg(long)]
+    pub substrate_addr: String,
 }
 
 /// Runtime configuration derived from parsed CLI arguments.

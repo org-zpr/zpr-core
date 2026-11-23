@@ -1,16 +1,10 @@
-//! Dock API.
+//! Node/dock API.
 //!
-//! These functions operate the local dock state at a high level.
+//! These functions operate the local node and dock state at a high level.
 //!
 //! They are meant to be invoked either from [super::handlers] by a node in
 //! response to a message from an adapter, or directly by a node managing
 //! its local adapter.
-
-// A lot of this functionality is similar/shared between node->adapter
-// and node->node links.  It will need to be rearranged somewhat to reflect
-// the similarities and differences.  However since for now we don't have
-// node->node links, we don't make the distinction (so some terminology
-// choices are weird).
 
 use super::requests;
 use super::txn_mgr::{TxnHandle, TxnId};
@@ -18,6 +12,7 @@ use crate::classifier;
 use crate::counters::ManagementCounterType;
 use crate::defs::FiveTuple;
 use crate::forwarding_tables;
+use crate::peer_table::PeerType;
 use crate::prelude::*;
 use crate::visa_mgmt;
 use crate::visa_table::VisaTableError;
@@ -26,7 +21,7 @@ use dashmap::DashMap;
 use std::num::NonZero;
 use zpr::vsapi_types::{CommFlag, PacketDesc, VisaRequest, VsapiFiveTuple, vsapi_ip_number};
 
-/// State of an in-progress inbound bind request.
+/// State of an in-progress inbound bind or stream ID request.
 enum BindRequestState {
     /// We have issued a visa request and are currently awaiting a response.
     /// The parameter is a join handle for the task which is performing the
@@ -35,7 +30,19 @@ enum BindRequestState {
     /// within the task it references, so we can't usefully join it.
     AwaitingVisaResponse(#[allow(dead_code)] tokio::task::JoinHandle<()>),
 
-    //AwaitingVisaPush(VisaId),  // for future node->node use
+    /// We have issued a visa ID request for the indicated visa and are
+    /// currently awaiting a response or racing push.  The join handle is for
+    /// the task which is issuing the request and awaiting the push.  Note
+    /// that this join handle is mostly only useful for monitoring, since
+    /// the subsequent state transitions are issued from within the task it
+    /// references, so we can't usefully join it.
+    AwaitingVisaPush {
+        #[allow(dead_code)]
+        visa_id: VisaId,
+        #[allow(dead_code)]
+        worker: tokio::task::JoinHandle<()>,
+    },
+
     /// We have a visa with the indicated ID, and are now waiting
     /// on completion of the next-hop bind request issued on the indicated
     /// next-hop link and identified by the indicated transaction handle.
@@ -46,8 +53,9 @@ enum BindRequestState {
     },
 }
 
-/// Per-peer state related to the docking session and managed by the code in this module.
-pub struct DockingSessionPeerState {
+/// Per-peer state related to the docking session or node peer link and
+/// managed by the code in this module.
+pub struct NodePeerState {
     /// In-progress inbound bind requests from this peer.  The key is the ID
     /// of a transaction opened by the peer; the value is the state of that
     /// bind request.
@@ -60,7 +68,7 @@ pub struct DockingSessionPeerState {
     awaiting_next_hop_bind_table: DashMap<TxnHandle, (NonZero<LinkId>, TxnId)>,
 }
 
-impl DockingSessionPeerState {
+impl NodePeerState {
     pub fn new() -> Self {
         Self {
             bind_request_state: DashMap::new(),
@@ -136,9 +144,8 @@ pub fn bind_actor_address(
 
     // Ensure this adapter actually owns this source address.
 
-    if !peer_state
-        .link_state_machine
-        .has_actor_address(&five_tuple.src_address)
+    if !peer_state.actor_auth.owns_address(&five_tuple.src_address)
+        && peer_state.link_state_machine.aaa_address() != Some(five_tuple.src_address)
     {
         warn!(target: FLOW_MGMT, "{}: bind request: source address {} does not match actor address", asm.formatted_link_id(ingress_link_id.get()), &five_tuple.src_address);
         return requested_visa_denied(asm, ingress_link_id, txn_id);
@@ -228,10 +235,7 @@ pub fn bind_actor_address(
     // add this entry.  Nonetheless, to ensure this behavior isn't broken should
     // the task be changed to spawn with `spawn()`, we begin instantiating the
     // bind request state machine entry (i.e., take a lock on it) up here.
-    let bind_st_entry = peer_state
-        .docking_session_state
-        .bind_request_state
-        .entry(txn_id);
+    let bind_st_entry = peer_state.node_state.bind_request_state.entry(txn_id);
 
     // Launch the visa-request task while holding a lock on its corresponding entry.
     let jh = tokio::task::spawn_local(visa_request_task(
@@ -288,6 +292,114 @@ async fn visa_request_task(
     }
 }
 
+pub fn request_stream(
+    asm: &Arc<Assembly>,
+    ingress_link_id: NonZero<LinkId>,
+    txn_id: TxnId,
+    visa_id: VisaId,
+) {
+    debug!(
+        target: FLOW_MGMT,
+        "request_stream(ingress_link_id={}, txn_id={txn_id}, visa_id={visa_id})",
+        asm.formatted_link_id(ingress_link_id.get()));
+
+    let Some(peer_state) = asm.peer_table.get(ingress_link_id.get()) else {
+        return;
+    };
+
+    // Check if we already have the indicated visa.
+    let visa_table = asm.visa_table.read().unwrap();
+    if visa_table.table.get(&visa_id).is_some() {
+        // Visa found.
+        return requested_visa_granted(asm, ingress_link_id, txn_id, visa_id);
+    }
+
+    // We do not have an existing visa.  Request one.
+
+    debug!(
+        target: FLOW_MGMT,
+        "issuing visa request for {visa_id} from ingress_link_id {}",
+        asm.formatted_link_id(ingress_link_id.get()),
+    );
+
+    asm.counters.management[ManagementCounterType::VisaByIdRequested].increment();
+
+    // We need to ensure the visa-request task (spawned below) doesn't try
+    // to access the docking session state before this entry is in place.
+    // Since the task is spawned with `spawn_local()`, it will not start
+    // until after we yield somehow, which we don't between now and when we
+    // add this entry.  Nonetheless, to ensure this behavior isn't broken should
+    // the task be changed to spawn with `spawn()`, we begin instantiating the
+    // bind request state machine entry (i.e., take a lock on it) up here.
+    let bind_st_entry = peer_state.node_state.bind_request_state.entry(txn_id);
+
+    // Launch the visa-request task while holding a lock on its corresponding entry.
+    let jh = tokio::task::spawn_local(visa_push_request_task(
+        asm.clone(),
+        ingress_link_id,
+        txn_id,
+        visa_id,
+    ));
+
+    // Finish instantiating the bind request state.
+    bind_st_entry.insert(BindRequestState::AwaitingVisaPush {
+        visa_id,
+        worker: jh,
+    });
+}
+
+/// State of an in-progress inbound bind (stream ID) request.
+/// Request a visa by ID, on behalf of a stream ID request from the given link and transaction ID.
+///
+/// On completion, advances the bind-request state machine via
+/// `requested_visa_granted()` or `requested_visa_denied()` as appropriate.
+async fn visa_push_request_task(
+    asm: Arc<Assembly>,
+    ingress_link_id: NonZero<LinkId>,
+    txn_id: TxnId,
+    req_visa_id: VisaId,
+) {
+    // TODO: optimization: concurrently await any visas pushed by the VS
+    match asm
+        .vsconn
+        .as_ref()
+        .unwrap()
+        .visa_by_id_request(vec![req_visa_id])
+        .await
+    {
+        Ok(visas) => {
+            // `visas` should only have the visa we requested, or none, but let's confirm that
+            let Some(visa) = visas.into_iter().find(|visa| visa.issuer_id == req_visa_id) else {
+                asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
+                debug!(target: FLOW_MGMT, "visa {req_visa_id} not found");
+                return requested_visa_denied(&asm, ingress_link_id, txn_id);
+            };
+
+            match visa_mgmt::insert_visa(&asm, visa) {
+                Ok(_vid) => (),
+
+                Err(VisaTableError::ParseError(field)) => {
+                    error!(target: FLOW_MGMT, "Could not parse visa: {field}");
+                    return requested_visa_denied(&asm, ingress_link_id, txn_id);
+                }
+
+                Err(e) => panic!("Got unexpected error type {e}"),
+            };
+
+            asm.counters.management[ManagementCounterType::VisaRequestSuccess].increment();
+            debug!(target: FLOW_MGMT, "visa request for {req_visa_id} succeeded");
+
+            requested_visa_granted(&asm, ingress_link_id, txn_id, req_visa_id);
+        }
+
+        Err(err) => {
+            asm.counters.management[ManagementCounterType::VisaRequestError].increment();
+            error!(target: FLOW_MGMT, "visa request error: {err}");
+            requested_visa_denied(&asm, ingress_link_id, txn_id)
+        }
+    }
+}
+
 /// Notify the bind-request state machine that the visa it requested
 /// on behalf of transaction `txn_id` from adapter `ingress_link_id`
 /// is now available with the specified visa ID.
@@ -302,7 +414,7 @@ fn requested_visa_granted(
 ) {
     debug!(
         target: FLOW_MGMT,
-        "requested_visa_granted(ingress_link_id={}, txn_id={txn_id}, visa_id={visa_id})", asm.formatted_link_id(ingress_link_id.get()));
+        "requested_visa_granted(ingress_link_id={ingress_link_id}, txn_id={txn_id}, visa_id={visa_id})");
 
     // Look up the egress link for this visa.
 
@@ -310,21 +422,40 @@ fn requested_visa_granted(
         // visa or egress link was deleted; consider visa denied
         return requested_visa_denied(asm, ingress_link_id, txn_id);
     };
+
     let Some(egress_peer_state) = asm.peer_table.get(egress_link_id.get()) else {
         // egress link was racily deleted; consider visa denied
         return requested_visa_denied(asm, ingress_link_id, txn_id);
     };
 
-    // Look up the traffic classifier for this visa.
+    // adapter next-hops require the TC; node next-hops require the visa ID
+    let tc;
+    let peer_a2a_dh_pubkey;
 
-    let visa_table = asm.visa_table.read().unwrap();
-    let Some(visa) = visa_table.table.get(&visa_id) else {
-        // Visa was either never granted or has already been removed
-        // Route is no longer valid
-        return requested_visa_denied(asm, ingress_link_id, txn_id);
-    };
-    let tc = visa.get_tc();
-    drop(visa_table);
+    match egress_peer_state.peer_type() {
+        PeerType::Node => {
+            tc = None;
+            peer_a2a_dh_pubkey = None;
+        }
+
+        PeerType::Adapter => {
+            // Look up the traffic classifier for this visa.
+            let visa_table = asm.visa_table.read().unwrap();
+            let Some(visa) = visa_table.table.get(&visa_id) else {
+                // Visa was either never granted or has already been removed
+                // Route is no longer valid
+                return requested_visa_denied(asm, ingress_link_id, txn_id);
+            };
+            tc = Some(visa.get_tc());
+            peer_a2a_dh_pubkey = visa.get_ingress_a2a_dh_pubkey(); // Egress adapter needs ingress adapter's pubkey for DH
+        }
+
+        PeerType::Dock | PeerType::Unknown => {
+            error!(target: FLOW_MGMT, "invalid egress link {}",
+                asm.formatted_link_id(egress_link_id.get()));
+            return requested_visa_denied(asm, ingress_link_id, txn_id);
+        }
+    }
 
     // Open a transaction on the egress link and move into AwaitingNextHopBind state.
 
@@ -337,30 +468,48 @@ fn requested_visa_granted(
         // requestor went away, bail!
         return;
     };
-    ingress_peer_state
-        .docking_session_state
-        .bind_request_state
-        .insert(
-            txn_id,
-            BindRequestState::AwaitingNextHopBind {
-                visa_id,
-                egress_link_id,
-                egress_bind_txn: egress_bind_txn.clone(),
-            },
-        );
+    ingress_peer_state.node_state.bind_request_state.insert(
+        txn_id,
+        BindRequestState::AwaitingNextHopBind {
+            visa_id,
+            egress_link_id,
+            egress_bind_txn: egress_bind_txn.clone(),
+        },
+    );
+    drop(ingress_peer_state);
 
-    // Issue a bind request on the egress link (first
+    // Issue a bind request on the next-hop link (first
     // noting in the `awaiting_next_hop_bind_table` on the egress link
     // how to route the reply).
 
     let egress_bind_txn_id = egress_bind_txn.id();
     egress_peer_state
-        .docking_session_state
+        .node_state
         .awaiting_next_hop_bind_table
         .insert(egress_bind_txn, (ingress_link_id, txn_id));
 
-    requests::send_bind_egress_stream_request(asm, egress_link_id.get(), egress_bind_txn_id, tc)
-        .enqueue();
+    match tc {
+        None => {
+            requests::send_stream_id_request(
+                asm,
+                egress_link_id.get(),
+                egress_bind_txn_id,
+                visa_id,
+            )
+            .enqueue();
+        }
+
+        Some(tc) => {
+            requests::send_bind_egress_stream_request(
+                asm,
+                egress_link_id.get(),
+                egress_bind_txn_id,
+                tc,
+                peer_a2a_dh_pubkey.as_ref(), // peer key passes through stream request
+            )
+            .enqueue();
+        }
+    }
 }
 
 /// Notify the bind-request state machine that the visa it requested
@@ -370,7 +519,7 @@ fn requested_visa_granted(
 /// Terminates the bind-request state machine by sending a policy error
 /// back to the adapter which initiated the request.
 fn requested_visa_denied(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, txn_id: TxnId) {
-    bind_actor_address_reject(asm, ingress_link_id, txn_id, "policy error")
+    bind_reject(asm, ingress_link_id, txn_id, "policy error")
 }
 
 /// Install the given tether into the PFT.
@@ -396,7 +545,7 @@ fn requested_tether_granted(
     // clean API on this state machine.)
 
     let dashmap::mapref::entry::Entry::Occupied(bind_st) = ingress_peer_state
-        .docking_session_state
+        .node_state
         .bind_request_state
         .entry(txn_id)
     else {
@@ -421,7 +570,7 @@ fn requested_tether_granted(
     if let Some(egress_peer_state) = asm.peer_table.get(egress_link_id.get()) {
         assert!(
             !egress_peer_state
-                .docking_session_state
+                .node_state
                 .awaiting_next_hop_bind_table
                 .contains_key(&egress_bind_txn)
         );
@@ -438,7 +587,7 @@ fn requested_tether_granted(
     let Ok(ingress_tether_entry) = ingress_peer_state.pft.vacant_entry() else {
         // PFT full; respond with error message
         // TODO: maybe tick a counter somewhere?
-        bind_actor_address_reject(asm, ingress_link_id, txn_id, "PFT full");
+        bind_reject(asm, ingress_link_id, txn_id, "PFT full");
         return;
     };
 
@@ -460,7 +609,27 @@ fn requested_tether_granted(
 
     // Retrieve the traffic classifier from the visa.
 
-    let tc = visa.get_tc();
+    // adapter requestors require the TC; node requestors do not
+    let tc;
+    let peer_a2a_dh_pubkey;
+
+    match ingress_peer_state.peer_type() {
+        PeerType::Node => {
+            tc = None;
+            peer_a2a_dh_pubkey = None;
+        }
+
+        PeerType::Adapter => {
+            tc = Some(visa.get_tc());
+            peer_a2a_dh_pubkey = visa.get_egress_a2a_dh_pubkey(); // Ingress adapter needs egress adapter's pubkey for DH
+        }
+
+        PeerType::Dock | PeerType::Unknown => {
+            error!(target: FLOW_MGMT, "invalid ingress link {}",
+                asm.formatted_link_id(ingress_link_id.get()));
+            return requested_visa_denied(asm, ingress_link_id, txn_id);
+        }
+    }
 
     drop(visa_table);
 
@@ -474,14 +643,25 @@ fn requested_tether_granted(
     let ingress_tether_id = ingress_tether_entry.insert(pep);
 
     // Send a success response to the requestor with the tether ID.
-    requests::send_bind_actor_address_success_response(
-        asm,
-        ingress_link_id.get(),
-        txn_id,
-        ingress_tether_id,
-        tc,
-    )
-    .enqueue();
+    match tc {
+        None => requests::send_stream_id_success_response(
+            asm,
+            ingress_link_id.get(),
+            txn_id,
+            ingress_tether_id,
+        )
+        .enqueue(),
+
+        Some(tc) => requests::send_bind_actor_address_success_response(
+            asm,
+            ingress_link_id.get(),
+            txn_id,
+            ingress_tether_id,
+            tc,
+            peer_a2a_dh_pubkey.as_ref(), // peer key passes through success response
+        )
+        .enqueue(),
+    }
 }
 
 /// Common functionality for exiting the bind request state machine with an error.
@@ -492,15 +672,10 @@ fn requested_tether_granted(
 /// It is invalid and racy to call this while a next-hop-bind request is outstanding,
 /// as there is neither mechanism to discard replies to such a request, or to
 /// synchronize replies with termination of this state machine.
-fn bind_actor_address_reject(
-    asm: &Arc<Assembly>,
-    ingress_link_id: NonZero<LinkId>,
-    txn_id: TxnId,
-    reason: &str,
-) {
+fn bind_reject(asm: &Arc<Assembly>, ingress_link_id: NonZero<LinkId>, txn_id: TxnId, reason: &str) {
     debug!(
         target: FLOW_MGMT,
-        "bind_actor_address_reject(ingress_link_id={}, txn_id={txn_id})", asm.formatted_link_id(ingress_link_id.get()));
+        "bind_reject(ingress_link_id={}, txn_id={txn_id})", asm.formatted_link_id(ingress_link_id.get()));
 
     let Some(ingress_peer_state) = asm.peer_table.get(ingress_link_id.get()) else {
         return;
@@ -509,7 +684,7 @@ fn bind_actor_address_reject(
     // Remove state from the bind-request state table.
 
     if let Some((_, bind_st)) = ingress_peer_state
-        .docking_session_state
+        .node_state
         .bind_request_state
         .remove(&txn_id)
     {
@@ -528,7 +703,7 @@ fn bind_actor_address_reject(
             if let Some(egress_peer_state) = asm.peer_table.get(egress_link_id.get()) {
                 assert!(
                     !egress_peer_state
-                        .docking_session_state
+                        .node_state
                         .awaiting_next_hop_bind_table
                         .contains_key(&egress_bind_txn)
                 );
@@ -537,8 +712,23 @@ fn bind_actor_address_reject(
     }
 
     // Send an error response to the requestor.
-    requests::send_bind_actor_address_error_response(asm, ingress_link_id.get(), txn_id, reason)
-        .enqueue();
+    match ingress_peer_state.peer_type() {
+        PeerType::Adapter => requests::send_bind_actor_address_error_response(
+            asm,
+            ingress_link_id.get(),
+            txn_id,
+            reason,
+        )
+        .enqueue(),
+
+        PeerType::Node => {
+            requests::send_stream_id_error_response(asm, ingress_link_id.get(), txn_id, reason)
+                .enqueue()
+        }
+
+        PeerType::Dock | PeerType::Unknown => error!(target: FLOW_MGMT, "invalid ingress link {}",
+                asm.formatted_link_id(ingress_link_id.get())),
+    }
 }
 
 #[derive(Debug)]
@@ -598,12 +788,7 @@ pub fn deny_tether(
 ) -> Result<(), InstallTetherError> {
     let (ingress_link_id, ingress_txn_id) =
         resolve_next_hop_bind_originator(asm, egress_link_id, egress_txn)?;
-    Ok(bind_actor_address_reject(
-        asm,
-        ingress_link_id,
-        ingress_txn_id,
-        reason,
-    ))
+    Ok(bind_reject(asm, ingress_link_id, ingress_txn_id, reason))
 }
 
 /// Resolve the originating bind-request state machine
@@ -623,7 +808,7 @@ fn resolve_next_hop_bind_originator(
         return Err(InstallTetherError::LinkClosed);
     };
     let Some((_, (ingress_link_id, ingress_txn_id))) = egress_peer_state
-        .docking_session_state
+        .node_state
         .awaiting_next_hop_bind_table
         .remove(egress_txn)
     else {
@@ -635,7 +820,7 @@ fn resolve_next_hop_bind_originator(
         // (don't bother if originator no longer exists).
 
         let Some(bind_st) = ingress_peer_state
-            .docking_session_state
+            .node_state
             .bind_request_state
             .get(&ingress_txn_id)
         else {

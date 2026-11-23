@@ -146,7 +146,7 @@ fn process_configuration(asm: &Arc<Assembly>, params: Vec<Param>) -> ConfigureRe
 fn process_topology(_asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyResponse {
     info!(target: VSS_RPC, "received topology update with {} links (not yet implemented)", links.len());
     for (i, link) in links.iter().enumerate() {
-        info!(target: VSS_RPC, "[link {i}]-> {:?}", link.peer);
+        info!(target: VSS_RPC, "[link {i}]-> peer {:?}, zpr addr {}", link.peer, link.zpr_addr);
     }
     Ok(())
 }

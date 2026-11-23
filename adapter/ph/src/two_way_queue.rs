@@ -224,6 +224,24 @@ where
             receiver: PhantomData,
         })
     }
+
+    /// Synchronously (non-blocking) receive a single item from the producer,
+    /// if one is immediately available.
+    ///
+    /// Returns `None` if no item is currently queued (this does not
+    /// distinguish between an empty queue and a producer that has closed
+    /// its half).
+    ///
+    /// The item will be protected by the returned `ItemGuard`, and will be
+    /// returned to the producer when the `ItemGuard` is dropped.
+    pub fn try_recv(&mut self) -> Option<ItemGuard<'_, T, U>> {
+        let (item, return_q_handle) = self.incoming_q.try_recv().ok()?;
+        Some(ItemGuard {
+            item: ManuallyDrop::new(item),
+            return_q_handle,
+            receiver: PhantomData,
+        })
+    }
 }
 
 /// Guard for an item received from a two-way queue.

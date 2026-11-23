@@ -132,6 +132,9 @@ pub enum ManagementCounterType {
     PeerRemoved,
     PeerHandshakeSuccess,
     PeerHandshakeFailure,
+    ActorAuthorizationSuccess,
+    ActorAuthorizationRejected,
+    ActorAuthorizationRetry,
 
     // RFC 6.5 § 8.2.1
     SequenceError,
@@ -140,6 +143,7 @@ pub enum ManagementCounterType {
     OtherError,
 
     VisaRequested,
+    VisaByIdRequested,
     VisaRequestSuccess,
     VisaRequestDenied,
     VisaRequestError,
@@ -219,6 +223,9 @@ impl ManagementCounterType {
             Self::PeerRemoved => "Management Peer Removed",
             Self::PeerHandshakeSuccess => "Peer Handshake Success",
             Self::PeerHandshakeFailure => "Peer Handshake Failure",
+            Self::ActorAuthorizationSuccess => "Actor Authorization Success",
+            Self::ActorAuthorizationRejected => "Actor Authorization Rejected",
+            Self::ActorAuthorizationRetry => "Actor Authorization Retry",
 
             // § 8.2.1 ZDP errors
             Self::SequenceError => "Sequence Error",
@@ -228,6 +235,7 @@ impl ManagementCounterType {
 
             // Visa counters (Node only)
             Self::VisaRequested => "Visa Requested",
+            Self::VisaByIdRequested => "Visa By Id Requested",
             Self::VisaRequestSuccess => "Visa Request Success",
             Self::VisaRequestDenied => "Visa Request Denied",
             Self::VisaRequestError => "Visa Request Error",

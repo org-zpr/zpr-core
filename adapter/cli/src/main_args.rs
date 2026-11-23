@@ -12,10 +12,6 @@ pub struct CmdlineArgs {
     /// Path to the Packet Handler's management socket
     #[arg(long, short = 'p', default_value_os_t = get_data_home().join("control.sock"))]
     pub socket: PathBuf,
-
-    /// Path to the Packet Handler's capture socket, only necessary when performing Capture commands
-    #[arg(long, short = 'c', default_value_os_t = get_data_home().join("capture.sock"))]
-    pub cap_socket: PathBuf,
 }
 
 #[derive(Parser, Debug)]
@@ -53,6 +49,7 @@ pub enum Commands {
         frequency: u64,
     },
     /// Set up or tear down packet captures
+    #[cfg(all(unix, feature = "capnp-ancillary"))]
     Capture(CaptureArgs),
     /// Change link state
     Link(LinkArgs),
@@ -76,6 +73,7 @@ pub enum Commands {
 }
 
 #[derive(Debug, Args)]
+#[cfg(all(unix, feature = "capnp-ancillary"))]
 #[command(flatten_help = true)]
 pub struct CaptureArgs {
     #[command(subcommand)]
@@ -83,6 +81,7 @@ pub struct CaptureArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[cfg(all(unix, feature = "capnp-ancillary"))]
 pub enum CaptureCommands {
     /// Set a capture file
     SetFile {
